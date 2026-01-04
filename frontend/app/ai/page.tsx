@@ -139,7 +139,7 @@ export default function AiPage() {
                       {op.op.toUpperCase()}
                     </span>
                     <span className="text-muted-foreground">{op.path}</span>
-                    {op.value !== undefined && (
+                    {"value" in op && op.value !== undefined && (
                       <span>값: {JSON.stringify(op.value).slice(0, 40)}...</span>
                     )}
                   </div>
