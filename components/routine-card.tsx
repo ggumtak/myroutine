@@ -54,7 +54,7 @@ const SLOT_BADGE_COLORS: Record<string, string> = {
 // 액션 한글화 매핑
 const ACTION_LABELS: Record<string, string> = {
   cleanse_optional: "세안 (선택)",
-  apply_serum: "세럼 바르기",
+  apply_serum: "앰플 바르기",
   apply_sunscreen: "선크림 바르기",
   double_cleanse_if_needed: "이중 클렌징",
   optional_toner: "토너",

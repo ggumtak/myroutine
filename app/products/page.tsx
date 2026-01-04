@@ -16,7 +16,7 @@ import { toast } from "sonner";
 // 카테고리 한글화
 const CATEGORY_LABELS: Record<string, string> = {
   toner: "토너",
-  serum: "세럼",
+  serum: "앰플",
   ampoule: "앰플/원액",
   cream: "크림",
   sunscreen: "선크림",

@@ -27,7 +27,7 @@ const SLOT_INFO: Record<
 
 const ACTION_LABELS: Record<string, string> = {
   cleanse_optional: "세안",
-  apply_serum: "세럼",
+  apply_serum: "앰플",
   apply_sunscreen: "선크림",
   double_cleanse_if_needed: "클렌징",
   optional_toner: "토너",

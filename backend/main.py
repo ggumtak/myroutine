@@ -40,6 +40,7 @@ from .seed import (
     DEFAULT_CONDITIONS,
     RULE_KEY_AM_VITC,
     RULE_KEY_PM_HIGH_NIACIN,
+    migrate_products,
     migrate_skincare_tasks,
     migrate_rules,
     seed_if_needed,
@@ -53,6 +54,7 @@ def on_startup() -> None:
     init_db()
     with Session(engine) as session:
         seed_if_needed(session)
+        migrate_products(session)
         migrate_skincare_tasks(session)
         migrate_rules(session)
 

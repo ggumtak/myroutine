@@ -14,10 +14,9 @@ import { RoutineCard } from "@/components/routine-card";
 import { buildProductLookup } from "@/lib/product-display";
 
 // 스킨케어 카테고리 (TH 순서)
-const SKINCARE_CATEGORIES = ["toner", "serum", "ampoule", "cream", "sunscreen", "all_in_one"];
+const SKINCARE_CATEGORIES = ["toner", "ampoule", "cream", "sunscreen", "all_in_one"];
 const SKINCARE_LABELS: Record<string, string> = {
   toner: "토너",
-  serum: "세럼",
   ampoule: "앰플",
   cream: "크림",
   sunscreen: "선크림",

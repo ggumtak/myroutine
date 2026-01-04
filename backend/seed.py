@@ -98,11 +98,13 @@ def migrate_skincare_tasks(session: Session) -> None:
 
     am_task = session.get(TaskDefinition, "skin_am")
     if am_task and (
-        _has_action(am_task.steps, "cleanse_optional") or not _has_action(am_task.steps, "apply_toner")
+        _has_action(am_task.steps, "cleanse_optional")
+        or _has_action(am_task.steps, "apply_toner")
+        or not _has_action(am_task.steps, "apply_cream")
     ):
         am_task.steps = [
-            {"step": 1, "action": "apply_toner", "products": ["toner_dr_sante_azulene"]},
-            {"step": 2, "action": "apply_serum", "productSelector": "rule_based_serum_am"},
+            {"step": 1, "action": "apply_serum", "productSelector": "rule_based_serum_am"},
+            {"step": 2, "action": "apply_cream", "products": ["cream_minic_barrier"]},
             {
                 "step": 3,
                 "action": "apply_sunscreen",
@@ -116,6 +118,7 @@ def migrate_skincare_tasks(session: Session) -> None:
     if pm_task and (
         _has_action(pm_task.steps, "double_cleanse_if_needed")
         or any(step.get("action") == "optional_toner" for step in pm_task.steps)
+        or not _has_action(pm_task.steps, "apply_toner")
     ):
         pm_task.steps = [
             {"step": 1, "action": "apply_toner", "products": ["toner_dr_sante_azulene"]},
@@ -125,6 +128,18 @@ def migrate_skincare_tasks(session: Session) -> None:
         session.add(pm_task)
         updated = True
 
+    if updated:
+        session.commit()
+
+
+def migrate_products(session: Session) -> None:
+    products = session.exec(select(Product)).all()
+    updated = False
+    for product in products:
+        if product.category == "serum":
+            product.category = "ampoule"
+            session.add(product)
+            updated = True
     if updated:
         session.commit()
 

@@ -2,7 +2,7 @@ import type { Product } from "@/lib/types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   toner: "토너",
-  serum: "세럼",
+  serum: "앰플",
   ampoule: "앰플",
   cream: "크림",
   sunscreen: "선크림",

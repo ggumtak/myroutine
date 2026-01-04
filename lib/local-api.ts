@@ -68,7 +68,19 @@ function getSeedProducts(): Product[] {
 }
 
 function getProducts(): Product[] {
-  return readStorage<Product[]>(STORAGE_KEYS.products, getSeedProducts());
+  const products = readStorage<Product[]>(STORAGE_KEYS.products, getSeedProducts());
+  let updated = false;
+  const nextProducts = products.map((product) => {
+    if (product.category === "serum") {
+      updated = true;
+      return { ...product, category: "ampoule" };
+    }
+    return product;
+  });
+  if (updated) {
+    saveProducts(nextProducts);
+  }
+  return nextProducts;
 }
 
 function saveProducts(products: Product[]) {
@@ -80,7 +92,57 @@ function getSeedTaskDefinitions(): TaskDefinition[] {
 }
 
 function getTaskDefinitions(): TaskDefinition[] {
-  return readStorage<TaskDefinition[]>(STORAGE_KEYS.taskDefinitions, getSeedTaskDefinitions());
+  const taskDefinitions = readStorage<TaskDefinition[]>(
+    STORAGE_KEYS.taskDefinitions,
+    getSeedTaskDefinitions()
+  );
+  let updated = false;
+
+  const nextDefinitions = taskDefinitions.map((task) => {
+    if (task.id === "skin_am") {
+      const actions = (task.steps || []).map((step) => step.action);
+      const needsUpdate =
+        actions.includes("cleanse_optional") ||
+        actions.includes("apply_toner") ||
+        !actions.includes("apply_cream");
+      if (needsUpdate) {
+        updated = true;
+        return {
+          ...task,
+          steps: [
+            { step: 1, action: "apply_serum", productSelector: "rule_based_serum_am" },
+            { step: 2, action: "apply_cream", products: ["cream_minic_barrier"] },
+            { step: 3, action: "apply_sunscreen", products: ["sunscreen_mediheal_madecassoside"] },
+          ],
+        };
+      }
+    }
+    if (task.id === "skin_pm") {
+      const actions = (task.steps || []).map((step) => step.action);
+      const needsUpdate =
+        actions.includes("double_cleanse_if_needed") ||
+        actions.includes("optional_toner") ||
+        !actions.includes("apply_toner");
+      if (needsUpdate) {
+        updated = true;
+        return {
+          ...task,
+          steps: [
+            { step: 1, action: "apply_toner", products: ["toner_dr_sante_azulene"] },
+            { step: 2, action: "apply_serum", productSelector: "rule_based_serum_pm" },
+            { step: 3, action: "apply_cream", products: ["cream_minic_barrier"] },
+          ],
+        };
+      }
+    }
+    return task;
+  });
+
+  if (updated) {
+    saveTaskDefinitions(nextDefinitions);
+  }
+
+  return nextDefinitions;
 }
 
 function saveTaskDefinitions(taskDefinitions: TaskDefinition[]) {
@@ -238,8 +300,7 @@ function seasonKeyFromDateKey(dateKey: string): string {
   return "fall";
 }
 
-function applyHydrationBoost(
-  products: string[],
+function hydrationEnabled(
   rules: Record<string, any>,
   conditions: Record<string, boolean>,
   targetDateKey: string
@@ -248,12 +309,23 @@ function applyHydrationBoost(
   const toggleKey = hydrationRule.toggle;
   const productId = hydrationRule.productId;
   const autoSeasons = hydrationRule.autoSeasons || [];
-  if (!productId) return products;
+  if (!productId) return { enabled: false, productId: "" };
   const seasonEnabled = autoSeasons.includes(seasonKeyFromDateKey(targetDateKey));
   const toggleEnabled = toggleKey ? !!conditions[toggleKey] : false;
-  if (!seasonEnabled && !toggleEnabled) return products;
-  if (products.includes(productId)) return products;
-  return [...products, productId];
+  return { enabled: seasonEnabled || toggleEnabled, productId };
+}
+
+function applyHydrationOverride(
+  selectedId: string | null | undefined,
+  defaultId: string | null | undefined,
+  rules: Record<string, any>,
+  conditions: Record<string, boolean>,
+  targetDateKey: string
+) {
+  if (!selectedId || selectedId !== defaultId) return selectedId;
+  const { enabled, productId } = hydrationEnabled(rules, conditions, targetDateKey);
+  if (!enabled || !productId) return selectedId;
+  return productId;
 }
 
 function buildTaskSteps(
@@ -281,15 +353,15 @@ function buildTaskSteps(
     const selector = rawStep.productSelector;
 
     if (selector === "rule_based_serum_am") {
+      const defaultId = rules.amSerumRotation?.default;
       selectedAm = selectAmSerum(rules, conditions, ruleUsage, targetDateKey);
+      selectedAm = applyHydrationOverride(selectedAm, defaultId, rules, conditions, targetDateKey) || null;
       products = selectedAm ? [selectedAm] : [];
     } else if (selector === "rule_based_serum_pm") {
-      const pmSelected = selectPmSerum(rules, conditions, ruleUsage, targetDateKey, selectedAm || undefined);
+      const defaultId = rules.pmSerumRotation?.default;
+      let pmSelected = selectPmSerum(rules, conditions, ruleUsage, targetDateKey, selectedAm || undefined);
+      pmSelected = applyHydrationOverride(pmSelected, defaultId, rules, conditions, targetDateKey) || null;
       products = pmSelected ? [pmSelected] : [];
-    }
-
-    if (rawStep.action === "apply_serum" && products.length > 0) {
-      products = applyHydrationBoost(products, rules, conditions, targetDateKey);
     }
 
     steps.push({ step: stepNumber, action: rawStep.action, products });

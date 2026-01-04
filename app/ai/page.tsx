@@ -34,11 +34,13 @@ const AI_HELP_CONTEXT = `
 
 스킨케어 룰
 - 얼굴 클렌징 단계는 스킨케어 루틴에서 제외
-- AM/PM 스킨케어는 3단계 (토너 → 세럼 → 선크림/크림)
+- AM: 앰플 → 크림 → 선크림 (3단계)
+- PM: 토너 → 앰플 → 크림 (3단계)
+- 앰플 단계는 한 번에 1개 제품만 사용
 - 계절 키: winter, spring, summer, fall (hydrationBoost.autoSeasons)
 
 제품 카테고리 코드
-- toner, serum, ampoule, cream, sunscreen, all_in_one, makeup, scalp
+- toner, ampoule, cream, sunscreen, all_in_one, makeup, scalp
 
 제품 역할 코드
 - optional_soothing, daily_calm, am_brightening, pm_active_high_niacinamide
@@ -46,7 +48,7 @@ const AI_HELP_CONTEXT = `
 - optional_cosmetic, lazy_fallback, scalp_scale, optional_active, optional_repair, post_shower_tonic
 
 요청 예시
-- "비타C 세럼 주 2회로 줄여줘"
+- "비타C 앰플 주 2회로 줄여줘"
 - "새 토너 추가: 클레어스 수분토너"
 - "저녁 고농도 나이아신은 4일 간격으로"
 - "샤워 루틴에 두피 스케일러 단계 추가해줘"

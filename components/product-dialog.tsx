@@ -118,7 +118,7 @@ export function ProductDialog({ open, onOpenChange, product, onSuccess }: Produc
               onChange={(e) => setFormData((prev) => ({ ...prev, id: e.target.value }))}
               disabled={isEdit}
               className="col-span-3"
-              placeholder="예: serum_vita_c"
+              placeholder="예: ampoule_vita_c"
             />
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
@@ -141,7 +141,7 @@ export function ProductDialog({ open, onOpenChange, product, onSuccess }: Produc
               value={formData.category}
               onChange={(e) => setFormData((prev) => ({ ...prev, category: e.target.value }))}
               className="col-span-3"
-              placeholder="예: serum"
+              placeholder="예: ampoule"
             />
           </div>
           <div className="grid grid-cols-4 items-center gap-4">

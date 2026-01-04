@@ -4,7 +4,7 @@
     "goal": "화장품 다이어트 + 3~4단계 평생 루틴 고정 + 오늘 할 일 점등 UI",
     "constraints": {
       "maxStepsPerRoutine": 4,
-      "oneActiveSerumPerSlot": true
+      "oneActiveAmpoulePerSlot": true
     }
   },
   "products": [
@@ -46,7 +46,7 @@
     {
       "id": "serum_parnell_cicamanu_92",
       "name": "파넬 시카마누 92세럼",
-      "category": "serum",
+      "category": "ampoule",
       "role": "daily_calm",
       "verified": {
         "type": "full_inci_verified",
@@ -62,7 +62,7 @@
     {
       "id": "serum_uiq_vita_c",
       "name": "유이크 바이옴 비타씨 잡티세럼",
-      "category": "serum",
+      "category": "ampoule",
       "role": "am_brightening",
       "verified": {
         "type": "full_inci_verified",
@@ -75,7 +75,7 @@
     {
       "id": "serum_parnell_niacinamide_high",
       "name": "파넬 나이아신아마이드 20.35 라이스 브라이트닝 세럼",
-      "category": "serum",
+      "category": "ampoule",
       "role": "pm_active_high_niacinamide",
       "verified": {
         "type": "name_verified_only",
@@ -236,15 +236,15 @@
       "steps": [
         {
           "step": 1,
-          "action": "apply_toner",
-          "products": [
-            "toner_dr_sante_azulene"
-          ]
+          "action": "apply_serum",
+          "productSelector": "rule_based_serum_am"
         },
         {
           "step": 2,
-          "action": "apply_serum",
-          "productSelector": "rule_based_serum_am"
+          "action": "apply_cream",
+          "products": [
+            "cream_minic_barrier"
+          ]
         },
         {
           "step": 3,

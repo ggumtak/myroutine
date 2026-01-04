@@ -84,7 +84,7 @@ def test_serum_selection_constraints():
     assert pm_selected == "serum_default"
 
 
-def test_hydration_boost_added():
+def test_hydration_boost_overrides_default_only():
     task_defs = [
         TaskDefinition(
             id="skin_am",
@@ -115,7 +115,11 @@ def test_hydration_boost_added():
         "need_extra_hydration": True,
         "lazy_mode": False,
     }
-    rule_usage = {RULE_KEY_AM_VITC: RuleUsage(rule_key=RULE_KEY_AM_VITC, last_used_at=None)}
+    rule_usage = {
+        RULE_KEY_AM_VITC: RuleUsage(
+            rule_key=RULE_KEY_AM_VITC, last_used_at=date(2026, 1, 3)
+        )
+    }
 
     cards = build_today_cards(
         task_defs,
@@ -126,4 +130,4 @@ def test_hydration_boost_added():
         target_date=date(2026, 1, 4),
     )
 
-    assert cards[0]["steps"][0]["products"] == ["serum_vitc", "ampoule_hydration"]
+    assert cards[0]["steps"][0]["products"] == ["ampoule_hydration"]

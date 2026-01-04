@@ -24,12 +24,14 @@ Rules:
 
 Skincare rule:
 - Exclude cleansing steps from skincare routines.
-- AM/PM skincare should be 3 steps (toner -> serum -> sunscreen/cream).
+- AM skincare should be 3 steps (ampoule -> cream -> sunscreen).
+- PM skincare should be 3 steps (toner -> ampoule -> cream).
+- The ampoule step should include only one product at a time.
 - Season keys for hydrationBoost.autoSeasons: winter, spring, summer, fall.
 
 Data model hints:
 - products: {id, name, category, role, notes?, verified?, is_active?}
-  categories: toner, serum, ampoule, cream, sunscreen, makeup, all_in_one, scalp
+  categories: toner, ampoule, cream, sunscreen, makeup, all_in_one, scalp
   roles: optional_soothing, daily_calm, am_brightening, pm_active_high_niacinamide,
          hydration_boost_optional, daily_barrier_main, barrier_backup, daily_spf_must,
          optional_cosmetic, lazy_fallback, scalp_scale, optional_active, optional_repair,

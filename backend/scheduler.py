@@ -166,25 +166,33 @@ def _season_key(target_date: date) -> str:
     return "fall"
 
 
-def _apply_hydration_boost(
-    products: List[str],
-    rules: Dict[str, Any],
-    conditions: Dict[str, bool],
-    target_date: date,
-) -> List[str]:
+def _hydration_enabled(
+    rules: Dict[str, Any], conditions: Dict[str, bool], target_date: date
+) -> Tuple[bool, Optional[str]]:
     hydration_rule = rules.get("hydrationBoost", {})
     toggle_key = hydration_rule.get("toggle")
     product_id = hydration_rule.get("productId")
     auto_seasons = hydration_rule.get("autoSeasons", [])
     if not product_id:
-        return products
+        return False, None
     season_enabled = _season_key(target_date) in auto_seasons
     toggle_enabled = bool(toggle_key and conditions.get(toggle_key, False))
-    if not (season_enabled or toggle_enabled):
-        return products
-    if product_id in products:
-        return products
-    return products + [product_id]
+    return season_enabled or toggle_enabled, product_id
+
+
+def _apply_hydration_override(
+    selected_id: Optional[str],
+    default_id: Optional[str],
+    rules: Dict[str, Any],
+    conditions: Dict[str, bool],
+    target_date: date,
+) -> Optional[str]:
+    if not selected_id or selected_id != default_id:
+        return selected_id
+    enabled, hydration_id = _hydration_enabled(rules, conditions, target_date)
+    if not enabled or not hydration_id:
+        return selected_id
+    return hydration_id
 
 
 def build_task_steps(
@@ -210,21 +218,19 @@ def build_task_steps(
         products = list(raw_step.get("products", []))
         selector = raw_step.get("productSelector")
         if selector == "rule_based_serum_am":
+            am_rules = rules.get("amSerumRotation", {})
             am_selected = select_am_serum(rules, conditions, rule_usage, target_date)
+            am_selected = _apply_hydration_override(
+                am_selected, am_rules.get("default"), rules, conditions, target_date
+            )
             products = [am_selected] if am_selected else []
         elif selector == "rule_based_serum_pm":
-            products = [
-                p
-                for p in [
-                    select_pm_serum(
-                        rules, conditions, rule_usage, target_date, am_selected
-                    )
-                ]
-                if p
-            ]
-
-        if raw_step.get("action") == "apply_serum" and products:
-            products = _apply_hydration_boost(products, rules, conditions, target_date)
+            pm_rules = rules.get("pmSerumRotation", {})
+            selected = select_pm_serum(rules, conditions, rule_usage, target_date, am_selected)
+            selected = _apply_hydration_override(
+                selected, pm_rules.get("default"), rules, conditions, target_date
+            )
+            products = [selected] if selected else []
 
         steps.append(
             {
