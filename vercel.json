@@ -1,8 +1,5 @@
 {
   "builds": [
-    { "src": "frontend/package.json", "use": "@vercel/next" }
-  ],
-  "rewrites": [
-    { "source": "/(?!frontend(?:/|$))(.*)", "destination": "/frontend/$1" }
+    { "src": "package.json", "use": "@vercel/next" }
   ]
 }
