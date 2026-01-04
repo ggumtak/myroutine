@@ -236,8 +236,10 @@
       "steps": [
         {
           "step": 1,
-          "action": "cleanse_optional",
-          "products": []
+          "action": "apply_toner",
+          "products": [
+            "toner_dr_sante_azulene"
+          ]
         },
         {
           "step": 2,
@@ -261,24 +263,18 @@
       "steps": [
         {
           "step": 1,
-          "action": "double_cleanse_if_needed",
-          "products": []
+          "action": "apply_toner",
+          "products": [
+            "toner_dr_sante_azulene"
+          ]
         },
         {
           "step": 2,
-          "action": "optional_toner",
-          "products": [
-            "toner_dr_sante_azulene"
-          ],
-          "condition": "skin_is_dry_or_sensitive"
-        },
-        {
-          "step": 3,
           "action": "apply_serum",
           "productSelector": "rule_based_serum_pm"
         },
         {
-          "step": 4,
+          "step": 3,
           "action": "apply_cream",
           "products": [
             "cream_minic_barrier"
@@ -393,7 +389,11 @@
     },
     "hydrationBoost": {
       "productId": "ampoule_wellage_hyaluronic_blue_100",
-      "toggle": "need_extra_hydration"
+      "toggle": "need_extra_hydration",
+      "autoSeasons": [
+        "winter",
+        "fall"
+      ]
     },
     "lazyFallback": {
       "pm": [

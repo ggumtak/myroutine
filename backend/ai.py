@@ -22,6 +22,11 @@ Rules:
 - Only edit fields inside currentSpec (rules, conditions, products, taskDefinitions).
 - Use minimal changes and keep existing ids stable.
 
+Skincare rule:
+- Exclude cleansing steps from skincare routines.
+- AM/PM skincare should be 3 steps (toner -> serum -> sunscreen/cream).
+- Season keys for hydrationBoost.autoSeasons: winter, spring, summer, fall.
+
 Data model hints:
 - products: {id, name, category, role, notes?, verified?, is_active?}
   categories: toner, serum, ampoule, cream, sunscreen, makeup, all_in_one, scalp

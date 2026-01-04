@@ -155,14 +155,32 @@ def _condition_met(condition: Optional[str], conditions: Dict[str, bool]) -> boo
     return conditions.get(condition, False)
 
 
+def _season_key(target_date: date) -> str:
+    month = target_date.month
+    if month in {12, 1, 2}:
+        return "winter"
+    if month in {3, 4, 5}:
+        return "spring"
+    if month in {6, 7, 8}:
+        return "summer"
+    return "fall"
+
+
 def _apply_hydration_boost(
-    products: List[str], rules: Dict[str, Any], conditions: Dict[str, bool]
+    products: List[str],
+    rules: Dict[str, Any],
+    conditions: Dict[str, bool],
+    target_date: date,
 ) -> List[str]:
-    toggle_key = rules.get("hydrationBoost", {}).get("toggle")
-    product_id = rules.get("hydrationBoost", {}).get("productId")
-    if not toggle_key or not product_id:
+    hydration_rule = rules.get("hydrationBoost", {})
+    toggle_key = hydration_rule.get("toggle")
+    product_id = hydration_rule.get("productId")
+    auto_seasons = hydration_rule.get("autoSeasons", [])
+    if not product_id:
         return products
-    if not conditions.get(toggle_key, False):
+    season_enabled = _season_key(target_date) in auto_seasons
+    toggle_enabled = bool(toggle_key and conditions.get(toggle_key, False))
+    if not (season_enabled or toggle_enabled):
         return products
     if product_id in products:
         return products
@@ -206,7 +224,7 @@ def build_task_steps(
             ]
 
         if raw_step.get("action") == "apply_serum" and products:
-            products = _apply_hydration_boost(products, rules, conditions)
+            products = _apply_hydration_boost(products, rules, conditions, target_date)
 
         steps.append(
             {

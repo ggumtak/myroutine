@@ -31,6 +31,7 @@ const ACTION_LABELS: Record<string, string> = {
   apply_sunscreen: "선크림",
   double_cleanse_if_needed: "클렌징",
   optional_toner: "토너",
+  apply_toner: "토너",
   apply_cream: "크림",
   apply_products: "제품",
   shampoo: "샴푸",

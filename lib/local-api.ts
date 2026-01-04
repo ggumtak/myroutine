@@ -229,11 +229,29 @@ function conditionMet(condition: string | undefined, conditions: Record<string, 
   return conditions[condition] || false;
 }
 
-function applyHydrationBoost(products: string[], rules: Record<string, any>, conditions: Record<string, boolean>) {
-  const toggleKey = rules.hydrationBoost?.toggle;
-  const productId = rules.hydrationBoost?.productId;
-  if (!toggleKey || !productId) return products;
-  if (!conditions[toggleKey]) return products;
+function seasonKeyFromDateKey(dateKey: string): string {
+  const [, monthStr] = dateKey.split("-");
+  const month = Number(monthStr);
+  if ([12, 1, 2].includes(month)) return "winter";
+  if ([3, 4, 5].includes(month)) return "spring";
+  if ([6, 7, 8].includes(month)) return "summer";
+  return "fall";
+}
+
+function applyHydrationBoost(
+  products: string[],
+  rules: Record<string, any>,
+  conditions: Record<string, boolean>,
+  targetDateKey: string
+) {
+  const hydrationRule = rules.hydrationBoost || {};
+  const toggleKey = hydrationRule.toggle;
+  const productId = hydrationRule.productId;
+  const autoSeasons = hydrationRule.autoSeasons || [];
+  if (!productId) return products;
+  const seasonEnabled = autoSeasons.includes(seasonKeyFromDateKey(targetDateKey));
+  const toggleEnabled = toggleKey ? !!conditions[toggleKey] : false;
+  if (!seasonEnabled && !toggleEnabled) return products;
   if (products.includes(productId)) return products;
   return [...products, productId];
 }
@@ -271,7 +289,7 @@ function buildTaskSteps(
     }
 
     if (rawStep.action === "apply_serum" && products.length > 0) {
-      products = applyHydrationBoost(products, rules, conditions);
+      products = applyHydrationBoost(products, rules, conditions, targetDateKey);
     }
 
     steps.push({ step: stepNumber, action: rawStep.action, products });

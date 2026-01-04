@@ -32,6 +32,11 @@ const AI_HELP_CONTEXT = `
 - products: 제품 목록 (추가/수정/비활성)
 - taskDefinitions: 루틴 카드 정의 (추가/수정/삭제)
 
+스킨케어 룰
+- 얼굴 클렌징 단계는 스킨케어 루틴에서 제외
+- AM/PM 스킨케어는 3단계 (토너 → 세럼 → 선크림/크림)
+- 계절 키: winter, spring, summer, fall (hydrationBoost.autoSeasons)
+
 제품 카테고리 코드
 - toner, serum, ampoule, cream, sunscreen, all_in_one, makeup, scalp
 

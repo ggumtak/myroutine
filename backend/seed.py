@@ -88,3 +88,57 @@ def seed_if_needed(session: Session) -> None:
         session.add(RuleUsage(rule_key=RULE_KEY_PM_HIGH_NIACIN))
 
     session.commit()
+
+
+def migrate_skincare_tasks(session: Session) -> None:
+    updated = False
+
+    def _has_action(steps: list[dict[str, Any]], action: str) -> bool:
+        return any(step.get("action") == action for step in steps)
+
+    am_task = session.get(TaskDefinition, "skin_am")
+    if am_task and (
+        _has_action(am_task.steps, "cleanse_optional") or not _has_action(am_task.steps, "apply_toner")
+    ):
+        am_task.steps = [
+            {"step": 1, "action": "apply_toner", "products": ["toner_dr_sante_azulene"]},
+            {"step": 2, "action": "apply_serum", "productSelector": "rule_based_serum_am"},
+            {
+                "step": 3,
+                "action": "apply_sunscreen",
+                "products": ["sunscreen_mediheal_madecassoside"],
+            },
+        ]
+        session.add(am_task)
+        updated = True
+
+    pm_task = session.get(TaskDefinition, "skin_pm")
+    if pm_task and (
+        _has_action(pm_task.steps, "double_cleanse_if_needed")
+        or any(step.get("action") == "optional_toner" for step in pm_task.steps)
+    ):
+        pm_task.steps = [
+            {"step": 1, "action": "apply_toner", "products": ["toner_dr_sante_azulene"]},
+            {"step": 2, "action": "apply_serum", "productSelector": "rule_based_serum_pm"},
+            {"step": 3, "action": "apply_cream", "products": ["cream_minic_barrier"]},
+        ]
+        session.add(pm_task)
+        updated = True
+
+    if updated:
+        session.commit()
+
+
+def migrate_rules(session: Session) -> None:
+    rules_state = session.exec(select(RulesState)).first()
+    if rules_state is None:
+        return
+
+    rules = rules_state.rules or {}
+    hydration = rules.get("hydrationBoost", {})
+    if "autoSeasons" not in hydration:
+        hydration["autoSeasons"] = ["winter", "fall"]
+        rules["hydrationBoost"] = hydration
+        rules_state.rules = rules
+        session.add(rules_state)
+        session.commit()
