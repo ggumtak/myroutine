@@ -77,7 +77,7 @@ Response (list):
 [
   {
     "id": "serum_parnell_cicamanu_92",
-    "name": "ÆÄ³Ú ½ÃÄ«¸¶´© 92¼¼·³",
+    "name": "íŒŒë„¬ ì‹œì¹´ë§ˆëˆ„ 92ì„¸ëŸ¼",
     "category": "serum",
     "role": "daily_calm",
     "notes": null,
@@ -124,7 +124,7 @@ Response:
 ### POST /api/ai/patch
 Request:
 {
-  "userInstruction": "ºñÅ¸C¸¦ ÁÖ 2È¸·Î ÁÙ¿©",
+  "userInstruction": "ë¹„íƒ€Cë¥¼ ì£¼ 2íšŒë¡œ ì¤„ì—¬",
   "currentSpec": { "rules": { /* current rules */ } }
 }
 Response:

@@ -1,7 +1,7 @@
 {
   "profile": {
     "timezone": "Asia/Seoul",
-    "goal": "È­ÀåÇ° ´ÙÀÌ¾îÆ® + 3~4´Ü°è Æò»ı ·çÆ¾ °íÁ¤ + ¿À´Ã ÇÒ ÀÏ Á¡µî UI",
+    "goal": "í™”ì¥í’ˆ ë‹¤ì´ì–´íŠ¸ + 3~4ë‹¨ê³„ í‰ìƒ ë£¨í‹´ ê³ ì • + ì˜¤ëŠ˜ í•  ì¼ ì ë“± UI",
     "constraints": {
       "maxStepsPerRoutine": 4,
       "oneActiveSerumPerSlot": true
@@ -10,7 +10,7 @@
   "products": [
     {
       "id": "toner_dr_sante_azulene",
-      "name": "»ó¶¼(Dr.SANTE) ¾ÆÁÙ·» ¼ö´õ Åä³Ê",
+      "name": "ìƒë–¼(Dr.SANTE) ì•„ì¤„ë Œ ìˆ˜ë” í† ë„ˆ",
       "category": "toner",
       "role": "optional_soothing",
       "notes": "PM ?? ?? ?? ??(???? ??). ??? ?? ??? ??; ??? ???(MultiEX BSASM)? ???????? ?? ?? ??.",
@@ -45,101 +45,101 @@
     },
     {
       "id": "serum_parnell_cicamanu_92",
-      "name": "ÆÄ³Ú ½ÃÄ«¸¶´© 92¼¼·³",
+      "name": "íŒŒë„¬ ì‹œì¹´ë§ˆëˆ„ 92ì„¸ëŸ¼",
       "category": "serum",
       "role": "daily_calm",
       "verified": {
         "type": "full_inci_verified",
         "highlights": [
-          "º´Ç®",
-          "¸¶´©Ä«(Çã´Ï)",
-          "¸¶µ¥Ä«¼Ò»çÀÌµå",
-          "¼¼¶ó¸¶ÀÌµåNP",
-          "¸á¶óÅä´Ñ"
+          "ë³‘í’€",
+          "ë§ˆëˆ„ì¹´(í—ˆë‹ˆ)",
+          "ë§ˆë°ì¹´ì†Œì‚¬ì´ë“œ",
+          "ì„¸ë¼ë§ˆì´ë“œNP",
+          "ë©œë¼í† ë‹Œ"
         ]
       }
     },
     {
       "id": "serum_uiq_vita_c",
-      "name": "À¯ÀÌÅ© ¹ÙÀÌ¿È ºñÅ¸¾¾ ÀâÆ¼¼¼·³",
+      "name": "ìœ ì´í¬ ë°”ì´ì˜´ ë¹„íƒ€ì”¨ ì¡í‹°ì„¸ëŸ¼",
       "category": "serum",
       "role": "am_brightening",
       "verified": {
         "type": "full_inci_verified",
         "highlights": [
-          "3-O-¿¡Æ¿¾Æ½ºÄÚºò¾Ö¾¾µå 1%",
-          "³ªÀÌ¾Æ½Å¾Æ¸¶ÀÌµå"
+          "3-O-ì—í‹¸ì•„ìŠ¤ì½”ë¹…ì• ì”¨ë“œ 1%",
+          "ë‚˜ì´ì•„ì‹ ì•„ë§ˆì´ë“œ"
         ]
       }
     },
     {
       "id": "serum_parnell_niacinamide_high",
-      "name": "ÆÄ³Ú ³ªÀÌ¾Æ½Å¾Æ¸¶ÀÌµå 20.35 ¶óÀÌ½º ºê¶óÀÌÆ®´× ¼¼·³",
+      "name": "íŒŒë„¬ ë‚˜ì´ì•„ì‹ ì•„ë§ˆì´ë“œ 20.35 ë¼ì´ìŠ¤ ë¸Œë¼ì´íŠ¸ë‹ ì„¸ëŸ¼",
       "category": "serum",
       "role": "pm_active_high_niacinamide",
       "verified": {
         "type": "name_verified_only",
-        "notes": "Á¦Ç°¸í¿¡ '20.35' Ç¥±âµÈ ¶óÀÎ. °ø½Ä Àü¼ººĞ ÆäÀÌÁö´Â ÀÌ¹ø ¼¼¼Ç¿¡¼­ ¾ÈÁ¤ÀûÀ¸·Î È®º¸ ºÒ°¡."
+        "notes": "ì œí’ˆëª…ì— '20.35' í‘œê¸°ëœ ë¼ì¸. ê³µì‹ ì „ì„±ë¶„ í˜ì´ì§€ëŠ” ì´ë²ˆ ì„¸ì…˜ì—ì„œ ì•ˆì •ì ìœ¼ë¡œ í™•ë³´ ë¶ˆê°€."
       }
     },
     {
       "id": "ampoule_wellage_hyaluronic_blue_100",
-      "name": "À£¶óÁê ¸®¾ó È÷¾Ë·ç·Î´Ğ ºí·ç 100 ¾ÚÇÃ",
+      "name": "ì›°ë¼ì¥¬ ë¦¬ì–¼ íˆì•Œë£¨ë¡œë‹‰ ë¸”ë£¨ 100 ì•°í”Œ",
       "category": "ampoule",
       "role": "hydration_boost_optional",
       "verified": {
         "type": "full_inci_verified",
         "highlights": [
-          "¼ÒµãÇÏÀÌ¾Ë·ç·Î³×ÀÌÆ® 1,000ppm(Ç¥±â)",
-          "ÆÇÅ×³î"
+          "ì†Œë“í•˜ì´ì•Œë£¨ë¡œë„¤ì´íŠ¸ 1,000ppm(í‘œê¸°)",
+          "íŒí…Œë†€"
         ]
       }
     },
     {
       "id": "cream_minic_barrier",
-      "name": "¹Ì´Ğ Àåº®Å©¸²",
+      "name": "ë¯¸ë‹‰ ì¥ë²½í¬ë¦¼",
       "category": "cream",
       "role": "daily_barrier_main",
       "verified": {
         "type": "user_provided_component_list",
         "highlights": [
-          "¼¼¶ó¸¶ÀÌµå º¹ÇÕ(5Á¾) + Äİ·¹½ºÅ×·Ñ + Áö¹æ»ê(3:1:1)",
-          "ÆÇÅ×³î",
-          "º´Ç®/¸¶µ¥Ä«¼Ò»çÀÌµå",
-          "È÷¾Ë·ç·Ğ»ê º¹ÇÕ"
+          "ì„¸ë¼ë§ˆì´ë“œ ë³µí•©(5ì¢…) + ì½œë ˆìŠ¤í…Œë¡¤ + ì§€ë°©ì‚°(3:1:1)",
+          "íŒí…Œë†€",
+          "ë³‘í’€/ë§ˆë°ì¹´ì†Œì‚¬ì´ë“œ",
+          "íˆì•Œë£¨ë¡ ì‚° ë³µí•©"
         ]
       }
     },
     {
       "id": "cream_rovectin_ultra",
-      "name": "·Îº¤Æ¾ ¾ØÆ¼ ÀÌ¸®ÅÏÆ® ¿ïÆ®¶ó Å©¸²(Àåº®Å©¸²)",
+      "name": "ë¡œë²¡í‹´ ì•¤í‹° ì´ë¦¬í„´íŠ¸ ìš¸íŠ¸ë¼ í¬ë¦¼(ì¥ë²½í¬ë¦¼)",
       "category": "cream",
       "role": "barrier_backup",
       "verified": {
         "type": "full_inci_verified",
         "highlights": [
-          "³ªÀÌ¾Æ½Å¾Æ¸¶ÀÌµå",
-          "¼¼¶ó¸¶ÀÌµåNP"
+          "ë‚˜ì´ì•„ì‹ ì•„ë§ˆì´ë“œ",
+          "ì„¸ë¼ë§ˆì´ë“œNP"
         ]
       }
     },
     {
       "id": "sunscreen_mediheal_madecassoside",
-      "name": "¸ŞµğÈú ¸¶µ¥Ä«¼Ò»çÀÌµå ¼öºĞ ¼±¼¼·³(ÈçÀû ¸®Æä¾î)",
+      "name": "ë©”ë””í ë§ˆë°ì¹´ì†Œì‚¬ì´ë“œ ìˆ˜ë¶„ ì„ ì„¸ëŸ¼(í”ì  ë¦¬í˜ì–´)",
       "category": "sunscreen",
       "role": "daily_spf_must",
       "verified": {
         "type": "full_inci_verified",
         "highlights": [
-          "ÀÚ¿Ü¼± ÇÊÅÍ",
-          "³ªÀÌ¾Æ½Å¾Æ¸¶ÀÌµå",
-          "¸¶µ¥Ä«¼Ò»çÀÌµå/º´Ç® °è¿­"
+          "ìì™¸ì„  í•„í„°",
+          "ë‚˜ì´ì•„ì‹ ì•„ë§ˆì´ë“œ",
+          "ë§ˆë°ì¹´ì†Œì‚¬ì´ë“œ/ë³‘í’€ ê³„ì—´"
         ]
       }
     },
     {
       "id": "makeup_minic_cover_or_toneup",
-      "name": "¹Ì´Ğ Åæ¾÷/Ä¿¹ö ·Î¼Ç(²Ù¹Ì±â ¿ëµµ)",
+      "name": "ë¯¸ë‹‰ í†¤ì—…/ì»¤ë²„ ë¡œì…˜(ê¾¸ë¯¸ê¸° ìš©ë„)",
       "category": "makeup",
       "role": "optional_cosmetic",
       "verified": {
@@ -148,28 +148,28 @@
     },
     {
       "id": "allinone_minic_collard_green",
-      "name": "¹Ì´Ğ ¿ÃÀÎ¿ø(Äİ¶óµå ±×¸° º£ÀÌ½º)",
+      "name": "ë¯¸ë‹‰ ì˜¬ì¸ì›(ì½œë¼ë“œ ê·¸ë¦° ë² ì´ìŠ¤)",
       "category": "all_in_one",
       "role": "lazy_fallback",
       "verified": {
         "type": "user_provided_component_list",
         "highlights": [
-          "ÄÉÀÏÀÙ¼ö º£ÀÌ½º",
-          "³ªÀÌ¾Æ½Å¾Æ¸¶ÀÌµå",
-          "ÆÇÅ×³î",
-          "º´Ç®/¸¶µ¥Ä«¼Ò»çÀÌµå",
-          "±Û·çÄÚ³ë¶ôÅæ(PHA)"
+          "ì¼€ì¼ììˆ˜ ë² ì´ìŠ¤",
+          "ë‚˜ì´ì•„ì‹ ì•„ë§ˆì´ë“œ",
+          "íŒí…Œë†€",
+          "ë³‘í’€/ë§ˆë°ì¹´ì†Œì‚¬ì´ë“œ",
+          "ê¸€ë£¨ì½”ë…¸ë½í†¤(PHA)"
         ]
       }
     },
     {
       "id": "scalp_scaler_drforhair_poligen_seasalt_plus",
-      "name": "´ÚÅÍÆ÷Çì¾î µÎÇÇ ½ºÄÉÀÏ·¯ Æú¸®Á¨ ¾¾ ¼ÖÆ®+",
+      "name": "ë‹¥í„°í¬í—¤ì–´ ë‘í”¼ ìŠ¤ì¼€ì¼ëŸ¬ í´ë¦¬ì   ì”¨ ì†”íŠ¸+",
       "category": "scalp",
       "role": "scalp_scale",
       "verified": {
         "type": "usage_verified",
-        "usage_summary": "ÁÖ 2~3È¸, ¼¤Çª ´ë½Å Á¥Àº µÎÇÇ¿¡ µµÆ÷¡æ¸¶»çÁö¡æÇó±À"
+        "usage_summary": "ì£¼ 2~3íšŒ, ìƒ´í‘¸ ëŒ€ì‹  ì –ì€ ë‘í”¼ì— ë„í¬â†’ë§ˆì‚¬ì§€â†’í—¹êµ¼"
       }
     },
     {
