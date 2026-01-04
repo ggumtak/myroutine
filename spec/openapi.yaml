@@ -1,0 +1,387 @@
+openapi: 3.1.0
+info:
+  title: Routine Scheduler API
+  version: 0.1.0
+  description: FastAPI backend for routine scheduling and checklist cards.
+servers:
+  - url: /
+paths:
+  /api/time:
+    get:
+      summary: Get current KST time
+      responses:
+        "200":
+          description: Current time in KST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeResponse"
+  /api/today:
+    get:
+      summary: Get today's cards
+      parameters:
+        - in: query
+          name: date
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Date to calculate tasks for (YYYY-MM-DD)
+      responses:
+        "200":
+          description: Cards for the requested date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TodayResponse"
+  /api/complete:
+    post:
+      summary: Mark a task instance complete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteRequest"
+      responses:
+        "200":
+          description: Completion stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompleteResponse"
+  /api/skip:
+    post:
+      summary: Mark a task instance skipped
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkipRequest"
+      responses:
+        "200":
+          description: Skip stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkipResponse"
+  /api/products:
+    get:
+      summary: List active products
+      responses:
+        "200":
+          description: Product list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+    post:
+      summary: Create a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreate"
+      responses:
+        "201":
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+  /api/products/{id}:
+    patch:
+      summary: Update a product
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductUpdate"
+      responses:
+        "200":
+          description: Product updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+    delete:
+      summary: Deactivate a product
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Product deactivated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResponse"
+  /api/rules:
+    get:
+      summary: Get rules and condition toggles
+      responses:
+        "200":
+          description: Rules payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesResponse"
+    patch:
+      summary: Update rules and/or condition toggles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RulesPatchRequest"
+      responses:
+        "200":
+          description: Updated rules payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesResponse"
+  /api/ai/patch:
+    post:
+      summary: Generate a JSON Patch for rules/products from user instruction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiPatchRequest"
+      responses:
+        "200":
+          description: Proposed JSON Patch and summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiPatchResponse"
+components:
+  schemas:
+    TimeResponse:
+      type: object
+      properties:
+        nowKstIso:
+          type: string
+          format: date-time
+      required: [nowKstIso]
+    TaskStep:
+      type: object
+      properties:
+        step:
+          type: integer
+        action:
+          type: string
+        products:
+          type: array
+          items:
+            type: string
+        productSelector:
+          type: string
+        condition:
+          type: string
+      required: [step, action]
+    TaskCard:
+      type: object
+      properties:
+        taskInstanceId:
+          type: string
+        taskDefinitionId:
+          type: string
+        slot:
+          type: string
+        type:
+          type: string
+        state:
+          type: string
+          enum: [due, completed, skipped]
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskStep"
+      required: [taskInstanceId, taskDefinitionId, slot, type, state, steps]
+    TodayResponse:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        nowKstIso:
+          type: string
+          format: date-time
+        cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskCard"
+      required: [date, nowKstIso, cards]
+    CompleteRequest:
+      type: object
+      properties:
+        taskInstanceId:
+          type: string
+        completedAtIso:
+          type: string
+          format: date-time
+      required: [taskInstanceId, completedAtIso]
+    CompleteResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        taskDefinitionId:
+          type: string
+        completedAtIso:
+          type: string
+          format: date-time
+      required: [ok, taskDefinitionId, completedAtIso]
+    SkipRequest:
+      type: object
+      properties:
+        taskInstanceId:
+          type: string
+        skippedAtIso:
+          type: string
+          format: date-time
+      required: [taskInstanceId, skippedAtIso]
+    SkipResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        taskDefinitionId:
+          type: string
+        skippedAtIso:
+          type: string
+          format: date-time
+      required: [ok, taskDefinitionId, skippedAtIso]
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        role:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        verified:
+          type: object
+          additionalProperties: true
+        is_active:
+          type: boolean
+      required: [id, name, category, role, verified, is_active]
+    ProductCreate:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        role:
+          type: string
+        notes:
+          type: string
+        verified:
+          type: object
+          additionalProperties: true
+      required: [id, name, category, role]
+    ProductUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        role:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        verified:
+          type: object
+          additionalProperties: true
+        is_active:
+          type: boolean
+      additionalProperties: false
+    RulesResponse:
+      type: object
+      properties:
+        rules:
+          type: object
+          additionalProperties: true
+        conditions:
+          type: object
+          additionalProperties:
+            type: boolean
+      required: [rules, conditions]
+    RulesPatchRequest:
+      type: object
+      properties:
+        rules:
+          type: object
+          additionalProperties: true
+        conditions:
+          type: object
+          additionalProperties:
+            type: boolean
+    AiPatchRequest:
+      type: object
+      properties:
+        userInstruction:
+          type: string
+        currentSpec:
+          type: object
+          additionalProperties: true
+      required: [userInstruction, currentSpec]
+    JsonPatchOperation:
+      type: object
+      properties:
+        op:
+          type: string
+          enum: [add, remove, replace, move, copy, test]
+        path:
+          type: string
+        from:
+          type: string
+        value:
+          type: object
+      required: [op, path]
+    AiPatchResponse:
+      type: object
+      properties:
+        jsonPatch:
+          type: array
+          items:
+            $ref: "#/components/schemas/JsonPatchOperation"
+        summary:
+          type: string
+      required: [jsonPatch, summary]
+    DeleteResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        id:
+          type: string
+      required: [ok, id]

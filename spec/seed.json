@@ -1,0 +1,408 @@
+{
+  "profile": {
+    "timezone": "Asia/Seoul",
+    "goal": "화장품 다이어트 + 3~4단계 평생 루틴 고정 + 오늘 할 일 점등 UI",
+    "constraints": {
+      "maxStepsPerRoutine": 4,
+      "oneActiveSerumPerSlot": true
+    }
+  },
+  "products": [
+    {
+      "id": "toner_dr_sante_azulene",
+      "name": "상떼(Dr.SANTE) 아줄렌 수더 토너",
+      "category": "toner",
+      "role": "optional_soothing",
+      "notes": "PM ?? ?? ?? ??(???? ??). ??? ?? ??? ??; ??? ???(MultiEX BSASM)? ???????? ?? ?? ??.",
+      "verified": {
+        "type": "full_inci_verified",
+        "full_inci": [
+          "????????(66%)",
+          "???????(5%)",
+          "????????",
+          "1,2-?????",
+          "????",
+          "???",
+          "???????",
+          "??????(1,000ppm)",
+          "??????????",
+          "???",
+          "????",
+          "???",
+          "????????",
+          "?????",
+          "????????",
+          "?????",
+          "?????",
+          "??????????",
+          "????????*",
+          "????????",
+          "??????",
+          "???????",
+          "?????????"
+        ]
+      }
+    },
+    {
+      "id": "serum_parnell_cicamanu_92",
+      "name": "파넬 시카마누 92세럼",
+      "category": "serum",
+      "role": "daily_calm",
+      "verified": {
+        "type": "full_inci_verified",
+        "highlights": [
+          "병풀",
+          "마누카(허니)",
+          "마데카소사이드",
+          "세라마이드NP",
+          "멜라토닌"
+        ]
+      }
+    },
+    {
+      "id": "serum_uiq_vita_c",
+      "name": "유이크 바이옴 비타씨 잡티세럼",
+      "category": "serum",
+      "role": "am_brightening",
+      "verified": {
+        "type": "full_inci_verified",
+        "highlights": [
+          "3-O-에틸아스코빅애씨드 1%",
+          "나이아신아마이드"
+        ]
+      }
+    },
+    {
+      "id": "serum_parnell_niacinamide_high",
+      "name": "파넬 나이아신아마이드 20.35 라이스 브라이트닝 세럼",
+      "category": "serum",
+      "role": "pm_active_high_niacinamide",
+      "verified": {
+        "type": "name_verified_only",
+        "notes": "제품명에 '20.35' 표기된 라인. 공식 전성분 페이지는 이번 세션에서 안정적으로 확보 불가."
+      }
+    },
+    {
+      "id": "ampoule_wellage_hyaluronic_blue_100",
+      "name": "웰라쥬 리얼 히알루로닉 블루 100 앰플",
+      "category": "ampoule",
+      "role": "hydration_boost_optional",
+      "verified": {
+        "type": "full_inci_verified",
+        "highlights": [
+          "소듐하이알루로네이트 1,000ppm(표기)",
+          "판테놀"
+        ]
+      }
+    },
+    {
+      "id": "cream_minic_barrier",
+      "name": "미닉 장벽크림",
+      "category": "cream",
+      "role": "daily_barrier_main",
+      "verified": {
+        "type": "user_provided_component_list",
+        "highlights": [
+          "세라마이드 복합(5종) + 콜레스테롤 + 지방산(3:1:1)",
+          "판테놀",
+          "병풀/마데카소사이드",
+          "히알루론산 복합"
+        ]
+      }
+    },
+    {
+      "id": "cream_rovectin_ultra",
+      "name": "로벡틴 앤티 이리턴트 울트라 크림(장벽크림)",
+      "category": "cream",
+      "role": "barrier_backup",
+      "verified": {
+        "type": "full_inci_verified",
+        "highlights": [
+          "나이아신아마이드",
+          "세라마이드NP"
+        ]
+      }
+    },
+    {
+      "id": "sunscreen_mediheal_madecassoside",
+      "name": "메디힐 마데카소사이드 수분 선세럼(흔적 리페어)",
+      "category": "sunscreen",
+      "role": "daily_spf_must",
+      "verified": {
+        "type": "full_inci_verified",
+        "highlights": [
+          "자외선 필터",
+          "나이아신아마이드",
+          "마데카소사이드/병풀 계열"
+        ]
+      }
+    },
+    {
+      "id": "makeup_minic_cover_or_toneup",
+      "name": "미닉 톤업/커버 로션(꾸미기 용도)",
+      "category": "makeup",
+      "role": "optional_cosmetic",
+      "verified": {
+        "type": "not_required_for_scheduler"
+      }
+    },
+    {
+      "id": "allinone_minic_collard_green",
+      "name": "미닉 올인원(콜라드 그린 베이스)",
+      "category": "all_in_one",
+      "role": "lazy_fallback",
+      "verified": {
+        "type": "user_provided_component_list",
+        "highlights": [
+          "케일잎수 베이스",
+          "나이아신아마이드",
+          "판테놀",
+          "병풀/마데카소사이드",
+          "글루코노락톤(PHA)"
+        ]
+      }
+    },
+    {
+      "id": "scalp_scaler_drforhair_poligen_seasalt_plus",
+      "name": "닥터포헤어 두피 스케일러 폴리젠 씨 솔트+",
+      "category": "scalp",
+      "role": "scalp_scale",
+      "verified": {
+        "type": "usage_verified",
+        "usage_summary": "주 2~3회, 샴푸 대신 젖은 두피에 도포→마사지→헹굼"
+      }
+    },
+    {
+      "id": "extract_nano_recipe_bakuchiol_10000",
+      "name": "????? ???? ?? (10,000ppm)",
+      "category": "ampoule",
+      "role": "optional_active",
+      "verified": {
+        "type": "full_inci_verified",
+        "full_inci": [
+          "????",
+          "????/????????????",
+          "1,2-?????"
+        ]
+      }
+    },
+    {
+      "id": "extract_nano_recipe_pdrn_100000",
+      "name": "????? ?? PDRN ?? (100,000ppm)",
+      "category": "ampoule",
+      "role": "optional_repair",
+      "verified": {
+        "type": "full_inci_verified",
+        "full_inci": [
+          "???",
+          "??????",
+          "???????",
+          "1,2-?????"
+        ]
+      }
+    },
+    {
+      "id": "extract_nano_recipe_azulene_cooling",
+      "name": "????? ?? ??? ??? ??",
+      "category": "ampoule",
+      "role": "optional_soothing",
+      "verified": {
+        "type": "full_inci_verified",
+        "full_inci": [
+          "???",
+          "??????",
+          "1,2-?????",
+          "????",
+          "???????"
+        ]
+      }
+    },
+    {
+      "id": "scalp_tonic_labo_h",
+      "name": "????? ?? ??",
+      "category": "scalp",
+      "role": "post_shower_tonic",
+      "notes": "?? ? ?? ?? ?? ??.",
+      "verified": {
+        "type": "name_verified_only"
+      }
+    }
+  ],
+  "taskDefinitions": [
+    {
+      "id": "skin_am",
+      "slot": "AM",
+      "type": "skincare",
+      "steps": [
+        {
+          "step": 1,
+          "action": "cleanse_optional",
+          "products": []
+        },
+        {
+          "step": 2,
+          "action": "apply_serum",
+          "productSelector": "rule_based_serum_am"
+        },
+        {
+          "step": 3,
+          "action": "apply_sunscreen",
+          "products": [
+            "sunscreen_mediheal_madecassoside"
+          ]
+        }
+      ],
+      "interval_days": 1
+    },
+    {
+      "id": "skin_pm",
+      "slot": "PM",
+      "type": "skincare",
+      "steps": [
+        {
+          "step": 1,
+          "action": "double_cleanse_if_needed",
+          "products": []
+        },
+        {
+          "step": 2,
+          "action": "optional_toner",
+          "products": [
+            "toner_dr_sante_azulene"
+          ],
+          "condition": "skin_is_dry_or_sensitive"
+        },
+        {
+          "step": 3,
+          "action": "apply_serum",
+          "productSelector": "rule_based_serum_pm"
+        },
+        {
+          "step": 4,
+          "action": "apply_cream",
+          "products": [
+            "cream_minic_barrier"
+          ]
+        }
+      ],
+      "interval_days": 1
+    },
+    {
+      "id": "shower_normal",
+      "slot": "SHOWER",
+      "type": "hygiene",
+      "interval_days": 1,
+      "steps": [
+        {
+          "step": 1,
+          "action": "shampoo"
+        },
+        {
+          "step": 2,
+          "action": "conditioner_on_hair"
+        },
+        {
+          "step": 3,
+          "action": "body_wash_or_brush_teeth"
+        },
+        {
+          "step": 4,
+          "action": "rinse_conditioner"
+        },
+        {
+          "step": 5,
+          "action": "face_cleanse_last"
+        },
+        {
+          "step": 6,
+          "action": "apply_scalp_tonic",
+          "products": [
+            "scalp_tonic_labo_h"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scalp_scale_day",
+      "slot": "SHOWER",
+      "type": "scalp",
+      "interval_days": 4,
+      "steps": [
+        {
+          "step": 1,
+          "action": "keep_face_dry_initially"
+        },
+        {
+          "step": 2,
+          "action": "wet_scalp_only"
+        },
+        {
+          "step": 3,
+          "action": "apply_scaler_massage_rinse",
+          "products": [
+            "scalp_scaler_drforhair_poligen_seasalt_plus"
+          ]
+        },
+        {
+          "step": 4,
+          "action": "optional_light_shampoo"
+        },
+        {
+          "step": 5,
+          "action": "conditioner_on_hair_then_body_wash"
+        },
+        {
+          "step": 6,
+          "action": "face_cleanse_last"
+        },
+        {
+          "step": 7,
+          "action": "apply_scalp_tonic",
+          "products": [
+            "scalp_tonic_labo_h"
+          ]
+        }
+      ]
+    }
+  ],
+  "rules": {
+    "amSerumRotation": {
+      "default": "serum_parnell_cicamanu_92",
+      "vitc": {
+        "productId": "serum_uiq_vita_c",
+        "interval_days": 2,
+        "only_if_condition_not": [
+          "sensitive",
+          "irritated"
+        ]
+      }
+    },
+    "pmSerumRotation": {
+      "default": "serum_parnell_cicamanu_92",
+      "highNiacinamide": {
+        "productId": "serum_parnell_niacinamide_high",
+        "interval_days": 4,
+        "only_if_condition_not": [
+          "sensitive",
+          "irritated"
+        ],
+        "constraints": [
+          "do_not_pair_with_vitc_same_day"
+        ]
+      }
+    },
+    "hydrationBoost": {
+      "productId": "ampoule_wellage_hyaluronic_blue_100",
+      "toggle": "need_extra_hydration"
+    },
+    "lazyFallback": {
+      "pm": [
+        "allinone_minic_collard_green"
+      ],
+      "am": [
+        "allinone_minic_collard_green",
+        "sunscreen_mediheal_madecassoside"
+      ]
+    }
+  }
+}
