@@ -21,6 +21,25 @@ export interface TaskCard {
     steps: TaskStep[];
 }
 
+export interface TaskDefinition {
+    id: string;
+    slot: string;
+    type: string;
+    steps: TaskStep[];
+    interval_days?: number;
+    cron_weekdays?: number[];
+}
+
+export interface TaskDefinitionCreate extends TaskDefinition {}
+
+export interface TaskDefinitionUpdate {
+    slot?: string;
+    type?: string;
+    steps?: TaskStep[];
+    interval_days?: number;
+    cron_weekdays?: number[];
+}
+
 export interface TodayResponse {
     date: string;
     nowKstIso: string;
@@ -79,8 +98,12 @@ export interface AiPatchRequest {
     userInstruction: string;
     currentSpec: {
         rules: Record<string, any>;
-        // products could be included if needed by backend, spec says "currentSpec" is object
+        conditions?: Record<string, boolean>;
+        products?: Product[];
+        taskDefinitions?: TaskDefinition[];
     };
+    apiKey?: string;
+    modelName?: string;
 }
 
 export type JsonPatchOperation = Operation;

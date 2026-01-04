@@ -30,6 +30,31 @@ class TodayResponse(BaseModel):
     cards: List[TaskCard]
 
 
+class TaskDefinitionBase(BaseModel):
+    id: str
+    slot: str
+    type: str
+    steps: List[Dict[str, Any]]
+    interval_days: Optional[int] = None
+    cron_weekdays: Optional[List[int]] = None
+
+
+class TaskDefinitionCreate(TaskDefinitionBase):
+    pass
+
+
+class TaskDefinitionUpdate(BaseModel):
+    slot: Optional[str] = None
+    type: Optional[str] = None
+    steps: Optional[List[Dict[str, Any]]] = None
+    interval_days: Optional[int] = None
+    cron_weekdays: Optional[List[int]] = None
+
+
+class TaskDefinitionRead(TaskDefinitionBase):
+    pass
+
+
 class CompleteRequest(BaseModel):
     taskInstanceId: str
     completedAtIso: str
@@ -103,6 +128,8 @@ class JsonPatchOperation(BaseModel):
 class AiPatchRequest(BaseModel):
     userInstruction: str
     currentSpec: Dict[str, Any]
+    apiKey: Optional[str] = None
+    modelName: Optional[str] = None
 
 
 class AiPatchResponse(BaseModel):

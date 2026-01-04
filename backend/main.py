@@ -23,6 +23,9 @@ from .schemas import (
     CompleteRequest,
     CompleteResponse,
     DeleteResponse,
+    TaskDefinitionCreate,
+    TaskDefinitionRead,
+    TaskDefinitionUpdate,
     ProductCreate,
     ProductRead,
     ProductUpdate,
@@ -70,6 +73,17 @@ def _deep_merge(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]
         else:
             merged[key] = value
     return merged
+
+
+def _task_definition_to_read(task_def: TaskDefinition) -> TaskDefinitionRead:
+    return TaskDefinitionRead(
+        id=task_def.id,
+        slot=task_def.slot,
+        type=task_def.task_type,
+        steps=task_def.steps,
+        interval_days=task_def.interval_days,
+        cron_weekdays=task_def.cron_weekdays,
+    )
 
 
 def _update_rule_usage(
@@ -215,6 +229,73 @@ def skip_task(payload: SkipRequest, session: Session = Depends(get_session)) -> 
     }
 
 
+@app.get("/api/tasks", response_model=List[TaskDefinitionRead])
+def list_task_definitions(session: Session = Depends(get_session)) -> List[TaskDefinitionRead]:
+    task_defs = session.exec(select(TaskDefinition)).all()
+    return [_task_definition_to_read(task_def) for task_def in task_defs]
+
+
+@app.post("/api/tasks", response_model=TaskDefinitionRead, status_code=201)
+def create_task_definition(
+    payload: TaskDefinitionCreate, session: Session = Depends(get_session)
+) -> TaskDefinitionRead:
+    if session.get(TaskDefinition, payload.id) is not None:
+        raise HTTPException(status_code=409, detail="Task definition id already exists")
+
+    task_def = TaskDefinition(
+        id=payload.id,
+        slot=payload.slot,
+        task_type=payload.type,
+        steps=payload.steps,
+        interval_days=payload.interval_days,
+        cron_weekdays=payload.cron_weekdays,
+    )
+    session.add(task_def)
+    session.commit()
+    session.refresh(task_def)
+    return _task_definition_to_read(task_def)
+
+
+@app.patch("/api/tasks/{id}", response_model=TaskDefinitionRead)
+def update_task_definition(
+    id: str, payload: TaskDefinitionUpdate, session: Session = Depends(get_session)
+) -> TaskDefinitionRead:
+    task_def = session.get(TaskDefinition, id)
+    if task_def is None:
+        raise HTTPException(status_code=404, detail="Task definition not found")
+
+    if hasattr(payload, "model_dump"):
+        updates = payload.model_dump(exclude_unset=True)
+    else:
+        updates = payload.dict(exclude_unset=True)
+
+    if "type" in updates:
+        task_def.task_type = updates.pop("type")
+
+    for key, value in updates.items():
+        setattr(task_def, key, value)
+
+    session.add(task_def)
+    session.commit()
+    session.refresh(task_def)
+    return _task_definition_to_read(task_def)
+
+
+@app.delete("/api/tasks/{id}", response_model=DeleteResponse)
+def delete_task_definition(id: str, session: Session = Depends(get_session)) -> Dict[str, Any]:
+    task_def = session.get(TaskDefinition, id)
+    if task_def is None:
+        raise HTTPException(status_code=404, detail="Task definition not found")
+
+    status = session.get(TaskStatus, id)
+    if status is not None:
+        session.delete(status)
+
+    session.delete(task_def)
+    session.commit()
+    return {"ok": True, "id": id}
+
+
 @app.get("/api/products", response_model=List[ProductRead])
 def list_products(session: Session = Depends(get_session)) -> List[Product]:
     return session.exec(select(Product).where(Product.is_active == True)).all()
@@ -310,4 +391,9 @@ def patch_rules(
 
 @app.post("/api/ai/patch", response_model=AiPatchResponse)
 def ai_patch(payload: AiPatchRequest) -> Dict[str, Any]:
-    return generate_ai_patch(payload.userInstruction, payload.currentSpec)
+    return generate_ai_patch(
+        payload.userInstruction,
+        payload.currentSpec,
+        payload.apiKey,
+        payload.modelName,
+    )

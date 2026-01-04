@@ -8,6 +8,9 @@ import type {
   ProductUpdate,
   RulesResponse,
   SkipRequest,
+  TaskDefinition,
+  TaskDefinitionCreate,
+  TaskDefinitionUpdate,
   TaskCard,
   TodayResponse,
 } from "@/lib/types";
@@ -16,6 +19,7 @@ const STORAGE_KEYS = {
   products: "routine_products",
   rules: "routine_rules",
   conditions: "routine_conditions",
+  taskDefinitions: "routine_task_definitions",
   taskStatuses: "routine_task_statuses",
   ruleUsage: "routine_rule_usage",
 };
@@ -69,6 +73,18 @@ function getProducts(): Product[] {
 
 function saveProducts(products: Product[]) {
   writeStorage(STORAGE_KEYS.products, products);
+}
+
+function getSeedTaskDefinitions(): TaskDefinition[] {
+  return (seedData as any).taskDefinitions || [];
+}
+
+function getTaskDefinitions(): TaskDefinition[] {
+  return readStorage<TaskDefinition[]>(STORAGE_KEYS.taskDefinitions, getSeedTaskDefinitions());
+}
+
+function saveTaskDefinitions(taskDefinitions: TaskDefinition[]) {
+  writeStorage(STORAGE_KEYS.taskDefinitions, taskDefinitions);
 }
 
 function getRulesState(): RulesResponse {
@@ -266,7 +282,7 @@ function buildTaskSteps(
 }
 
 function buildTodayCards(targetDateKey: string): TaskCard[] {
-  const taskDefs = (seedData as any).taskDefinitions || [];
+  const taskDefs = getTaskDefinitions();
   const statuses = getTaskStatuses();
   const { rules, conditions } = getRulesState();
   const ruleUsage = getRuleUsage();
@@ -412,6 +428,47 @@ export async function localApi(path: string, options: RequestInit = {}): Promise
     return response;
   }
 
+  if (path === "/api/tasks" && method === "GET") {
+    return getTaskDefinitions();
+  }
+
+  if (path === "/api/tasks" && method === "POST") {
+    const taskDefinitions = getTaskDefinitions();
+    const payload = body as TaskDefinitionCreate;
+    if (taskDefinitions.some((t) => t.id === payload.id)) {
+      throw new Error("Task definition id already exists");
+    }
+    taskDefinitions.push(payload);
+    saveTaskDefinitions(taskDefinitions);
+    return payload;
+  }
+
+  if (path.startsWith("/api/tasks/") && method === "PATCH") {
+    const id = path.split("/").pop() || "";
+    const taskDefinitions = getTaskDefinitions();
+    const index = taskDefinitions.findIndex((t) => t.id === id);
+    if (index === -1) throw new Error("Task definition not found");
+    const update = body as TaskDefinitionUpdate;
+    taskDefinitions[index] = { ...taskDefinitions[index], ...update };
+    saveTaskDefinitions(taskDefinitions);
+    return taskDefinitions[index];
+  }
+
+  if (path.startsWith("/api/tasks/") && method === "DELETE") {
+    const id = path.split("/").pop() || "";
+    const taskDefinitions = getTaskDefinitions();
+    const nextDefinitions = taskDefinitions.filter((t) => t.id !== id);
+    if (nextDefinitions.length === taskDefinitions.length) throw new Error("Task definition not found");
+    saveTaskDefinitions(nextDefinitions);
+    const statuses = getTaskStatuses();
+    if (statuses[id]) {
+      delete statuses[id];
+      saveTaskStatuses(statuses);
+    }
+    const response: DeleteResponse = { ok: true, id };
+    return response;
+  }
+
   if (path === "/api/rules" && method === "GET") {
     return getRulesState();
   }
@@ -453,7 +510,7 @@ export async function localApi(path: string, options: RequestInit = {}): Promise
   if (path === "/api/ai/patch" && method === "POST") {
     const response: AiPatchResponse = {
       jsonPatch: [],
-      summary: "로컬 모드에서는 AI 패치를 사용할 수 없습니다.",
+      summary: "로컬 모드에서는 AI 패치를 사용할 수 없습니다. API Base URL과 Gemini 키를 설정하세요.",
     };
     return response;
   }

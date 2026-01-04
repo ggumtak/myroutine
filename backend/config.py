@@ -15,4 +15,4 @@ SEED_PATH = Path(os.getenv("SEED_PATH", str(REPO_ROOT / "spec" / "seed.json")))
 TIMEZONE = ZoneInfo("Asia/Seoul")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-1.5-flash")
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.0-flash")

@@ -1,20 +1,24 @@
 ﻿"use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fetchClient } from "@/lib/api";
-import { TodayResponse, TaskCard } from "@/lib/types";
-import { RoutineCard } from "@/components/routine-card";
+import { Product, TodayResponse, TaskCard } from "@/lib/types";
+import { CompactRoutineCard } from "@/components/compact-routine-card";
 import { BottomNav } from "@/components/bottom-nav";
 import { Calendar } from "@/components/ui/calendar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
+import { buildProductLookup } from "@/lib/product-display";
 
 export default function CalendarPage() {
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [cards, setCards] = useState<TaskCard[]>([]);
   const [loading, setLoading] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+
+  const productLookup = useMemo(() => buildProductLookup(products), [products]);
 
   useEffect(() => {
     async function fetchData() {
@@ -32,6 +36,14 @@ export default function CalendarPage() {
     }
     fetchData();
   }, [date]);
+
+  useEffect(() => {
+    fetchClient("/api/products")
+      .then((res) => setProducts(res as Product[]))
+      .catch(() => {
+        toast.error("제품 정보를 불러오지 못했습니다.");
+      });
+  }, []);
 
   const handleAction = async (action: "complete" | "skip", id: string) => {
     try {
@@ -79,12 +91,13 @@ export default function CalendarPage() {
               .map((_, i) => <Skeleton key={i} className="h-40 w-full rounded-xl" />)
           ) : cards.length > 0 ? (
             cards.map((card) => (
-              <RoutineCard
+              <CompactRoutineCard
                 key={card.taskInstanceId}
                 card={card}
                 onComplete={(id) => handleAction("complete", id)}
                 onSkip={(id) => handleAction("skip", id)}
                 loading={loading}
+                productLookup={productLookup}
               />
             ))
           ) : (

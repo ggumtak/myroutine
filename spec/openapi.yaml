@@ -66,6 +66,70 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SkipResponse"
+  /api/tasks:
+    get:
+      summary: List task definitions
+      responses:
+        "200":
+          description: Task definition list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskDefinition"
+    post:
+      summary: Create a task definition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskDefinitionCreate"
+      responses:
+        "201":
+          description: Task definition created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDefinition"
+  /api/tasks/{id}:
+    patch:
+      summary: Update a task definition
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskDefinitionUpdate"
+      responses:
+        "200":
+          description: Task definition updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDefinition"
+    delete:
+      summary: Delete a task definition
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task definition deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResponse"
   /api/products:
     get:
       summary: List active products
@@ -215,6 +279,52 @@ components:
           items:
             $ref: "#/components/schemas/TaskStep"
       required: [taskInstanceId, taskDefinitionId, slot, type, state, steps]
+    TaskDefinition:
+      type: object
+      properties:
+        id:
+          type: string
+        slot:
+          type: string
+        type:
+          type: string
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        interval_days:
+          type: integer
+          nullable: true
+        cron_weekdays:
+          type: array
+          items:
+            type: integer
+          nullable: true
+      required: [id, slot, type, steps]
+    TaskDefinitionCreate:
+      allOf:
+        - $ref: "#/components/schemas/TaskDefinition"
+    TaskDefinitionUpdate:
+      type: object
+      properties:
+        slot:
+          type: string
+        type:
+          type: string
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        interval_days:
+          type: integer
+          nullable: true
+        cron_weekdays:
+          type: array
+          items:
+            type: integer
+          nullable: true
     TodayResponse:
       type: object
       properties:
@@ -353,6 +463,10 @@ components:
         currentSpec:
           type: object
           additionalProperties: true
+        apiKey:
+          type: string
+        modelName:
+          type: string
       required: [userInstruction, currentSpec]
     JsonPatchOperation:
       type: object

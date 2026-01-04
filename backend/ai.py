@@ -9,6 +9,32 @@ from fastapi import HTTPException
 
 from .config import GEMINI_API_KEY, MODEL_NAME
 
+SYSTEM_PROMPT = """
+You are the AI assistant for a personal routine manager.
+Generate a JSON Patch (RFC 6902) against currentSpec.
+
+Return ONLY a JSON object with:
+- jsonPatch: array of patch ops
+- summary: short string explaining changes or answering a question
+
+Rules:
+- If the user asks a general question or no data change is needed, return an empty jsonPatch and answer in summary.
+- Only edit fields inside currentSpec (rules, conditions, products, taskDefinitions).
+- Use minimal changes and keep existing ids stable.
+
+Data model hints:
+- products: {id, name, category, role, notes?, verified?, is_active?}
+  categories: toner, serum, ampoule, cream, sunscreen, makeup, all_in_one, scalp
+  roles: optional_soothing, daily_calm, am_brightening, pm_active_high_niacinamide,
+         hydration_boost_optional, daily_barrier_main, barrier_backup, daily_spf_must,
+         optional_cosmetic, lazy_fallback, scalp_scale, optional_active, optional_repair,
+         post_shower_tonic
+- taskDefinitions: {id, slot, type, steps, interval_days?, cron_weekdays?}
+  slots: AM, PM, SHOWER, SUPP
+  types: skincare, hygiene, scalp, mask
+  steps: list of objects with action, products?, productSelector?, condition?
+"""
+
 
 def _extract_json(text: str) -> Dict[str, Any]:
     start = text.find("{")
@@ -18,24 +44,30 @@ def _extract_json(text: str) -> Dict[str, Any]:
     return json.loads(text[start : end + 1])
 
 
-def generate_ai_patch(user_instruction: str, current_spec: Dict[str, Any]) -> Dict[str, Any]:
-    if not GEMINI_API_KEY or not MODEL_NAME:
+def generate_ai_patch(
+    user_instruction: str,
+    current_spec: Dict[str, Any],
+    api_key: str | None = None,
+    model_name: str | None = None,
+) -> Dict[str, Any]:
+    api_key = api_key or GEMINI_API_KEY
+    model_name = model_name or MODEL_NAME
+    if not api_key or not model_name:
         return {
             "jsonPatch": [],
             "summary": "AI not configured. Set GEMINI_API_KEY and MODEL_NAME.",
         }
 
     prompt = (
-        "You are a JSON Patch generator. Return ONLY a JSON object with keys "
-        "'jsonPatch' (RFC6902 array) and 'summary' (string). "
-        "Use paths relative to the provided currentSpec.\n\n"
+        f"{SYSTEM_PROMPT}\n"
+        "Use paths relative to currentSpec.\n\n"
         f"Instruction: {user_instruction}\n\n"
         f"currentSpec: {json.dumps(current_spec, ensure_ascii=False)}"
     )
 
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
+        f"{model_name}:generateContent?key={api_key}"
     )
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
