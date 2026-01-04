@@ -1,3 +1,5 @@
+import type { Operation } from "fast-json-patch";
+
 export interface TimeResponse {
     nowKstIso: string;
 }
@@ -81,12 +83,7 @@ export interface AiPatchRequest {
     };
 }
 
-export interface JsonPatchOperation {
-    op: 'add' | 'remove' | 'replace' | 'move' | 'copy' | 'test';
-    path: string;
-    from?: string;
-    value?: any;
-}
+export type JsonPatchOperation = Operation;
 
 export interface AiPatchResponse {
     jsonPatch: JsonPatchOperation[];
