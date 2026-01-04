@@ -1,29 +1,48 @@
 import { localApi } from "@/lib/local-api";
 
+const normalizeBaseUrl = (url: string) => url.trim().replace(/\/+$/, "");
+
 const getStoredBaseUrl = () => {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("API_BASE_URL") || "";
+  const raw = localStorage.getItem("API_BASE_URL") || "";
+  return normalizeBaseUrl(raw);
 };
 
-const getEnvBaseUrl = () => process.env.NEXT_PUBLIC_API_BASE_URL || "";
+const getEnvBaseUrl = () => normalizeBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL || "");
+
+const isSameOrigin = (url: string) => {
+  if (typeof window === "undefined" || !url) return false;
+  try {
+    return new URL(url, window.location.origin).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+};
 
 export const getBaseUrl = () => {
   const stored = getStoredBaseUrl();
   if (stored) return stored;
-  return getEnvBaseUrl();
+  const envBaseUrl = getEnvBaseUrl();
+  return isSameOrigin(envBaseUrl) ? "" : envBaseUrl;
 };
 
 export const setBaseUrl = (url: string) => {
   if (typeof window !== "undefined") {
-    localStorage.setItem("API_BASE_URL", url);
+    const normalized = normalizeBaseUrl(url);
+    if (normalized) {
+      localStorage.setItem("API_BASE_URL", normalized);
+    } else {
+      localStorage.removeItem("API_BASE_URL");
+    }
   }
 };
 
 export async function fetchClient(path: string, options: RequestInit = {}) {
   const storedBaseUrl = getStoredBaseUrl();
-  const baseUrl = storedBaseUrl || getEnvBaseUrl();
+  const envBaseUrl = getEnvBaseUrl();
+  const baseUrl = storedBaseUrl || envBaseUrl;
 
-  if (!baseUrl) {
+  if (!baseUrl || isSameOrigin(baseUrl)) {
     return localApi(path, options);
   }
 
@@ -34,23 +53,22 @@ export async function fetchClient(path: string, options: RequestInit = {}) {
     ...options.headers,
   };
 
+  const fallbackToLocal = () => {
+    if (storedBaseUrl && typeof window !== "undefined") {
+      localStorage.removeItem("API_BASE_URL");
+    }
+    return localApi(path, options);
+  };
+
   try {
     const response = await fetch(url, { ...options, headers });
 
     if (!response.ok) {
-      if (storedBaseUrl && typeof window !== "undefined") {
-        localStorage.removeItem("API_BASE_URL");
-        return localApi(path, options);
-      }
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      return fallbackToLocal();
     }
 
     return response.json();
-  } catch (error) {
-    if (storedBaseUrl && typeof window !== "undefined") {
-      localStorage.removeItem("API_BASE_URL");
-      return localApi(path, options);
-    }
-    throw error;
+  } catch {
+    return fallbackToLocal();
   }
 }

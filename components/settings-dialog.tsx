@@ -41,12 +41,12 @@ export function SettingsDialog() {
           <div className="space-y-2">
             <Label>API 기본 주소 (Base URL)</Label>
             <Input
-              placeholder="예: http://localhost:8000 (비워두면 현재 주소 사용)"
+              placeholder="예: http://localhost:8000 (비워두면 로컬 모드 사용)"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              백엔드 서버 주소를 입력하세요. 변경 시 페이지가 새로고침됩니다.
+              백엔드 서버 주소를 입력하세요. 비워두면 브라우저 저장소를 사용하며 변경 시 새로고침됩니다.
             </p>
           </div>
           <Button onClick={handleSave} className="w-full">저장</Button>

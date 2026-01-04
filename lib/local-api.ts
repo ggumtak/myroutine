@@ -133,7 +133,7 @@ function isDue(taskDef: any, status: any, targetDateKey: string): boolean {
   return false;
 }
 
-function stateForDate(status: any, targetDateKey: string): "completed" | "skipped" | null {
+function stateForDate(status: any, targetDateKey: string): TaskCard["state"] | null {
   const completedKey = status?.lastCompletedAt ? toDateKeyFromIso(status.lastCompletedAt) : null;
   const skippedKey = status?.lastSkippedAt ? toDateKeyFromIso(status.lastSkippedAt) : null;
   if (completedKey === targetDateKey) return "completed";
