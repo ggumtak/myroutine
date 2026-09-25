@@ -532,7 +532,7 @@ button{-webkit-user-select:none;user-select:none}
 .drill.done:not(.folded) .drill-count{margin-right:30px}
 .drills .drill-prog + .drill,.drills .drill-prog + .stamp + .drill{border-top:0;padding-top:0}
 .drills .drill.folded + .drill.folded{border-top:0}
-.drills.all .stamp{position:relative;top:auto;right:auto;display:block;margin:-8px 6px -10px auto;width:74px;height:74px}
+.drills.all .stamp{position:relative;top:auto;right:auto;display:block;margin:-8px 6px 4px auto;width:74px;height:74px}
 
 /* sheets */
 .sheet-grab-area{padding:0 0 2px;touch-action:none;cursor:grab}
@@ -685,8 +685,8 @@ body.kb main{padding-bottom:40vh}
 .np-t{flex:1;min-width:0;text-align:left;font-weight:600;font-size:14px;min-height:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .np-time{font-size:12.5px;font-variant-numeric:tabular-nums;opacity:.75;white-space:nowrap}
 .np-x{width:40px;height:40px;display:grid;place-items:center;flex:none;opacity:.8}
-body.np main{padding-bottom:calc(var(--tabbar-h) + 100px + var(--sab))}
-body.np .toast{bottom:calc(var(--tabbar-h) + 70px + var(--sab))}
+body.np:not(.kb) main{padding-bottom:calc(var(--tabbar-h) + 100px + var(--sab))}
+body.np:not(.kb) .toast{bottom:calc(var(--tabbar-h) + 70px + var(--sab))}
 body.kb .now-playing{display:none}
 .wk.sel{outline:2px solid var(--ink);outline-offset:1px}
 .page > .month-stats:first-child{border-top:0}

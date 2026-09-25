@@ -852,7 +852,7 @@ function ToggleRow(label, value, onChange, hint, iconName) {
   btn.addEventListener('click', () => { const v = btn.getAttribute('aria-checked') !== 'true'; btn.setAttribute('aria-checked', String(v)); onChange(v); });
   return h('div', { class: 'toggle-row' }, h('div', { class: 'tr-l' }, h('span', { class: 'tr-t' }, iconName ? icon(iconName, 17) : null, label), hint ? h('span', { class: 'hint' }, hint) : null), btn);
 }
-function segBtn(label, on, fn) { return h('button', { 'aria-pressed': String(!!on), onclick: fn }, label); }
+function segBtn(label, on, fn, fk) { return h('button', { 'aria-pressed': String(!!on), 'data-fk': fk || null, onclick: fn }, label); }
 function autoTA(attrs, minH) {
   const ta = h('textarea', attrs);
   const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.max(minH || 0, ta.scrollHeight + 2) + 'px'; };
@@ -913,8 +913,8 @@ function render(opts = {}) {
   if (opts.focus) { const el = main.querySelector(`[data-fk="${opts.focus}"]`); if (el) el.focus({ preventScroll: true }); }
   else if (keep) {
     const find = k => $$('button,[role="slider"],select', main).find(x => ctlKey(x) === k && !x.disabled);
-    const dm = /^dr-(.+)-(plus|staff|minus|fold)$/.exec(keep);
-    const el = find(keep) || (dm && (find(`dr-${dm[1]}-fold`) || find(`dr-${dm[1]}-plus`)));
+    const dm = /^dr-(.+)-(plus|staff|minus|fold|unfold|timer)$/.exec(keep);
+    const el = find(keep) || (dm && (find(`dr-${dm[1]}-fold`) || find(`dr-${dm[1]}-unfold`) || find(`dr-${dm[1]}-plus`) || find(`dr-${dm[1]}-minus`)));
     if (el) el.focus({ preventScroll: true });
   }
   Player.sync();
@@ -1037,7 +1037,7 @@ function drillList(date) {
     const pos = id => { const i = S.settings.drills.findIndex(t => t.id === id); return i < 0 ? 1e3 : i; };
     return Object.keys(snap).sort((a, b) => pos(a) - pos(b)).map(id => {
       const s = snap[id], t = S.settings.drills.find(x => x.id === id);
-      return { id, name: (t && t.name) || s.name || '연습', memo: t ? t.memo : '', timed: t ? t.timed : (s.times || []).length > 0, target: s.target, done: Math.min(s.done || 0, s.target), times: s.times || [] };
+      return { id, name: (t && t.name) || s.name || '연습', memo: t ? t.memo : '', timed: !!(t && t.timed), target: s.target, done: Math.min(s.done || 0, s.target), times: s.times || [] };
     });
   }
   const list = S.settings.drills.map(t => {
@@ -1047,7 +1047,7 @@ function drillList(date) {
   });
   for (const id in snap) {
     const s = snap[id];
-    if (!list.some(x => x.id === id) && (s.done || 0) > 0) list.push({ id, name: s.name || '연습', memo: '', timed: (s.times || []).length > 0, target: s.target, done: Math.min(s.done, s.target), times: s.times || [], orphan: true });
+    if (!list.some(x => x.id === id) && (s.done || 0) > 0) list.push({ id, name: s.name || '연습', memo: '', timed: false, target: s.target, done: Math.min(s.done, s.target), times: s.times || [], orphan: true });
   }
   return list;
 }
@@ -1513,7 +1513,7 @@ function DrillRow(date, d) {
         h('span', { class: 'sp' }), icon('chevd', 18)));
   }
   return h('div', { class: 'drill' + (complete ? ' done' : '') },
-    complete ? h('button', { class: 'drill-unfold', 'aria-label': '접기', onclick: () => { S.openDrills.delete(d.id); render(); } }, icon('chevu', 18)) : null,
+    complete ? h('button', { class: 'drill-unfold', 'data-fk': `dr-${d.id}-unfold`, 'aria-label': `${d.name} 접기`, onclick: () => { S.openDrills.delete(d.id); render(); } }, icon('chevu', 18)) : null,
     h('div', { class: 'drill-top' },
       h('span', { class: 'drill-name' }, d.name),
       d.memo ? h('span', { class: 'drill-memo' }, d.memo) : h('span', { class: 'sp' }),
@@ -1523,7 +1523,7 @@ function DrillRow(date, d) {
       h('span', { class: 'drill-rec' }, todayBest != null ? h('span', null, `오늘 최고 ${fmtSec(todayBest)}`) : null, best ? h('span', null, `최고 기록 ${fmtSec(best.sec)}`) : null),
       h('div', { class: 'drill-acts' },
         h('button', { class: 'btn soft sm sq', 'data-fk': `dr-${d.id}-minus`, 'aria-label': `${d.name} 체크 하나 지우기`, disabled: d.done === 0, onclick: () => bump(date, d.id, -1) }, icon('minus', 18)),
-        d.timed ? h('button', { class: 'btn soft sm', onclick: () => openStopwatch(date, d.id) }, icon('timer', 18), '재기') : null,
+        d.timed ? h('button', { class: 'btn soft sm', 'data-fk': `dr-${d.id}-timer`, 'aria-label': `${d.name} 시간 재기`, onclick: () => openStopwatch(date, d.id) }, icon('timer', 18), '재기') : null,
         h('button', { class: 'btn blue sm btn-check', 'data-fk': `dr-${d.id}-plus`, 'aria-label': complete ? `${d.name} 다 했어요` : `${d.name} 1회 체크`, disabled: complete, onclick: () => bump(date, d.id, 1) }, complete ? [icon('check', 18), '다 했어요'] : [icon('plus', 18), '1회']))));
 }
 function bump(date, id, delta, sec) {
@@ -1554,7 +1554,7 @@ function bump(date, id, delta, sec) {
 function SongSec(date, e) {
   const lib = songLib();
   const songs = e ? e.songs : [];
-  const inp = h('input', { class: 'input', placeholder: '제목이나 가수, 초성(ㅂㅇㄱ)도 돼요', 'data-fk': 'song', enterkeyhint: 'done', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': '부른 노래 찾아서 추가', value: S.songDraft && S.songDraft.date === date ? S.songDraft.text : '' });
+  const inp = h('input', { class: 'input', placeholder: '제목·가수·초성(ㅂㅇㄱ)', 'data-fk': 'song', enterkeyhint: 'done', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': '부른 노래 찾아서 추가', value: S.songDraft && S.songDraft.date === date ? S.songDraft.text : '' });
   inp.addEventListener('input', () => { S.songDraft = { date, text: inp.value }; });
   const sugg = SongSuggest(inp, {
     free: true,
@@ -1771,7 +1771,7 @@ async function shareSummary(date) {
 /* ================= recordings UI ================= */
 function RecRow(r, date, opts = {}) {
   const marks = (r.marks || []).filter(m => r.dur && m.t <= r.dur);
-  const track = h('div', { class: 'track', role: 'slider', tabindex: 0, 'aria-label': '재생 위치', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': 0 },
+  const track = h('div', { class: 'track', role: 'slider', tabindex: 0, 'data-fk': `rec-track-${r.id}`, 'aria-label': `${r.title || '녹음'} 재생 위치`, 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': 0 },
     h('div', { class: 'loop-band', hidden: true }),
     h('div', { class: 'prog' }),
     marks.map(m => h('i', { class: 'tick', style: `left:${(m.t / r.dur * 100).toFixed(2)}%` })),
@@ -2299,6 +2299,8 @@ function openItem(date, kind, id) {
   const ta = autoTA({ class: 'input', value: it.text, 'aria-label': '내용' }, 70);
   let tag = it.tag || null, from = it.from || '선생님', pinned = !!it.pinned, resolved = !!it.resolved, saved = false;
   const orig = JSON.stringify([it.text, tag, from, pinned, resolved]);
+  const dirty = () => JSON.stringify([ta.value.trim(), tag, from, pinned, resolved]) !== orig && !!ta.value.trim();
+  const leave = then => { const go = () => { saved = true; closeSheet(s, true); then(); }; if (saved || guardUnsaved(dirty, go)) go(); };
   const tagChips = h('div', { class: 'chips' }), fromChips = h('div', { class: 'chips' });
   const draw = () => {
     tagChips.replaceChildren(...S.settings.tags.map(t => h('button', { class: 'chip sm', 'aria-pressed': String(tag === t), onclick: () => { tag = tag === t ? null : t; draw(); } }, t)));
@@ -2321,7 +2323,7 @@ function openItem(date, kind, id) {
   s = openSheet({
     title: KIND[kind].label,
     body: h('div', null,
-      h('div', { class: 'kind-line' }, mark(kind), h('button', { class: 'date-link', onclick: () => { closeSheet(s, true); goDate(date); } }, `${fmtMDW(date)} 기록`)),
+      h('div', { class: 'kind-line' }, mark(kind), h('button', { class: 'date-link', onclick: () => leave(() => goDate(date)) }, `${fmtMDW(date)} 기록`)),
       field('내용', ta),
       field('주제', tagChips),
       kind === 'fb' ? field('누가 말해 줬나요?', fromChips) : null,
@@ -2329,7 +2331,7 @@ function openItem(date, kind, id) {
       kind !== 'good' ? ToggleRow('해결했어요', resolved, v => { resolved = v; }, '피드백 탭에서 ‘해결함’ 쪽으로 옮겨요', 'check') : null,
       h('button', { class: 'btn ghost danger wide', style: 'margin-top:10px', onclick: () => { closeSheet(s, true); deleteItem(date, kind, id); } }, icon('trash', 18), '지우기')),
     foot: [save],
-    beforeClose: () => saved || guardUnsaved(() => JSON.stringify([ta.value.trim(), tag, from, pinned, resolved]) !== orig && !!ta.value.trim(), () => { saved = true; closeSheet(s, true); })
+    beforeClose: () => saved || guardUnsaved(dirty, () => { saved = true; closeSheet(s, true); })
   });
 }
 function openSongEntry(date, sid) {
@@ -2379,7 +2381,7 @@ function openSongEntry(date, sid) {
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, '키'), kInp, quickKeys),
       field('오늘 이 노래 메모', nInp),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'btn soft', onclick: () => { closeSheet(s, true); openSongDetail(normKey(so.title)); } }, icon('music', 18), '이 노래 기록 모아보기'),
+        h('button', { class: 'btn soft', onclick: () => { const go = () => { saved = true; closeSheet(s, true); openSongDetail(normKey(so.title)); }; if (saved || guardUnsaved(() => now() !== orig(), go)) go(); } }, icon('music', 18), '이 노래 기록 모아보기'),
         h('button', { class: 'btn ghost danger', onclick: () => { closeSheet(s, true); deleteItem(date, 'songs', sid); } }, icon('trash', 18), '오늘 목록에서 빼기'))),
     foot: [save],
     beforeClose: () => saved || guardUnsaved(() => now() !== orig(), () => { saved = true; closeSheet(s, true); })
@@ -2842,14 +2844,14 @@ function SongsView() {
   else if (seg === 'recs') content = AllRecsPanel();
   else if (seg === 'journal') content = JournalPanel();
   else content = RangePanel();
-  const pickSeg = v => { if (S.lib.seg === v) return; S.lib.seg = v; render({ top: true }); };
+  const pickSeg = v => { if (S.lib.seg === v) return; S.lib.seg = v; render({ top: true, focus: 'seg-' + v }); };
   return h('div', { class: 'v-songs' }, Banner(),
     h('div', { class: 'view-head' }, h('h1', { class: 'view-title' }, '모아보기')),
     h('div', { class: 'seg', style: 'margin-bottom:12px', role: 'group', 'aria-label': '보기' },
-      segBtn('곡별', seg === 'songs', () => pickSeg('songs')),
-      segBtn('녹음', seg === 'recs', () => pickSeg('recs')),
-      segBtn('일지', seg === 'journal', () => pickSeg('journal')),
-      segBtn('음역', seg === 'range', () => pickSeg('range'))),
+      segBtn('곡별', seg === 'songs', () => pickSeg('songs'), 'seg-songs'),
+      segBtn('녹음', seg === 'recs', () => pickSeg('recs'), 'seg-recs'),
+      segBtn('일지', seg === 'journal', () => pickSeg('journal'), 'seg-journal'),
+      segBtn('음역', seg === 'range', () => pickSeg('range'), 'seg-range')),
     content);
 }
 function SongListPanel() {
