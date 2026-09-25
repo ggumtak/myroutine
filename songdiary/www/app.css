@@ -697,3 +697,5 @@ body.kb .now-playing{display:none}
 .cell[data-r="4"] .n,.cell[data-r="5"] .n{color:var(--ink)}
 .tag-edit .chip .x{width:32px;height:32px}
 .fbi-text{padding:6px 0;margin:-6px 0}
+/* Android 15+ draws edge to edge: nothing scrolls visibly under the status bar */
+body::before{content:"";position:fixed;top:0;left:0;right:0;height:var(--sat);background:var(--bg);z-index:21;pointer-events:none}

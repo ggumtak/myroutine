@@ -189,7 +189,7 @@ const Files = {
     if (!plug('Filesystem')) { this.download(name, blob); return null; }
     const path = `노래일기/${sub ? sub + '/' : ''}${safeName(name)}`;
     await writeBlob(path, 'DOCUMENTS', blob, onProgress);
-    return `내 파일 > 문서 > ${path}`;
+    return `내 파일 > 내장 저장공간 > Documents > ${path.split('/').join(' > ')}`;
   },
   /* the copy handed to the share sheet can be gigabytes; once the app starts again it is surely not needed */
   async clearShareCache() {
@@ -227,6 +227,9 @@ const Files = {
     const res = await fetch(Cap.convertFileSrc(f.path));
     if (!res.ok) throw new Error('read');
     const blob = await res.blob();
+    /* the copy in the app cache isn't needed once it has been read */
+    const FS = plug('Filesystem');
+    if (FS) FS.deleteFile({ path: f.path }).catch(() => {});
     return new File([blob], f.name || '녹음', { type: f.mime || blob.type || '' });
   }
 };
@@ -298,15 +301,24 @@ const App = {
     a.href = url; a.rel = 'noopener';
     document.body.append(a); a.click(); a.remove();
   },
+  /* at app start: keep an existing reminder scheduled without asking for anything */
+  async ensureReminder(hour, minute, body) {
+    const LN = plug('LocalNotifications');
+    if (!LN) return 'unsupported';
+    const p = await LN.checkPermissions();
+    if (p.display !== 'granted') return 'denied';
+    try { const pend = await LN.getPending(); if ((pend.notifications || []).some(n => +n.id === 1001)) return 'ok'; } catch (e) { /* schedule again below */ }
+    return this.setReminder(true, hour, minute, body);
+  },
   /* daily practice reminder */
   async setReminder(on, hour, minute, body) {
     const LN = plug('LocalNotifications');
     if (!LN) return on ? 'unsupported' : 'ok';
-    try { await LN.cancel({ notifications: [{ id: 1001 }] }); } catch (e) { /* ignore */ }
-    if (!on) return 'ok';
+    if (!on) { try { await LN.cancel({ notifications: [{ id: 1001 }] }); } catch (e) { /* ignore */ } return 'ok'; }
     let p = await LN.checkPermissions();
     if (p.display !== 'granted') p = await LN.requestPermissions();
     if (p.display !== 'granted') return 'denied';
+    try { await LN.cancel({ notifications: [{ id: 1001 }] }); } catch (e) { /* ignore */ }
     try { await LN.createChannel({ id: 'practice', name: '연습 알림', description: '매일 노래 연습할 시간을 알려줘요', importance: 4, vibration: true }); } catch (e) { /* ignore */ }
     await LN.schedule({ notifications: [{ id: 1001, title: '노래일기', body, channelId: 'practice', smallIcon: 'ic_stat_note', schedule: { on: { hour, minute }, allowWhileIdle: true } }] });
     return 'ok';

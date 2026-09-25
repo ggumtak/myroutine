@@ -3073,7 +3073,13 @@ function StorageBlock() {
 function backupJSON(extra) { return JSON.stringify({ app: 'songdiary', v: 2, exportedAt: new Date().toISOString(), settings: S.settings, days: S.days, ...(extra || {}) }); }
 function backupStamp() { const d = new Date(); return `${todayStr()}_${pad(d.getHours())}${pad(d.getMinutes())}`; }
 function lastBackupInfo() { const u = lsGet(LS_UI, {}); return u.lastFull ? `마지막 전체 백업: ${fmtMD(ymd(new Date(u.lastFull)))} ${fmtHM(u.lastFull)}` : '아직 전체 백업을 한 적이 없어요.'; }
+let exporting = false;
 async function exportBackup(withAudio, how) {
+  if (exporting) { toast('백업을 만드는 중이에요. 끝날 때까지 기다려 주세요.'); return; }
+  exporting = true;
+  try { await exportBackupNow(withAudio, how); } finally { exporting = false; }
+}
+async function exportBackupNow(withAudio, how) {
   await flushWrites();
   const t = toastProgress('백업 파일을 만드는 중…');
   try {
@@ -3221,7 +3227,7 @@ function importBackup() {
           S.settings = fresh ? normSettings({ ...incS, reminder: S.settings.reminder, updatedAt: Date.now() }) : mergeSettings(S.settings, incS);
           queueWrite('@s', 100); applyTheme();
           const Rm = S.settings.reminder;
-          if (Rm.on) Native.setReminder(true, Rm.h, Rm.m, REMIND_TEXT).catch(() => {});
+          if (Rm.on) Native.ensureReminder(Rm.h, Rm.m, REMIND_TEXT).then(r => { if (r === 'denied') { Rm.on = false; touchSettings(); } }).catch(() => {});
         }
         await flushWrites();
         /* recordings after the text, so the diary is back even if the phone runs out of space */
@@ -3315,8 +3321,8 @@ function openSettings() {
           h('button', { class: 'btn soft sm', onclick: () => exportBackup(true, 'share') }, icon('share', 17), '백업 보내기'),
           h('button', { class: 'btn soft sm', onclick: () => exportBackup(false, 'save') }, '글만 백업'),
           h('button', { class: 'btn soft sm', onclick: importBackup }, icon('upload', 17), '백업 불러오기')),
-        Native.isNative ? h('p', { class: 'hint', style: 'margin-top:8px' }, '저장 위치: 내 파일 > 문서 > 노래일기 > 백업. ‘백업 보내기’로 구글 드라이브나 카카오톡 나에게 보내 두면 더 안전해요.') : null,
-        Native.isNative ? ToggleRow('매일 자동 백업 (글만)', S.settings.autoBackup, v => { S.settings.autoBackup = v; touchSettings(); if (v) autoBackup(true); }, '앱을 닫을 때 모든 글 기록을 문서 > 노래일기 > 자동백업에 저장해요. 하루 한 파일씩 최근 14개를 남기고, 녹음은 빠져요.', 'save') : null),
+        Native.isNative ? h('p', { class: 'hint', style: 'margin-top:8px' }, '저장 위치: 내 파일 > 내장 저장공간 > Documents > 노래일기 > 백업. ‘백업 보내기’로 구글 드라이브나 카카오톡 나에게 보내 두면 더 안전해요.') : null,
+        Native.isNative ? ToggleRow('매일 자동 백업 (글만)', S.settings.autoBackup, v => { S.settings.autoBackup = v; touchSettings(); if (v) autoBackup(true); }, '앱을 닫을 때 모든 글 기록을 Documents > 노래일기 > 자동백업에 저장해요. 하루 한 파일씩 최근 14개를 남기고, 녹음은 빠져요.', 'save') : null),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '저장 공간')), StorageBlock()),
       h('div', { class: 'set-block' }, verLine, h('p', { class: 'hint' }, '이전 노래일기(웹)에서 ‘백업 파일 저장’으로 받은 파일도 ‘백업 불러오기’로 옮길 수 있어요. 그때 녹음은 파일이 옮겨지지 않아서 ‘보내기’로 받은 파일을 따로 불러와야 해요.'))),
     onClose: () => render()
@@ -3328,17 +3334,20 @@ function bindViewport() {
   const vv = window.visualViewport;
   let base = window.innerHeight, lastW = window.innerWidth;
   const upd = () => {
-    if (window.innerWidth !== lastW) { lastW = window.innerWidth; base = window.innerHeight; }
+    /* only a text field can bring the keyboard up; any other height change (split screen, pop-up view) is the window */
+    const typing = isTyping();
+    if (window.innerWidth !== lastW || !typing) { lastW = window.innerWidth; base = window.innerHeight; }
     const vh = vv ? vv.height : window.innerHeight;
     base = Math.max(base, window.innerHeight);
     const overlay = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
     const root = document.documentElement;
     root.style.setProperty('--kb', (overlay > 80 ? overlay : 0) + 'px');
     root.style.setProperty('--vvh', vh + 'px');
-    document.body.classList.toggle('kb', base - vh > 150);
+    document.body.classList.toggle('kb', typing && base - vh > 150);
   };
   if (vv) { vv.addEventListener('resize', upd); vv.addEventListener('scroll', upd); }
   window.addEventListener('resize', upd);
+  document.addEventListener('focusout', () => setTimeout(upd, 60));
   upd();
   /* keep what you're typing above the keyboard */
   document.addEventListener('focusin', ev => {
@@ -3389,7 +3398,7 @@ function bindGlobal() {
   let lastBack = 0;
   Native.onBack(() => {
     if (Sheets.length) { closeSheet(); return; }
-    if (isTyping()) { document.activeElement.blur(); return; }
+    if (isTyping()) { const kb = document.body.classList.contains('kb'); document.activeElement.blur(); if (kb) return; }
     if (S.tab !== 'today') { go('today'); return; }
     if (S.date !== todayStr()) { goDate(todayStr()); return; }
     if (Date.now() - lastBack < 2000) { flushWrites(); Native.minimize(); return; }
@@ -3401,8 +3410,13 @@ function bindGlobal() {
 }
 async function takeShared(list) {
   const files = [];
-  for (const f of list) { try { files.push(await Files.readShared(f)); } catch (e) { console.warn(e); } }
-  if (!files.length) { toast('받은 파일을 읽지 못했어요'); return; }
+  let big = 0;
+  for (const f of list) {
+    if (f && f.size > MAX_AUDIO) { big++; continue; }
+    try { files.push(await Files.readShared(f)); } catch (e) { console.warn(e); }
+  }
+  if (big) toast(`300MB보다 큰 파일 ${big}개는 넣을 수 없어요`);
+  if (!files.length) { if (!big) toast('받은 파일을 읽지 못했어요'); return; }
   if (S.mode !== 'ready') return;
   const date = S.tab === 'today' ? S.date : todayStr();
   openImport(date, files, 'share');
@@ -3416,7 +3430,11 @@ function afterLoad() {
   setTimeout(() => { if (!Sheets.length) offerDraft(); }, 800);
   if (!Native.isNative) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S };
   const R = S.settings.reminder;
-  if (R.on) Native.setReminder(true, R.h, R.m, REMIND_TEXT).catch(() => {});
+  if (R.on) Native.ensureReminder(R.h, R.m, REMIND_TEXT).then(r => {
+    if (r !== 'denied') return;
+    R.on = false; touchSettings();
+    toast('알림 권한이 꺼져 있어서 연습 알림을 껐어요', { action: '권한 켜기', onAction: () => Native.openAppSettings() });
+  }).catch(() => {});
   setTimeout(() => autoBackup(), 4000);
 }
 async function init() {
