@@ -8,6 +8,7 @@ Capacitor(Android) 앱 `com.songdiary.app`의 웹 소스와 APK 재빌드 도구
 - `www/` — 앱 화면 전체 (빌드 과정 없는 순수 HTML/CSS/JS)
   - `app.js` 화면·기록 로직
   - `songsearch.js` 노래 찾기 (초성·부분 입력 매칭, Apple Music 곡 검색)
+  - `scales.js` 스케일 연습 (스케일 목록, 계이름, 마이크 음정 인식)
   - `native.js` 저장소(IndexedDB)·백업·네트워크·안드로이드 연결
   - `fonts/`, `fonts.css` Gaegu · IBM Plex Sans KR (앱 안에 포함, 오프라인 동작)
 - `tools/build_apk.py` — 안드로이드 SDK 없이 APK를 다시 만드는 스크립트
@@ -27,6 +28,23 @@ Capacitor(Android) 앱 `com.songdiary.app`의 웹 소스와 APK 재빌드 도구
 금방 낡기 때문에 온라인 검색 + 내가 부른 노래 목록(오프라인) 조합을 택했어요.
 추가되는 용량은 코드 몇 KB뿐입니다.
 
+## 스케일 연습
+
+오늘 화면 ‘기초 연습’의 건반 버튼(스케일 같은 연습 항목에는 줄마다 ‘건반’)으로 엽니다.
+
+- 건반은 1옥 도(C3)부터 3옥 도(C5)까지. 누른 음을 ‘도’로 삼아 고른 스케일이 **한 번** 나오고,
+  자동으로 다음 음으로 넘어가지 않아요. ‘반음 ▲/▼’로 직접 올리고 내려요.
+- 기본 스케일: 5음, 3음, 내려오는 5음, 9음, 아르페지오, 옥타브 아르페지오,
+  옥타브 반복(도미솔도도도도도솔미도), 옥타브 점프, 단조 5음(단조 화음으로 시작).
+  계이름 버튼으로 **내 스케일**을 만들 수 있어요 (30개까지).
+- 빠르기 4단계, 시작 전 기준 화음, 지금 나오는 음 표시(건반·계이름). 3옥 도 위로 올라가는 음은
+  흐린 건반으로 보여 줌.
+- **따라 부르기 박자**: 피아노가 끝나면 같은 박자를 한 번 더 짚어 줘서, 듣고 따라 부르는 연습을 할 수 있음.
+- **내 음 보기**: 마이크로 부르는 음을 인식해 건반에 초록색으로, 목표 음과 맞는지 막대로 보여 줌
+  (YIN 음정 인식, 인터넷 불필요). 목소리가 피아노보다 늦는 만큼(약 0.25초) 이전 음과 비교하고,
+  한 옥타브 차이는 같은 음으로 봄.
+- 스케일 꼭대기 음을 그날 ‘최고음’으로 바로 기록하고, 기초 연습 항목에서 열면 1회 체크도 돼요.
+
 ## APK 다시 만들기
 
 ```bash
@@ -37,7 +55,7 @@ keytool -genkeypair -alias songdiary -keyalg RSA -keysize 2048 -validity 36500 \
 # 기존 APK의 안드로이드 부분 + www/ → 새 APK (정렬 + v2 서명)
 SONGDIARY_STOREPASS=... python3 songdiary/tools/build_apk.py \
   --base 노래일기-1.0.0.apk --www songdiary/www --keystore songdiary-release.p12 \
-  --version-name 1.1.0 --version-code 2 --out 노래일기-1.1.0.apk
+  --version-name 1.2.0 --version-code 3 --out 노래일기-1.2.0.apk
 ```
 
 - 필요한 것: Python 3.8+, `cryptography` 패키지

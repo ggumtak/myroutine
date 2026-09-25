@@ -6,6 +6,7 @@
 const PRESETS = [
   { id: 'five', name: '5음 스케일', steps: [0, 2, 4, 5, 7, 5, 4, 2, 0] },
   { id: 'three', name: '3음 스케일', steps: [0, 2, 4, 2, 0] },
+  { id: 'down5', name: '내려오는 5음', steps: [7, 5, 4, 2, 0] },
   { id: 'arp', name: '아르페지오', steps: [0, 4, 7, 4, 0] },
   { id: 'octarp', name: '옥타브 아르페지오', steps: [0, 4, 7, 12, 7, 4, 0] },
   { id: 'octrep', name: '옥타브 반복', steps: [0, 4, 7, 12, 12, 12, 12, 12, 7, 4, 0] },
@@ -24,7 +25,7 @@ const BUILD_KEYS = [-5, -3, -1, 0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19];
 
 /* ---------- pitch detection (YIN) for the singer's voice ---------- */
 /* buf: Float32Array of samples; returns frequency in Hz, or null for silence / no clear pitch */
-function detectPitch(buf, sr, minF = 65, maxF = 1100) {
+function detectPitch(buf, sr, minF = 65, maxF = 1400) {
   let rms = 0;
   for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
   rms = Math.sqrt(rms / buf.length);

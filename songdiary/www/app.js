@@ -169,7 +169,8 @@ function normScale(x) {
   x = x && typeof x === 'object' ? x : {};
   const custom = Array.isArray(x.custom) ? x.custom.filter(c => c && c.id && Array.isArray(c.steps) && c.steps.length >= 2).slice(0, 30)
     .map(c => ({ id: String(c.id), name: String(c.name || '내 스케일').slice(0, 20), steps: c.steps.slice(0, 40).map(n => clampInt(n, -12, 24, 0)) })) : [];
-  return { pat: typeof x.pat === 'string' && x.pat ? x.pat : 'five', bpm: clampInt(x.bpm, 40, 220, 100), chord: x.chord !== false, root: clampInt(x.root, SCALE_LO, SCALE_HI, 60), custom };
+  const pat = typeof x.pat === 'string' && (SK.PRESETS.some(p => p.id === x.pat) || custom.some(c => c.id === x.pat)) ? x.pat : 'five';
+  return { pat, bpm: clampInt(x.bpm, 40, 220, 100), chord: x.chord !== false, echo: !!x.echo, root: clampInt(x.root, SCALE_LO, SCALE_HI, 60), custom };
 }
 /* a link to a real song from the catalog (album art, 30-second preview) */
 function normCat(c) {
@@ -835,7 +836,9 @@ function closeSheet(obj, force) {
     if (top) { if (!top.sheet.contains(document.activeElement)) top.head.focus({ preventScroll: true }); }
     else if (p && p !== document.body && !/^(INPUT|TEXTAREA|SELECT)$/.test(p.tagName) && !isTyping()) {
       const k = ctlKey(p);
-      const el = p.isConnected ? p : k ? $$('button,[role="slider"],select', $('#view')).find(x => ctlKey(x) === k) : null;
+      const all = k && !p.isConnected ? $$('button,[role="slider"],select', $('#view')) : [];
+      const dr = /^dr-(.+)-[a-z]+$/.exec(k || '');
+      const el = p.isConnected ? p : all.find(x => ctlKey(x) === k) || (dr && all.find(x => (x.dataset.fk || '').startsWith(`dr-${dr[1]}-`)));
       if (el) el.focus({ preventScroll: true });
     }
   }, 300);
@@ -969,11 +972,16 @@ function WhatsNew() {
   const box = h('div', { class: 'banner news' },
     h('b', null, '새로워졌어요'),
     h('ul', null,
-      h('li', null, '‘기초 연습’의 건반(🎹)으로 스케일 연습을 할 수 있어요. 음을 누르면 그 음부터 5음 스케일, 아르페지오 같은 연습이 나와요.'),
+      h('li', null, '‘기초 연습’의 건반(🎹)으로 스케일 연습을 할 수 있어요. 음을 누르면 그 음부터 5음 스케일, 아르페지오 같은 연습이 나오고, 마이크로 내 음이 맞는지도 볼 수 있어요.'),
       !u.seen11 ? h('li', null, '노래 제목을 몇 글자만 쳐도 실제 노래를 찾아 줘요. 초성(ㅂㅇㄱ)이나 가수 이름으로도 돼요.') : null,
       !u.seen11 ? h('li', null, '‘모아보기’ 탭에서 그동안 쓴 일지를 한곳에 모아 읽을 수 있어요.') : null),
     h('div', { class: 'btn-row', style: 'margin-top:8px' },
-      h('button', { class: 'btn ink sm', onclick: () => { close(); box.remove(); openScaleTrainer({ date: todayStr() }); } }, icon('piano', 16), '건반 열어 보기'),
+      h('button', { class: 'btn ink sm', onclick: () => {
+        close();
+        const k = $('[data-fk="drills-keys"]'); /* the banner goes away: the sheet hands focus back to the section's keyboard button */
+        if (k) k.focus({ preventScroll: true });
+        box.remove(); openScaleTrainer({ date: todayStr() });
+      } }, icon('piano', 16), '건반 열어 보기'),
       h('button', { class: 'btn ghost sm', onclick: () => { close(); box.remove(); } }, '닫기')));
   return box;
 }
@@ -1343,9 +1351,10 @@ function openSongLink(key, onDone) {
 }
 
 /* ================= scale practice: press a key, hear the exercise start from it ================= */
+const mod12 = n => ((n % 12) + 12) % 12;
 /* piano-like tones on the Web Audio clock; everything scheduled can be stopped at once */
 const Synth = {
-  nodes: [], timers: [], master: null,
+  nodes: [], timers: [], master: null, seq: 0, onAbort: null,
   out(ctx) {
     if (!this.master || this.master.context !== ctx) {
       const comp = ctx.createDynamicsCompressor();
@@ -1359,67 +1368,109 @@ const Synth = {
     const f = 440 * Math.pow(2, (midi - 69) / 12);
     const g = ctx.createGain();
     g.connect(this.out(ctx));
-    const parts = [['triangle', 1, 1], ['sine', 2, 0.32], ['sine', 3, 0.08]].map(([type, mul, lv]) => {
-      const o = ctx.createOscillator(), og = ctx.createGain();
-      o.type = type; o.frequency.value = f * mul; og.gain.value = lv;
-      o.connect(og); og.connect(g);
-      o.start(t); o.stop(t + dur + 0.2);
-      return o;
-    });
+    /* low notes get more overtones: a phone speaker hardly plays the fundamental of a man's range */
+    const L = Math.max(0, Math.min(1, (67 - midi) / 19));
+    const os = [['triangle', 1, 1], ['sine', 2, 0.32 + 0.5 * L], ['sine', 3, 0.08 + 0.4 * L], ['sine', 4, 0.3 * L], ['sine', 5, 0.15 * L]]
+      .filter(p => p[2] > 0.01).map(([type, mul, lv]) => {
+        const o = ctx.createOscillator(), og = ctx.createGain();
+        o.type = type; o.frequency.value = f * mul; og.gain.value = lv;
+        o.connect(og); og.connect(g);
+        o.start(t); o.stop(t + dur + 0.2);
+        return o;
+      });
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
     g.gain.exponentialRampToValueAtTime(vol * 0.45, t + Math.min(0.4, dur * 0.7));
     g.gain.setValueAtTime(vol * 0.45, t + dur);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.15);
-    this.nodes.push({ g, os: parts, end: t + dur + 0.2 });
+    this.nodes.push({ g, os, t, end: t + dur + 0.2 });
     if (this.nodes.length > 80) this.nodes = this.nodes.filter(n => n.end > ctx.currentTime);
   },
+  /* a soft tick for the sing-back beats */
+  tick(ctx, t) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = 1760; o.connect(g); g.connect(this.out(ctx));
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    o.start(t); o.stop(t + 0.06);
+    this.nodes.push({ g, os: [o], t, end: t + 0.06 });
+  },
   one(midi) { const ctx = Sound.get(); if (ctx) this.tone(ctx, midi, ctx.currentTime + 0.02, 0.5, 0.25); },
-  /* steps: semitones above root. onStep(i) as each note starts, onEnd() after the last one */
-  play(root, steps, { bpm, chord, onStep, onEnd }) {
+  /* steps: semitones above root. onStep(i, pass) as each note is heard — pass 'play' for the piano, 'sing' for
+     the sing-back beats (echo); onEnd() after the last one, or when the playback is cut off. Resolves false if no sound. */
+  async play(root, steps, { bpm, chord, echo, onStep, onEnd }) {
     this.stop();
+    const my = ++this.seq;
     const ctx = Sound.get();
     if (!ctx) return false;
+    if (ctx.state !== 'running') { try { await ctx.resume(); } catch (e) { /* ignore */ } }
+    if (my !== this.seq) return false; /* stopped or replaced while the audio was waking up */
     const beat = 60 / bpm;
+    const lat = ctx.outputLatency || ctx.baseLatency || 0; /* highlights follow what is heard, not what is scheduled */
+    const at = t => Math.max(0, (t + lat - ctx.currentTime) * 1000);
     let t0 = ctx.currentTime + 0.08;
-    if (chord) { [0, 4, 7].forEach(o => this.tone(ctx, root + o, t0, beat * 1.7, 0.13)); t0 += beat * 2.2; }
-    const at = t => Math.max(0, (t - ctx.currentTime) * 1000);
+    if (chord) {
+      const minor = steps.some(s => mod12(s) === 3) && !steps.some(s => mod12(s) === 4);
+      [0, minor ? 3 : 4, 7].forEach(o => this.tone(ctx, root + o, t0, beat * 1.7, 0.13));
+      t0 += beat * 2.2;
+    }
     steps.forEach((off, i) => {
-      const t = t0 + i * beat, last = i === steps.length - 1;
-      this.tone(ctx, root + off, t, last ? beat * 1.8 : beat * 0.9, 0.27);
-      this.timers.push(setTimeout(() => onStep && onStep(i), at(t)));
+      const t = t0 + i * beat;
+      this.tone(ctx, root + off, t, i === steps.length - 1 ? beat * 1.8 : beat * 0.9, 0.27);
+      this.timers.push(setTimeout(() => onStep && onStep(i, 'play'), at(t)));
     });
-    this.timers.push(setTimeout(() => { this.timers = []; if (onEnd) onEnd(); }, at(t0 + (steps.length - 1) * beat + beat * 1.8)));
+    let end = t0 + (steps.length - 1) * beat + beat * 1.8;
+    if (echo) {
+      const s0 = end + beat * 0.6;
+      steps.forEach((off, i) => { const t = s0 + i * beat; this.tick(ctx, t); this.timers.push(setTimeout(() => onStep && onStep(i, 'sing'), at(t))); });
+      end = s0 + (steps.length - 1) * beat + beat * 1.5;
+    }
+    this.onAbort = onEnd || null;
+    this.timers.push(setTimeout(() => { this.timers = []; this.onAbort = null; if (onEnd) onEnd(); }, at(end)));
     return true;
   },
   stop() {
+    this.seq++;
     this.timers.forEach(clearTimeout); this.timers = [];
     const ctx = Sound.ctx;
     if (ctx) {
       const now = ctx.currentTime;
       this.nodes.forEach(n => {
-        try { n.g.gain.cancelScheduledValues(now); n.g.gain.setValueAtTime(Math.max(0.0001, n.g.gain.value), now); n.g.gain.exponentialRampToValueAtTime(0.0001, now + 0.06); } catch (e) { /* ignore */ }
+        try {
+          /* a note that hasn't started is simply cut off; ramping it from the default gain would pop */
+          if (n.t > now - 0.01) n.g.disconnect();
+          else { n.g.gain.cancelScheduledValues(now); n.g.gain.setValueAtTime(Math.max(0.0001, n.g.gain.value), now); n.g.gain.exponentialRampToValueAtTime(0.0001, now + 0.06); }
+        } catch (e) { /* ignore */ }
         n.os.forEach(o => { try { o.stop(now + 0.08); } catch (e) { /* already stopped */ } });
       });
     }
     this.nodes = [];
+    const cb = this.onAbort;
+    this.onAbort = null;
+    if (cb) cb();
   }
 };
 /* '내 음 보기': the pitch you sing, from the microphone */
 const Tuner = {
-  stream: null, src: null, an: null, raf: 0, buf: null, hist: [], last: 0,
-  async start(onPitch) {
+  stream: null, src: null, an: null, raf: 0, buf: null, hist: [], last: 0, gen: 0,
+  /* onPitch(midi or null) ~14 times a second; onLost() if the mic goes away by itself */
+  async start(onPitch, onLost) {
     const ctx = Sound.get();
     if (!ctx || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { const e = new Error('unsupported'); e.name = 'NotSupportedError'; throw e; }
-    /* echo cancellation keeps the piano coming out of the speaker from being taken for your voice */
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } });
-    this.stop();
-    this.stream = stream;
-    this.src = ctx.createMediaStreamSource(stream);
-    this.an = ctx.createAnalyser(); this.an.fftSize = 2048;
-    this.src.connect(this.an);
-    this.buf = new Float32Array(this.an.fftSize);
-    this.hist = [];
+    const gen = ++this.gen;
+    /* raw input like the recorder: echo cancellation would put Android into call mode (quieter, call-quality sound) */
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    if (gen !== this.gen) { stream.getTracks().forEach(t => t.stop()); return false; } /* switched off or closed while the mic was opening */
+    this.teardown();
+    try {
+      this.stream = stream;
+      this.src = ctx.createMediaStreamSource(stream);
+      this.an = ctx.createAnalyser(); this.an.fftSize = 2048;
+      this.src.connect(this.an);
+      this.buf = new Float32Array(this.an.fftSize);
+      this.hist = [];
+      const tr = stream.getAudioTracks()[0];
+      if (tr) tr.onended = () => { if (this.stream === stream) { this.stop(); if (onLost) onLost(); } };
+    } catch (e) { this.stop(); throw e; }
     const loop = ts => {
       if (!this.an) return;
       if (ts - this.last > 70) {
@@ -1434,139 +1485,227 @@ const Tuner = {
       this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
+    return true;
   },
-  stop() {
+  teardown() {
     cancelAnimationFrame(this.raf);
     try { if (this.src) this.src.disconnect(); } catch (e) { /* ignore */ }
-    if (this.stream) this.stream.getTracks().forEach(t => t.stop());
+    if (this.stream) this.stream.getTracks().forEach(t => { t.onended = null; t.stop(); });
     this.stream = this.src = this.an = null;
   },
+  stop() { this.gen++; this.teardown(); },
   on() { return !!this.stream; }
 };
 const TEMPOS = [['아주 느리게', 60], ['느리게', 80], ['보통', 100], ['빠르게', 130]];
+const BLACK_PC = [1, 3, 6, 8, 10];
 const scalePats = () => SK.PRESETS.concat(S.settings.scale.custom);
 function openScaleTrainer(o = {}) {
   const T = S.settings.scale;
   const date = o.date && o.date <= todayStr() ? o.date : todayStr();
-  let root = T.root, step = -1, playing = false, played = false, sung = null;
+  let root = T.root, step = -1, pass = '', playing = false, lastTop = null, sung = null;
+  const stepAt = [];
   const pat = () => scalePats().find(p => p.id === T.pat) || SK.PRESETS[0];
+  const best = bestHigh(), bestM = best ? best.m : null;
+  /* exercise chips: the name, and what is sung */
   const chips = h('div', { class: 'chips scroll sc-pats', role: 'group', 'aria-label': '스케일 고르기' });
+  const chipEls = new Map();
+  const drawChips = () => {
+    chipEls.clear();
+    chips.replaceChildren(...scalePats().map(p => {
+      const sung2 = p.steps.map(SK.degName).join(' ');
+      const b = h('button', { class: 'chip sc-chip', 'aria-pressed': String(T.pat === p.id), 'aria-label': `${p.name}: ${sung2}`, onclick: () => choose(p.id) }, h('b', null, p.name), h('small', { 'aria-hidden': 'true' }, sung2));
+      chipEls.set(p.id, b);
+      return b;
+    }), h('button', { class: 'chip sc-chip again', onclick: () => { stop(); openScaleBuilder(null, afterBuild); } }, icon('plus', 15), '만들기'));
+  };
+  /* the exercise as 계이름; the note being heard lights up */
   const stepsBox = h('div', { class: 'sc-steps' });
+  const drawSteps = () => {
+    const p = pat(), custom = T.custom.some(c => c.id === p.id);
+    stepsBox.replaceChildren(...[
+      h('span', { class: 'sc-turn', 'aria-live': 'polite' }),
+      h('span', { class: 'sc-seq', 'aria-hidden': 'true' }, p.steps.map(s => h('span', null, SK.degName(s)))),
+      custom ? h('button', { class: 'link', 'data-fk': 'sc-edit', onclick: () => { stop(); openScaleBuilder(T.custom.find(c => c.id === p.id), afterBuild); } }, '편집') : null].filter(Boolean));
+  };
+  const paintSteps = () => {
+    $$('.sc-seq > span', stepsBox).forEach((sp, i) => { sp.classList.toggle('cur', i === step); sp.classList.toggle('sing', i === step && pass === 'sing'); });
+    const turn = $('.sc-turn', stepsBox), txt = pass === 'sing' ? '따라 불러요' : '';
+    if (turn && turn.textContent !== txt) turn.textContent = txt;
+  };
   const nowBox = h('div', { class: 'sc-now' });
-  /* keyboard: 1옥 도 … 3옥 도 */
+  /* keyboard: 1옥 도 … 3옥 도 to press, plus dimmed keys where the chosen exercise goes past them */
   const W = 44, B = 28, keys = new Map();
   const kb = h('div', { class: 'kb' });
-  let whites = 0;
-  for (let m = SCALE_LO; m <= SCALE_HI; m++) {
-    const pc = m % 12, black = [1, 3, 6, 8, 10].includes(pc);
-    const k = h('button', { type: 'button', class: black ? 'kbk' : 'kw', 'aria-label': `${noteName(m)}부터 스케일`, onclick: () => start(m) },
-      black ? null : h('span', { class: 'kn' }, SK.SOLFA[pc]), !black && pc === 0 ? h('small', null, `${Math.floor(m / 12) - 3}옥`) : null);
-    k.style.left = (black ? whites * W - B / 2 : whites * W) + 'px';
-    if (!black) whites++;
-    keys.set(m, k);
-    kb.append(k);
-  }
-  kb.style.width = whites * W + 'px';
-  const best = bestHigh();
-  if (best && keys.has(best.m)) keys.get(best.m).classList.add('best');
   const kbWrap = h('div', { class: 'kb-wrap' }, kb);
-  const down = h('button', { class: 'btn soft', 'aria-label': '반음 내려서 다시', onclick: () => start(root - 1) }, icon('dn', 18), '반음');
-  const again = h('button', { class: 'btn ink sc-play', onclick: () => (playing ? stop() : start(root)) });
-  const up = h('button', { class: 'btn soft', 'aria-label': '반음 올려서 다시', onclick: () => start(root + 1) }, icon('up', 18), '반음');
-  const extra = h('div', { class: 'sc-extra' });
-  const tempo = h('div', { class: 'seg', role: 'group', 'aria-label': '빠르기' });
-  const drawTempo = () => tempo.replaceChildren(...TEMPOS.map(([l, v]) => segBtn(l, T.bpm === v, () => { T.bpm = v; touchSettings(); drawTempo(); })));
-  drawTempo();
-  const tuneBox = h('div', { class: 'tuner', hidden: true, role: 'status', 'aria-live': 'off' });
-  const drawTune = () => {
-    if (!Tuner.on()) { tuneBox.hidden = true; return; }
-    tuneBox.hidden = false;
-    const target = step >= 0 ? root + pat().steps[step] : null;
-    if (sung == null) { tuneBox.replaceChildren(h('span', { class: 'tn-note hint' }, target != null ? `지금 음: ${noteName(target)}` : '소리를 내 보세요'), h('span', { class: 'tn-meter' }, h('i', { class: 'tn-mid' }))); return; }
-    const m = Math.round(sung), cents = Math.round((sung - m) * 100);
-    const ok = target != null ? m === target && Math.abs(cents) <= 30 : Math.abs(cents) <= 15;
-    tuneBox.replaceChildren(
-      h('span', { class: 'tn-note' + (ok ? ' ok' : '') }, `내 음 ${noteName(m)}`, h('small', null, ` ${cents > 0 ? '+' : ''}${cents}`), target != null && m !== target ? h('small', null, ` · 목표 ${noteName(target)}`) : null),
-      h('span', { class: 'tn-meter' }, h('i', { class: 'tn-mid' }), h('b', { class: ok ? 'ok' : '', style: `left:${50 + Math.max(-50, Math.min(50, cents))}%` })));
+  let kbRange = '';
+  /* a key's left edge in the scroll box's coordinates (the box has side padding) */
+  const keyX = k => k.getBoundingClientRect().left - kbWrap.getBoundingClientRect().left + kbWrap.scrollLeft;
+  const centerRoot = () => { const k = keys.get(root); if (k) kbWrap.scrollLeft = Math.max(0, keyX(k) - kbWrap.clientWidth / 2 + W / 2); };
+  /* scroll so the keys from a to b are in view; if they don't all fit, start from a */
+  const showRange = (a, b) => {
+    const ka = keys.get(a) || keys.get(a - 1), kz = keys.get(b) || keys.get(b + 1);
+    if (!ka || !kz) return;
+    const l = keyX(ka) - 6, r = keyX(kz) + kz.offsetWidth + 6, vl = kbWrap.scrollLeft, vw = kbWrap.clientWidth;
+    if (l >= vl && r <= vl + vw) return;
+    const to = r - l <= vw ? (l < vl ? l : r - vw) : l;
+    kbWrap.scrollTo({ left: Math.max(0, to), behavior: smooth() });
   };
-  const tuneRow = ToggleRow('내 음 보기 (마이크)', false, async v => {
-    if (!v) { Tuner.stop(); sung = null; paint(); return; }
-    try { await Tuner.start(mm => { sung = mm; paintKeys(); drawTune(); }); paint(); }
-    catch (err) {
-      const sw = tuneRow.querySelector('.switch'); if (sw) sw.setAttribute('aria-checked', 'false');
-      const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
-      toast(denied ? '마이크 권한이 꺼져 있어요. 앱 설정에서 마이크를 허용해 주세요.' : '지금은 마이크를 쓸 수 없어요.', denied && Native.isNative ? { action: '설정 열기', onAction: () => Native.openAppSettings() } : {});
+  const drawKeys = () => {
+    const st = pat().steps;
+    let lo = Math.max(36, SCALE_LO + Math.min(0, ...st)), hi = Math.min(96, SCALE_HI + Math.max(0, ...st));
+    while (BLACK_PC.includes(lo % 12)) lo--;
+    while (BLACK_PC.includes(hi % 12)) hi++;
+    if (kbRange === `${lo}-${hi}`) return;
+    kbRange = `${lo}-${hi}`;
+    keys.clear();
+    kb.replaceChildren();
+    let whites = 0;
+    for (let m = lo; m <= hi; m++) {
+      const pc = m % 12, black = BLACK_PC.includes(pc), ext = m < SCALE_LO || m > SCALE_HI;
+      const cls = (black ? 'kbk' : 'kw') + (ext ? ' ext' : '') + (m === bestM ? ' best' : '');
+      const inner = [black ? null : h('span', { class: 'kn' }, SK.SOLFA[pc]), !black && pc === 0 ? h('small', null, `${Math.floor(m / 12) - 3}옥`) : null];
+      const k = ext ? h('span', { class: cls, 'aria-hidden': 'true' }, inner)
+        : h('button', { type: 'button', class: cls, 'aria-label': `${noteName(m)}부터 스케일${m === bestM ? ', 내 최고음' : ''}`, onclick: () => start(m) }, inner);
+      k.style.left = (black ? whites * W - B / 2 : whites * W) + 'px';
+      if (!black) whites++;
+      keys.set(m, k);
+      kb.append(k);
     }
-  }, '부르는 음을 건반에 초록색으로 보여 줘요. 이어폰을 끼면 더 정확해요.', 'mic');
+    kb.style.width = whites * W + 'px';
+    requestAnimationFrame(centerRoot);
+  };
   const paintKeys = () => {
     const cur = step >= 0 ? root + pat().steps[step] : null, s = sung != null ? Math.round(sung) : null;
     keys.forEach((k, m) => { k.classList.toggle('root', m === root); k.classList.toggle('on', m === cur); k.classList.toggle('sing', m === s); });
   };
-  const drawChips = () => {
-    chips.replaceChildren(...scalePats().map(p => h('button', { class: 'chip sm', 'aria-pressed': String(T.pat === p.id), onclick: () => { if (T.pat === p.id) return; T.pat = p.id; touchSettings(); stop(); drawChips(); paint(); } }, p.name)),
-      h('button', { class: 'chip sm again', onclick: () => openScaleBuilder(null, () => { drawChips(); paint(); }) }, icon('plus', 15), '만들기'));
+  const down = h('button', { class: 'btn soft', 'aria-label': '반음 내려서 다시', onclick: () => start(root - 1) }, icon('dn', 18), '반음');
+  const again = h('button', { class: 'btn ink sc-play', onclick: () => (playing ? stop() : start(root)) });
+  const up = h('button', { class: 'btn soft', 'aria-label': '반음 올려서 다시', onclick: () => start(root + 1) }, icon('up', 18), '반음');
+  const extra = h('div', { class: 'sc-extra' });
+  const tempo = h('div', { class: 'seg', role: 'group', 'aria-label': '빠르기' },
+    TEMPOS.map(([l, v]) => segBtn(l, T.bpm === v, ev => { T.bpm = v; touchSettings(); $$('button', tempo).forEach(b => b.setAttribute('aria-pressed', String(b === ev.currentTarget))); })));
+  /* '내 음 보기' */
+  const tuneBox = h('div', { class: 'tuner', hidden: true });
+  const setSwitch = on => { const sw = tuneRow.querySelector('.switch'); if (sw) sw.setAttribute('aria-checked', String(on)); };
+  const drawTune = () => {
+    if (!Tuner.on()) { tuneBox.hidden = true; return; }
+    tuneBox.hidden = false;
+    /* the note to be on: the one that started ~¼ s ago (the voice and the detector both trail the piano) */
+    let js = step;
+    const lag = performance.now() - 250;
+    while (js > 0 && stepAt[js] > lag) js--;
+    const listening = playing && T.echo && pass !== 'sing';
+    const target = js >= 0 && !listening ? root + pat().steps[js] : null;
+    const meter = (dev, ok) => h('span', { class: 'tn-meter' }, h('i', { class: 'tn-mid' }), dev == null ? null : h('b', { class: ok ? 'ok' : '', style: `left:${50 + Math.max(-100, Math.min(100, dev)) / 2}%` }));
+    if (listening) { tuneBox.replaceChildren(h('span', { class: 'tn-note hint' }, '피아노를 듣고, 이어서 따라 불러요'), meter(null)); return; }
+    if (sung == null) { tuneBox.replaceChildren(h('span', { class: 'tn-note hint' }, target != null ? `목표 ${noteName(target)} · 소리를 내 보세요` : '소리를 내 보세요'), meter(null)); return; }
+    const m = Math.round(sung);
+    if (target != null) {
+      /* octave-folded: a note sung an octave off (or the detector jumping an octave) is still the right note */
+      const dev = Math.round((((sung - target) % 12 + 18) % 12 - 6) * 100), ok = Math.abs(dev) <= 30;
+      const word = ok ? '딱 맞아요' : Math.abs(dev) >= 100 ? `${Math.round(Math.abs(dev) / 100)}반음 ${dev > 0 ? '높아요' : '낮아요'}` : dev > 0 ? '조금 높아요' : '조금 낮아요';
+      tuneBox.replaceChildren(h('span', { class: 'tn-note' + (ok ? ' ok' : '') }, word, h('small', null, ` · 내 음 ${noteName(m)} · 목표 ${noteName(target)}`)), meter(dev, ok));
+    } else {
+      const cents = Math.round((sung - m) * 100), ok = Math.abs(cents) <= 15;
+      tuneBox.replaceChildren(h('span', { class: 'tn-note' + (ok ? ' ok' : '') }, `내 음 ${noteName(m)}`, h('small', null, ` ${ok ? '정확해요' : cents > 0 ? '살짝 높아요' : '살짝 낮아요'}`)), meter(cents * 2, ok));
+    }
   };
+  const tuneRow = ToggleRow('내 음 보기 (마이크)', false, async v => {
+    if (!v) { Tuner.stop(); sung = null; paint(); return; }
+    try {
+      const ok = await Tuner.start(mm => { sung = mm; paintKeys(); drawTune(); }, () => { setSwitch(false); sung = null; paint(); toast('마이크가 끊겼어요'); });
+      if (ok && !tuneRow.isConnected) Tuner.stop();
+      paint();
+    } catch (err) {
+      setSwitch(false);
+      const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+      toast(denied ? '마이크 권한이 꺼져 있어요. 앱 설정에서 마이크를 허용해 주세요.' : '지금은 마이크를 쓸 수 없어요.', denied && Native.isNative ? { action: '설정 열기', onAction: () => Native.openAppSettings() } : {});
+    }
+  }, '부르는 음을 건반에 초록색으로, 맞는지는 아래 막대로 보여 줘요. 이어폰을 끼면 더 정확해요.', 'mic');
   const paint = () => {
-    const p = pat(), top = root + Math.max(...p.steps), custom = T.custom.some(c => c.id === p.id);
-    stepsBox.replaceChildren(...[h('span', { class: 'sc-seq', 'aria-label': `${p.name}: ${p.steps.map(SK.degName).join(' ')}` }, p.steps.map((s, i) => h('span', { class: i === step ? 'cur' : '', 'aria-hidden': 'true' }, SK.degName(s)))),
-      custom ? h('button', { class: 'link', onclick: () => openScaleBuilder(T.custom.find(c => c.id === p.id), () => { drawChips(); paint(); }) }, '편집') : null].filter(Boolean));
+    const p = pat(), top = root + Math.max(...p.steps);
     nowBox.replaceChildren(h('b', null, noteName(root)), h('span', null, ` (${noteSci(root)})에서 시작`), h('span', { class: 'hint' }, ` · 가장 높은 음 ${noteName(top)}`));
-    again.replaceChildren(...(playing ? [icon('stop', 18), '멈추기'] : [icon('play', 18), played ? '다시' : '듣기']));
+    again.replaceChildren(...(playing ? [icon('stop', 18), '멈추기'] : [icon('play', 18), lastTop != null ? '다시' : '듣기']));
     down.disabled = root <= SCALE_LO; up.disabled = root >= SCALE_HI;
+    /* buttons that change what they do keep the focus */
+    const a = document.activeElement, fk = a && extra.contains(a) ? a.dataset.fk : null;
     const e = S.days[date];
     const dl = o.drillId ? drillList(date).find(d => d.id === o.drillId) : null;
+    const canHigh = lastTop != null && lastTop >= HIGH_MIN && lastTop <= HIGH_MAX && !(e && e.high != null && e.high >= lastTop);
     extra.replaceChildren(...[
-      played && !(e && e.high != null && e.high >= top) ? h('button', { class: 'btn soft sm', onclick: () => { const d = ensureDay(date); d.high = top; touch(date); toast(`${fmtMD(date)} 최고음: ${noteName(top)}`); paint(); } }, icon('flag', 16), `최고음으로 적기: ${noteName(top)}`) : null,
-      dl ? h('button', { class: 'btn blue sm', disabled: dl.done >= dl.target, onclick: () => { bump(date, dl.id, 1); paint(); } }, dl.done >= dl.target ? [icon('check', 16), `${dl.name} 다 했어요`] : [icon('plus', 16), `${dl.name} 1회 체크 (${dl.done}/${dl.target})`]) : null].filter(Boolean));
-    paintKeys(); drawTune();
+      dl ? h('button', { class: 'btn blue sm', 'data-fk': 'sc-drill', disabled: dl.done >= dl.target, onclick: () => { bump(date, dl.id, 1); paint(); } }, dl.done >= dl.target ? [icon('check', 16), `${dl.name} 다 했어요`] : [icon('plus', 16), `${dl.name} 1회 체크 (${dl.done}/${dl.target})`]) : null,
+      canHigh ? h('button', { class: 'btn soft sm', 'data-fk': 'sc-high', onclick: () => {
+        const d = ensureDay(date), prev = d.high, v = lastTop;
+        d.high = v; touch(date); softRender(); paint();
+        toast(`${fmtMD(date)} 최고음: ${noteName(v)}`, { action: '되돌리기', onAction: () => { const d2 = ensureDay(date); d2.high = prev; touch(date); softRender(); paint(); } });
+      } }, icon('flag', 16), `최고음으로 적기: ${noteName(lastTop)}`) : null].filter(Boolean));
+    if (fk) { const el = $(`[data-fk="${fk}"]`, extra); (el && !el.disabled ? el : again).focus({ preventScroll: true }); }
+    paintSteps(); paintKeys(); drawTune();
   };
-  function start(m) {
+  const choose = id => {
+    if (T.pat === id) return;
+    T.pat = id; touchSettings();
+    stop();
+    chipEls.forEach((b, k) => b.setAttribute('aria-pressed', String(k === id)));
+    drawSteps(); drawKeys(); paint();
+  };
+  const afterBuild = () => { drawChips(); drawSteps(); drawKeys(); paint(); };
+  async function start(m) {
     if (m < SCALE_LO || m > SCALE_HI) return;
     root = m;
     if (T.root !== m) { T.root = m; touchSettings(); }
     Player.stopAll();
-    step = -1;
-    playing = Synth.play(root, pat().steps, { bpm: T.bpm, chord: T.chord, onStep: i => { step = i; paint(); }, onEnd: () => { playing = false; step = -1; paint(); } });
-    if (!playing) { toast('이 폰에서는 소리를 낼 수 없어요'); return; }
-    played = true;
+    const p = pat();
+    step = -1; pass = '';
+    lastTop = root + Math.max(...p.steps);
+    playing = true;
     paint();
-    const k = keys.get(root), r = k.getBoundingClientRect(), wr = kbWrap.getBoundingClientRect();
-    if (r.left < wr.left + 8 || r.right > wr.right - 8) kbWrap.scrollBy({ left: r.left - wr.left - wr.width / 2 + r.width / 2, behavior: smooth() });
+    showRange(root + Math.min(0, ...p.steps), lastTop);
+    const ok = await Synth.play(root, p.steps, {
+      bpm: T.bpm, chord: T.chord, echo: T.echo,
+      onStep: (i, ps) => { step = i; pass = ps; stepAt[i] = performance.now(); paintSteps(); paintKeys(); drawTune(); },
+      onEnd: () => { playing = false; step = -1; pass = ''; paint(); }
+    });
+    if (!ok && playing && root === m && !Sound.get()) { playing = false; paint(); toast('이 폰에서는 소리를 낼 수 없어요'); }
   }
-  function stop() { Synth.stop(); playing = false; step = -1; paint(); }
-  const onVis = () => { if (document.visibilityState === 'hidden') { stop(); Tuner.stop(); const sw = tuneRow.querySelector('.switch'); if (sw) sw.setAttribute('aria-checked', 'false'); sung = null; drawTune(); } };
+  function stop() { Synth.stop(); playing = false; step = -1; pass = ''; paint(); }
+  const onVis = () => { if (document.visibilityState === 'hidden') { stop(); if (Tuner.on()) { Tuner.stop(); setSwitch(false); sung = null; drawTune(); } } };
   document.addEventListener('visibilitychange', onVis);
-  drawChips(); paint();
+  drawChips(); drawSteps(); drawKeys(); paint();
   openSheet({
     title: '스케일 연습',
     body: h('div', { class: 'scale' },
-      chips, stepsBox, nowBox, kbWrap,
+      chips, stepsBox, nowBox, kbWrap, tuneBox,
       h('div', { class: 'sc-ctrl' }, down, again, up),
       extra,
       h('div', { class: 'field', style: 'margin:16px 0 4px' }, h('span', { class: 'lbl' }, '빠르기'), tempo),
       ToggleRow('시작 전에 기준 화음', T.chord, v => { T.chord = v; touchSettings(); }, '스케일 전에 첫 음의 화음을 들려줘요', 'music'),
-      tuneRow, tuneBox,
-      h('p', { class: 'hint', style: 'margin-top:8px' }, '건반을 누르면 그 음을 ‘도’로 삼아 스케일이 한 번 나와요. 따라 부른 다음 ‘반음’ 버튼으로 반음씩 올리거나 내려 보세요.')),
+      ToggleRow('따라 부르기 박자', T.echo, v => { T.echo = v; touchSettings(); }, '피아노가 끝나면 같은 박자를 한 번 더 짚어 줘요. 들은 다음 따라 부르는 연습이에요.', 'repeat'),
+      tuneRow,
+      h('p', { class: 'hint', style: 'margin-top:8px' }, '건반을 누르면 그 음을 ‘도’로 삼아 스케일이 한 번 나와요. 따라 부른 다음 ‘반음’ 버튼으로 반음씩 올리거나 내려 보세요.', bestM != null ? ' 빨간 점은 지금까지 낸 최고음이에요.' : '')),
     onClose: () => { Synth.stop(); Tuner.stop(); document.removeEventListener('visibilitychange', onVis); }
   });
-  /* the last key you used, in view */
-  requestAnimationFrame(() => { const k = keys.get(root); if (k) kbWrap.scrollLeft = Math.max(0, k.offsetLeft - kbWrap.clientWidth / 2 + W / 2); });
+  requestAnimationFrame(centerRoot);
 }
 /* your own exercise, built from the notes as sung from 도 */
 function openScaleBuilder(existing, onDone) {
   const T = S.settings.scale;
-  let steps = existing ? existing.steps.slice() : [];
-  const nameInp = h('input', { class: 'input', value: existing ? existing.name : `내 스케일 ${T.custom.length + 1}`, maxlength: 20, 'aria-label': '스케일 이름' });
+  if (!existing && T.custom.length >= 30) { toast('내 스케일은 30개까지 만들 수 있어요. 안 쓰는 걸 지우고 만들어 주세요.'); return; }
+  let steps = existing ? existing.steps.slice() : [], saved = false, previewing = false;
+  const origName = existing ? existing.name : `내 스케일 ${T.custom.length + 1}`;
+  const nameInp = h('input', { class: 'input', value: origName, maxlength: 20, 'aria-label': '스케일 이름' });
   const seq = h('div', { class: 'sc-steps build', 'aria-live': 'polite' });
   const drawSeq = () => seq.replaceChildren(steps.length ? h('span', { class: 'sc-seq' }, steps.map(x => h('span', null, SK.degName(x)))) : h('span', { class: 'hint' }, '아래 음을 부를 순서대로 눌러 주세요.'));
   drawSeq();
   const pad = h('div', { class: 'sc-pad' }, SK.BUILD_KEYS.map(x => h('button', { class: 'btn soft sm' + (x === 0 ? ' do' : ''), onclick: () => { if (steps.length >= 40) { toast('40음까지 넣을 수 있어요'); return; } steps.push(x); Synth.one(60 + x); drawSeq(); } }, SK.degName(x))));
   let s = null;
+  const dirty = () => JSON.stringify(steps) !== JSON.stringify(existing ? existing.steps : []) || nameInp.value.trim() !== origName;
   const save = h('button', { class: 'btn ink', onclick: () => {
     if (steps.length < 2) { toast('음을 두 개 이상 넣어 주세요'); return; }
     const name = nameInp.value.trim() || '내 스케일';
     if (existing) Object.assign(existing, { name, steps: steps.slice() });
     else { const c = { id: uid('sc'), name, steps: steps.slice() }; T.custom.push(c); T.pat = c.id; }
+    saved = true;
     touchSettings(); closeSheet(s, true); toast(`‘${name}’ 스케일을 저장했어요`); onDone();
   } }, '저장');
   s = openSheet({
@@ -1577,16 +1716,18 @@ function openScaleBuilder(existing, onDone) {
         h('div', { class: 'btn-row' },
           h('button', { class: 'btn ghost sm', onclick: () => { steps.pop(); drawSeq(); } }, icon('undo', 16), '하나 지우기'),
           h('button', { class: 'btn ghost sm', onclick: () => { steps = []; drawSeq(); } }, '모두 지우기'),
-          h('button', { class: 'btn soft sm', onclick: () => { if (steps.length) Synth.play(60, steps, { bpm: T.bpm, chord: false }); } }, icon('play', 16), '들어 보기'))),
+          h('button', { class: 'btn soft sm', onclick: () => { if (!steps.length) return; previewing = true; Synth.play(60, steps, { bpm: T.bpm, chord: false }); } }, icon('play', 16), '들어 보기'))),
       pad,
       h('p', { class: 'hint', style: 'margin-top:10px' }, '‘도’는 건반에서 누른 음이에요. ‘높은도’는 한 옥타브 위, ‘낮은시’는 도 바로 아래예요.'),
       existing ? h('button', { class: 'btn ghost danger wide', style: 'margin-top:12px', onclick: () => confirmSheet({ title: '이 스케일을 지울까요?', text: `‘${existing.name}’을(를) 지워요.`, ok: '지우기', danger: true, onOk: () => {
         T.custom = T.custom.filter(c => c.id !== existing.id);
         if (T.pat === existing.id) T.pat = 'five';
+        saved = true;
         touchSettings(); closeSheet(s, true); onDone();
       } }) }, icon('trash', 18), '이 스케일 지우기') : null),
     foot: [save],
-    onClose: () => Synth.stop()
+    beforeClose: () => saved || guardUnsaved(dirty, () => { saved = true; closeSheet(s, true); }),
+    onClose: () => { if (previewing) Synth.stop(); }
   });
 }
 
@@ -1752,9 +1893,9 @@ function DrillSec(date) {
   const reps = counted.reduce((a, d) => a + Math.min(d.done, d.target), 0), total = counted.reduce((a, d) => a + d.target, 0);
   const ordered = list; /* settings order: a row never moves under the finger when it completes */
   return h('div', { class: 'sec drills' + (all ? ' all' : ''), id: 'sec-drills' },
-    h('div', { class: 'sec-h' }, h('h2', null, '기초 연습'), counted.length ? h('span', { class: 'sec-note' }, all ? '모두 완료!' : `${counted.length}개 중 ${doneN}개 완료`) : null, h('span', { class: 'sp' }),
+    h('div', { class: 'sec-h' }, h('h2', null, '기초 연습'), counted.length ? h('span', { class: 'sec-note' }, all ? '모두 완료!' : `${doneN}/${counted.length} 완료`) : null, h('span', { class: 'sp' }),
       h('button', { class: 'icon-btn', 'aria-label': S.settings.sound ? '체크 소리 끄기' : '체크 소리 켜기', onclick: () => { S.settings.sound = !S.settings.sound; touchSettings(); render(); toast(S.settings.sound ? '체크할 때 음이 울려요' : '체크 소리를 껐어요'); } }, icon(S.settings.sound ? 'sound' : 'mute', 20)),
-      h('button', { class: 'icon-btn', 'aria-label': '스케일 건반 열기', onclick: () => openScaleTrainer({ date }) }, icon('piano', 21)),
+      h('button', { class: 'icon-btn', 'data-fk': 'drills-keys', 'aria-label': '스케일 연습 건반 열기', onclick: () => openScaleTrainer({ date }) }, icon('piano', 21)),
       h('button', { class: 'btn ghost sm', onclick: openDrillEditor }, '편집')),
     list.length ? h('div', { class: 'drill-prog', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': reps, 'aria-label': `기초 연습 ${reps}/${total}회` }, h('i', { style: `width:${total ? (reps / total * 100).toFixed(1) : 0}%` })) : null,
     all ? Stamp(S.justDone === date) : null,
@@ -1784,12 +1925,12 @@ function DrillRow(date, d) {
       h('span', { class: 'drill-rec' }, todayBest != null ? h('span', null, `오늘 최고 ${fmtSec(todayBest)}`) : null, best ? h('span', null, `최고 기록 ${fmtSec(best.sec)}`) : null),
       h('div', { class: 'drill-acts' },
         h('button', { class: 'btn soft sm sq', 'data-fk': `dr-${d.id}-minus`, 'aria-label': `${d.name} 체크 하나 지우기`, disabled: d.done === 0, onclick: () => bump(date, d.id, -1) }, icon('minus', 18)),
-        SCALE_DRILL.test(d.name) ? h('button', { class: 'btn soft sm', 'data-fk': `dr-${d.id}-keys`, 'aria-label': `${d.name} 건반 열기`, onclick: () => openScaleTrainer({ date, drillId: d.id }) }, icon('piano', 18), '건반') : null,
+        SCALE_DRILL.test(d.name) ? h('button', { class: 'btn soft sm' + (d.timed ? ' sq' : ''), 'data-fk': `dr-${d.id}-keys`, 'aria-label': `${d.name} 건반으로 연습`, onclick: () => openScaleTrainer({ date, drillId: d.id }) }, icon('piano', 18), d.timed ? null : '건반') : null,
         d.timed ? h('button', { class: 'btn soft sm', 'data-fk': `dr-${d.id}-timer`, 'aria-label': `${d.name} 시간 재기`, onclick: () => openStopwatch(date, d.id) }, icon('timer', 18), '재기') : null,
         h('button', { class: 'btn blue sm btn-check', 'data-fk': `dr-${d.id}-plus`, 'aria-label': complete ? `${d.name} 다 했어요` : `${d.name} 1회 체크`, disabled: complete, onclick: () => bump(date, d.id, 1) }, complete ? [icon('check', 18), '다 했어요'] : [icon('plus', 18), '1회']))));
 }
 /* drills sung on scales get a 건반 button */
-const SCALE_DRILL = /스케일|음계|아르페|립\s*트릴|허밍|사이렌|scale|arpeg/i;
+const SCALE_DRILL = /스케일|음계|아르페|트릴|립\s*롤|허밍|사이렌|옥타브|모음|scale|arpeg|trill|lip\s*roll|siren|humming/i;
 function bump(date, id, delta, sec) {
   const t = S.settings.drills.find(x => x.id === id);
   const e = ensureDay(date);
