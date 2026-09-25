@@ -686,3 +686,4 @@ body.np main{padding-bottom:calc(var(--tabbar-h) + 100px + var(--sab))}
 body.np .toast{bottom:calc(var(--tabbar-h) + 70px + var(--sab))}
 body.kb .now-playing{display:none}
 .wk.sel{outline:2px solid var(--ink);outline-offset:1px}
+.page > .month-stats:first-child{border-top:0}

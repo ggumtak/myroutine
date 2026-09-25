@@ -2432,7 +2432,8 @@ function CalendarView() {
 function drawCalBody(body) {
   const q = S.cal.q.trim();
   if (q) { body.replaceChildren(SearchResults(q)); return; }
-  body.replaceChildren(...[MonthPanel(), DayPreview(S.cal.sel), MonthStats(`${S.cal.y}-${pad(S.cal.m + 1)}-`), MonthList(), WeeksStrip()].filter(Boolean));
+  const stats = MonthStats(`${S.cal.y}-${pad(S.cal.m + 1)}-`);
+  body.replaceChildren(...[MonthPanel(), DayPreview(S.cal.sel), stats ? h('div', { class: 'page' }, stats) : null, MonthList(), WeeksStrip()].filter(Boolean));
 }
 /* after picking a day, make sure its preview is on screen */
 function revealPreview(start) {
