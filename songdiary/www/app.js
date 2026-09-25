@@ -43,6 +43,8 @@ const fmtHM = ts => { const d = new Date(ts); const hh = d.getHours(); return `$
 const fmtClock = ms => { const s = Math.max(0, Math.floor(ms / 1000)); const hh = Math.floor(s / 3600), mm = Math.floor(s % 3600 / 60), ss = s % 60; return hh ? `${hh}:${pad(mm)}:${pad(ss)}` : `${mm}:${pad(ss)}`; };
 const normKey = t => String(t || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const clone = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
+/* 을/를 after a word: 긁힘을, 쉰 소리를 */
+const eulReul = w => { const c = String(w).charCodeAt(String(w).length - 1); return c >= 0xAC00 && c <= 0xD7A3 && (c - 0xAC00) % 28 ? '을' : '를'; };
 const uid = p => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const clampInt = (v, lo, hi, d) => { v = parseInt(v, 10); return isNaN(v) ? d : Math.max(lo, Math.min(hi, v)); };
 /* 'Remove animations' on the phone turns smooth scrolling off too */
@@ -150,7 +152,7 @@ const SCALE_LO = 48, SCALE_HI = 72; /* 1옥 도 … 3옥 도 */
 const PR = window.Practice;
 const SORE = ['쉰 소리', '따가움', '긁힘'];
 const TAG_FLIP = '뒤집힘', TAG_TIGHT = '조임';
-const PH_TAG = { '뒤집힘': '뒤집힌 가사/단어  예: 사랑해의 ‘해’', '조임': '조인 가사/단어  예: 너를의 ‘를’' };
+const PH_TAG = { '뒤집힘': '뒤집힌 가사/단어  예: 사랑해 (‘해’에서)', '조임': '조인 가사/단어  예: 너를 (‘를’에서)' };
 
 /* ================= state ================= */
 const S = {
@@ -1043,7 +1045,7 @@ function startTimer(date) {
   render();
   const e = S.days[date];
   if (e && e.goal.trim()) toast('연습 시간을 재기 시작했어요. 20분·25분에 쉬라고 알려 줄게요');
-  else toast('연습 시간을 재기 시작했어요. 오늘 집중할 것 1개 정해 볼까요?', { action: '고르기', onAction: () => focusField('cue-0') });
+  else toast('연습 시간을 재기 시작했어요. 오늘 집중할 것 1개 정해 볼까요?', { action: '고르기', onAction: () => focusField('cue-0') }); /* focusField picks the open list's row */
 }
 /* quiet: the caller shows its own message. Returns the minutes added. */
 function stopTimer(o = {}) {
@@ -1080,10 +1082,20 @@ function addWater(date) {
   toast(`물 ${d.water}잔`);
 }
 const MIN_MS = 60000;
+/* doing an exercise while '쉬는 중' means singing again */
+function resumeQuiet() {
+  const tm = lsGet(LS_TIMER, null);
+  if (!tm || !tm.rest) return;
+  tm.seg = Date.now(); tm.rest = 0; tm.cue = '';
+  lsSet(LS_TIMER, tm);
+}
 /* 멈춤 규칙 3: 20·25분 부르면 쉬라고, 쉬는 동안 5·10분에 알려요. Each level fires once; after the phone slept only the latest one. */
 function timerCue(tm, now) {
   if (!tm.seg) { tm.seg = now; tm.rest = 0; tm.cue = ''; lsSet(LS_TIMER, tm); return; } /* started before this version */
   const rank = { '': 0, s20: 1, r5: 1, s25: 2, r10: 2 };
+  if (tm.rest && now - tm.rest >= 15 * MIN_MS && tm.cue === 'r10') { /* no answer to '다시 불러 볼까요?': count singing from the end of the rest */
+    tm.seg = tm.rest + 10 * MIN_MS; tm.rest = 0; tm.cue = ''; lsSet(LS_TIMER, tm);
+  }
   let lvl = '';
   if (tm.rest) { const r = now - tm.rest; lvl = r >= 10 * MIN_MS ? 'r10' : r >= 5 * MIN_MS ? 'r5' : ''; }
   else { const g = now - tm.seg; lvl = g >= 25 * MIN_MS ? 's25' : g >= 20 * MIN_MS ? 's20' : ''; }
@@ -1181,8 +1193,13 @@ const isLight = g => g === 'r1' || g === 'r2' || g === 'r3';
 /* 멈춤 규칙 2: the day before ended with 목 상태 5 or lower → only steps ①~③ today (returns that score) */
 function restInfo(date) { const y = S.days[addDays(date, -1)]; return y && y.after != null && y.after <= 5 ? y.after : null; }
 const restDay = date => restInfo(date) != null;
+/* was the routine part of that day (today: the settings; a past day: its own record) */
+const routineOnDay = date => (date === todayStr() ? routineOn() : !!(S.days[date] && Object.keys(S.days[date].drills || {}).some(k => PR.BY_ID[k])));
 /* does this item count toward the day's progress and stamp */
-const counts = (date, id) => !(routineOn() && restDay(date)) || isLight(grpOf(id));
+function counts(date, id) {
+  if (!restDay(date) || !routineOnDay(date)) return true;
+  return PR.BY_ID[id] ? isLight(PR.BY_ID[id].g) : id === hissId() || id === pantId();
+}
 /* 히싱: 1주 20초 → 2주 25초 → 3주 30초 → 4주 35초, counted from the day the routine was added */
 function hissWeek(date) {
   const r = S.settings.routine;
@@ -1223,7 +1240,10 @@ function soreSince(date) {
     if (clear(d)) break;
     if (sym(d)) { F = d; n++; gap = 0; } else if (++gap > 7) break;
   }
-  return daysBetween(F, L) >= 13 && n >= 3 ? { since: F, n } : null;
+  if (daysBetween(F, L) < 13 || n < 3) return null;
+  const seen = new Set();
+  for (let d = F; d <= L; d = addDays(d, 1)) { const e = S.days[d]; if (e) { e.throat.forEach(t => { if (SORE.includes(t)) seen.add(t); }); if (e.stop) seen.add('긁히거나 따끔함'); } }
+  return { since: F, n, what: SORE.concat('긁히거나 따끔함').filter(t => seen.has(t)) };
 }
 function uiSet(k, v) { const u = lsGet(LS_UI, {}); if (v == null) delete u[k]; else u[k] = v; lsSet(LS_UI, u); }
 function bestTime(id) {
@@ -1650,10 +1670,11 @@ const scalePats = () => SK.PRESETS.concat(S.settings.scale.custom);
 function openScaleTrainer(o = {}) {
   const T = S.settings.scale;
   const date = o.date && o.date <= todayStr() ? o.date : todayStr();
-  if (o.pat && o.pat !== T.pat && scalePats().some(p => p.id === o.pat)) { T.pat = o.pat; touchSettings(); } /* 루틴: 빨대 5음, 모음 찾기 */
+  /* 루틴 (빨대 5음, 모음 찾기) opens on 5음 스케일 without changing the exercise you picked last */
+  let curPat = o.pat && scalePats().some(p => p.id === o.pat) ? o.pat : T.pat;
   let root = T.root, step = -1, pass = '', playing = false, lastTop = null, sung = null;
   const stepAt = [];
-  const pat = () => scalePats().find(p => p.id === T.pat) || SK.PRESETS[0];
+  const pat = () => scalePats().find(p => p.id === curPat) || SK.PRESETS[0];
   const best = bestHigh(), bestM = best ? best.m : null;
   /* exercise chips: the name, and what is sung */
   const chips = h('div', { class: 'chips scroll sc-pats', role: 'group', 'aria-label': '스케일 고르기' });
@@ -1662,7 +1683,7 @@ function openScaleTrainer(o = {}) {
     chipEls.clear();
     chips.replaceChildren(...scalePats().map(p => {
       const sung2 = p.steps.map(SK.degName).join(' ');
-      const b = h('button', { class: 'chip sc-chip', 'aria-pressed': String(T.pat === p.id), 'aria-label': `${p.name}: ${sung2}`, onclick: () => choose(p.id) }, h('b', null, p.name), h('small', { 'aria-hidden': 'true' }, sung2));
+      const b = h('button', { class: 'chip sc-chip', 'aria-pressed': String(curPat === p.id), 'aria-label': `${p.name}: ${sung2}`, onclick: () => choose(p.id) }, h('b', null, p.name), h('small', { 'aria-hidden': 'true' }, sung2));
       chipEls.set(p.id, b);
       return b;
     }), h('button', { class: 'chip sc-chip again', onclick: () => { stop(); openScaleBuilder(null, afterBuild); } }, icon('plus', 15), '만들기'));
@@ -1792,15 +1813,17 @@ function openScaleTrainer(o = {}) {
     paintSteps(); paintKeys(); drawTune();
   };
   const choose = id => {
-    if (T.pat === id) return;
-    T.pat = id; touchSettings();
+    if (curPat === id) return;
+    curPat = id;
+    if (T.pat !== id) { T.pat = id; touchSettings(); } /* only a pick you made is kept for next time */
     stop();
     chipEls.forEach((b, k) => b.setAttribute('aria-pressed', String(k === id)));
     drawSteps(); drawKeys(); paint();
   };
-  const afterBuild = () => { drawChips(); drawSteps(); drawKeys(); paint(); };
+  const afterBuild = () => { curPat = T.pat; drawChips(); drawSteps(); drawKeys(); paint(); };
   async function start(m) {
     if (m < SCALE_LO || m > SCALE_HI) return;
+    resumeQuiet();
     root = m;
     if (T.root !== m) { T.root = m; touchSettings(); }
     Player.stopAll();
@@ -1992,39 +2015,44 @@ function TimerSec(date, e, isToday) {
 /* render and bring one control into view (a field in 오늘의 기록, a cue chip …) */
 function focusField(fk) {
   if (S.tab !== 'today') { S.tab = 'today'; }
+  if (fk === 'cue-0' && lsGet(LS_UI, {}).cueOpen) fk = 'cue-row-0'; /* the list is open instead of the chips */
   render({ focus: fk });
-  const el = $(`[data-fk="${fk}"]`);
+  let el = $(`[data-fk="${fk}"]`);
+  if (!el) { el = $('[data-fk="goal"]'); if (el) el.focus({ preventScroll: true }); }
   if (el) el.scrollIntoView({ block: 'center', behavior: smooth() });
 }
 /* ---------- ⛔ 멈춤 규칙 ---------- */
 function StopCard(date) {
   const e = S.days[date] || null, u = lsGet(LS_UI, {});
-  const folded = !!u.stopFold;
+  if (u.stopLast !== date) { uiSet('stopLast', date); uiSet('stopDays', (u.stopDays || 0) + 1); u.stopDays = (u.stopDays || 0) + 1; }
   const tm = lsGet(LS_TIMER, null), running = !!(tm && tm.date <= date);
   const now = Date.now();
   const link = (fk, label, fn) => h('button', { class: 'link', 'data-fk': fk, onclick: fn }, label);
   const R = PR.STOP_RULES.map(t => ({ t }));
   /* 1: 목이 긁히거나 따끔하면 그날은 끝 */
   const sore = e ? e.throat.filter(t => t === '긁힘' || t === '따가움') : [];
-  if (e && e.stop) Object.assign(R[0], { done: true, st: `오늘은 여기까지 했어요 · ${fmtHM(e.stop)}`, act: link('stop-undo', '잘못 눌렀어요', () => { const d = ensureDay(date); d.stop = null; touch(date); render({ focus: 'stop-1' }); toast('다시 열었어요'); }) });
+  if (e && e.stop) Object.assign(R[0], { done: true, st: `오늘은 여기까지 했어요 · ${fmtHM(e.stop)}`, act: link('stop-undo', '잘못 눌렀어요', () => { const d = ensureDay(date); d.stop = null; touch(date); render({ focus: d.throat.some(t => t === '긁힘' || t === '따가움') ? 'stop-end' : 'stop-1' }); toast('다시 열었어요'); }) });
   else if (sore.length) Object.assign(R[0], { on: true, st: `컨디션에 ‘${sore[0]}’을 골랐어요. 오늘은 여기까지 해요.`, act: h('button', { class: 'btn redb sm', 'data-fk': 'stop-end', onclick: () => markStop(date, false) }, '오늘은 끝') });
   else R[0].inline = h('button', { class: 'link danger', 'data-fk': 'stop-1', 'aria-label': '지금 목이 긁히거나 따끔해요, 오늘은 끝내기', onclick: () => markStop(date, true) }, '지금 그래요');
   /* 2: 끝난 후 목 상태 5점 이하 → 다음 날 ①~③단계만 */
   const rest = restInfo(date), yd = addDays(date, -1), y = S.days[yd];
   R[1].hint = '①~③단계 = 몸 풀기·호흡·빨대 발성';
-  if (rest != null) Object.assign(R[1], { on: true, st: `어제 끝난 후 목 상태 ${rest}점 → 오늘은 ①~③단계만 해요`, act: link('stop-yday', '어제 기록', () => goDate(yd)) });
-  else if (e && e.after != null && e.after <= 5) Object.assign(R[1], { on: true, st: `오늘 끝난 후 목 상태 ${e.after}점 → 내일은 ①~③단계만 해요` });
+  const steps13 = '①~③단계(몸 풀기·호흡·빨대 발성)만';
+  const guideLink = routineOn() ? null : link('stop-steps', '루틴 보기', openGuide);
+  if (rest != null) Object.assign(R[1], { on: true, st: `어제 끝난 후 목 상태 ${rest}점 → 오늘은 ${steps13} 해요`, act: [link('stop-yday', '어제 기록', () => goDate(yd)), guideLink] });
+  else if (e && e.after != null && e.after <= 5) Object.assign(R[1], { on: true, st: `오늘 끝난 후 목 상태 ${e.after}점 → 내일은 ${steps13} 해요`, act: guideLink });
   else if (y && hasContent(y) && y.minutes > 0 && y.after == null) Object.assign(R[1], { hint: '어제 끝난 후 목 상태를 안 적었어요', hintAct: link('stop-yafter', '적기', () => openAfterSheet(yd)) });
   /* 3: 20~25분 부르면 5~10분 쉬기, 물 */
   if (running && tm.rest) R[2].hint = '쉬는 중이에요 · 물 자주 마시기';
   else if (running && tm.seg && now - tm.seg >= 20 * MIN_MS) Object.assign(R[2], { on: true, st: `${Math.floor((now - tm.seg) / MIN_MS)}분째 불렀어요. 5~10분 완전히 쉬어요`, act: h('button', { class: 'btn ink sm', 'data-fk': 'stop-rest', onclick: startRest }, '쉬기') });
   /* 4: 2주 넘게 쉰 목소리·통증 → 이비인후과 */
   const ent = soreSince(date);
-  if (ent && !(u.entSnooze > now)) Object.assign(R[3], { on: true, st: `쉰 소리·따가움을 적은 날이 ${fmtMD(ent.since)}부터 이어지고 있어요 (기록 ${ent.n}일). 이비인후과(음성 전문)에 가 보세요.`, act: h('button', { class: 'btn soft sm', 'data-fk': 'stop-ent', onclick: () => { uiSet('entSnooze', Date.now() + 7 * 86400000); render({ focus: 'stop-fold' }); } }, '알겠어요') });
-  const shown = folded ? R.filter(r => r.on) : R;
+  if (ent && !(u.entSnooze > now)) Object.assign(R[3], { on: true, st: `${ent.what.length ? `${ent.what.join('·')}${eulReul(ent.what[ent.what.length - 1])} 적은 날` : '목이 아팠던 날'}이 ${fmtMD(ent.since)}부터 이어지고 있어요 (기록 ${ent.n}일). 이비인후과(음성 전문)에 가 보세요.`, act: h('button', { class: 'btn soft sm', 'data-fk': 'stop-ent', onclick: () => { uiSet('entSnooze', Date.now() + 7 * 86400000); render({ focus: 'stop-fold' }); } }, '알겠어요') });
   const onN = R.filter(r => r.on).length;
+  const folded = typeof u.stopFold === 'boolean' ? u.stopFold : onN === 0 && u.stopDays > 3;
+  const shown = folded ? R.filter(r => r.on || r.hintAct) : R;
   return h('div', { class: 'sec stop-card' + (onN ? ' alert' : ''), id: 'sec-stop' },
-    h('button', { class: 'stop-h', 'data-fk': 'stop-fold', 'aria-expanded': String(!folded), 'aria-label': `멈춤 규칙 4가지${onN ? `, 지금 해당 ${onN}개` : ''}, ${folded ? '펼치기' : '접기'}`, onclick: () => { uiSet('stopFold', !folded || null); render({ focus: 'stop-fold' }); } },
+    h('button', { class: 'stop-h', 'data-fk': 'stop-fold', 'aria-expanded': String(!folded), 'aria-label': `멈춤 규칙 4가지${onN ? `, 지금 해당 ${onN}개` : ''}, ${folded ? '펼치기' : '접기'}`, onclick: () => { uiSet('stopFold', !folded); render({ focus: 'stop-fold' }); } },
       h('span', { class: 'stop-ic', 'aria-hidden': 'true' }, '⛔'), h('b', null, '멈춤 규칙'),
       folded ? h('span', { class: 'hint' }, onN ? `지금 해당 ${onN}개` : '4가지 · 펼치기') : null, h('span', { class: 'sp' }), icon(folded ? 'chevd' : 'chevu', 18)),
     shown.length ? h('ul', { class: 'stop-list' }, shown.map(r => h('li', { class: 'stop-rule' + (r.on ? ' on' : '') + (r.done ? ' done' : '') },
@@ -2038,13 +2066,17 @@ function StopCard(date) {
 /* 멈춤 규칙 1: the day ends here — keeps the practice time and asks how the throat is */
 function markStop(date, ask) {
   const end = () => {
+    const tm = lsGet(LS_TIMER, null);
+    if (tm && tm.date < date && Date.now() - tm.start <= 240 * MIN_MS) date = tm.date; /* practice that went past midnight belongs to its day */
     const d = ensureDay(date);
     d.stop = Date.now(); touch(date);
-    const tm = lsGet(LS_TIMER, null);
+    render({ focus: 'stop-undo' }); /* the sheet below hands focus back here */
     let added = 0;
-    if (tm && tm.date <= date) added = stopTimer({ quiet: true }); /* opens 끝난 후 목 상태 when it isn't written yet */
-    else { render(); if (d.after == null) openAfterSheet(date); }
-    toast(`오늘은 끝으로 적었어요${added ? ` · 연습 ${fmtMin(added)} 기록` : ''}. 목을 쉬게 해 주세요`, { action: '되돌리기', onAction: () => { const d2 = ensureDay(date); d2.stop = null; touch(date); render(); } });
+    if (tm && tm.date <= date) {
+      added = stopTimer({ quiet: true }); /* opens 끝난 후 목 상태 when it isn't written yet */
+      if (!added && !Sheets.length && d.after == null) openAfterSheet(date);
+    } else if (d.after == null) openAfterSheet(date);
+    toast(`오늘은 끝으로 적었어요${added ? ` · 연습 ${fmtMin(added)} 기록` : ''}. 목을 쉬게 해 주세요`, { action: '되돌리기', onAction: () => { const d2 = ensureDay(date); d2.stop = null; touch(date); render({ focus: d2.throat.some(t => t === '긁힘' || t === '따가움') ? 'stop-end' : 'stop-1' }); } });
   };
   if (!ask) { end(); return; }
   confirmSheet({ title: '오늘은 여기까지 해요', text: '목이 긁히거나 따끔하면 그날은 끝이에요. 연습 시간을 저장하고, 끝난 후 목 상태를 적어요.', ok: '오늘은 끝', danger: true, onOk: end });
@@ -2056,18 +2088,22 @@ function AfterGrid(date, onPick) {
   for (let n = 1; n <= 10; n++) box.append(h('button', { class: 'ag' + (a === n ? (n <= 5 ? ' on low' : ' on') : ''), role: 'radio', 'aria-checked': String(a === n), 'aria-label': `${n}점`, 'data-fk': `after-${n}`, onclick: () => { const d = ensureDay(date); d.after = d.after === n ? null : n; touch(date); onPick(d.after, n); } }, String(n)));
   return box;
 }
-const AFTER_LOW = '5점 이하예요. 내일은 ①~③단계만 해요 (몸 풀기·호흡·빨대 발성).';
+/* 5점 이하 → the next day only steps ①~③; said from the point of view of today */
+function afterLow(date) {
+  const t = todayStr(), when = date === t ? '내일은' : date === addDays(t, -1) ? '오늘은' : '다음 날은';
+  return `5점 이하예요. ${when} ①~③단계만 해요 (몸 풀기·호흡·빨대 발성).`;
+}
 function openAfterSheet(date) {
   const body = h('div', { class: 'after-sheet' });
   let s = null;
   const draw = () => {
     const e = S.days[date];
     const a = e ? e.after : null;
-    body.replaceChildren(
+    body.replaceChildren(...[
       h('p', { class: 'lead' }, '노래를 끝낸 지금 목 상태는 몇 점인가요? (1~10)'),
       AfterGrid(date, (v, n) => { draw(); const b = $(`[data-fk="after-${n}"]`, body); if (b) b.focus({ preventScroll: true }); }),
       h('p', { class: 'hint' }, '1 나쁨 · 10 아주 좋음'),
-      a != null && a <= 5 ? h('p', { class: 'banner warn' }, AFTER_LOW) : null,
+      a != null && a <= 5 ? h('p', { class: 'banner warn' }, afterLow(date)) : null,
       h('div', { class: 'field', style: 'margin-top:14px' }, h('span', { class: 'lbl' }, '지금 이런 게 있나요?'),
         h('div', { class: 'chips' }, SORE.map(t => h('button', { class: 'chip sm', 'data-fk': `after-sore-${t}`, 'aria-pressed': String(!!(e && e.throat.includes(t))), onclick: () => {
           const d = ensureDay(date), i = d.throat.indexOf(t);
@@ -2075,7 +2111,7 @@ function openAfterSheet(date) {
           touch(date); draw();
           const b = $(`[data-fk="after-sore-${t}"]`, body); if (b) b.focus({ preventScroll: true });
         } }, t)))),
-      h('p', { class: 'hint' }, '쉰 목소리·통증이 2주 넘게 이어지면 멈춤 규칙에서 알려 줘요'));
+      h('p', { class: 'hint' }, '쉰 목소리·통증이 2주 이상 이어지면 멈춤 규칙에서 알려 줘요')].filter(Boolean));
   };
   draw();
   const later = h('button', { class: 'btn soft', onclick: () => closeSheet(s) }, '나중에');
@@ -2144,18 +2180,19 @@ function CondSec(date, e) {
     h('div', { class: 'cond-line' }, h('span', { class: 'lbl' }, '물'), cups, h('span', { class: 'val' }, `${w}잔`)));
 }
 const cueText = c => `${c[0]}: ${c[1]}`;
+const isCue = l => PR.CUES.some(c => cueText(c) === l.trim());
 /* 오늘의 목표 = 오늘 집중할 것: one tap on a '노래할 때 기억할 것' line makes it the goal */
 function GoalSec(date, e) {
-  const goal = e ? e.goal.trim() : '';
+  const lines = e ? e.goal.split('\n').map(l => l.trim()) : [];
   const open = !!lsGet(LS_UI, {}).cueOpen;
-  const chosen = i => goal === cueText(PR.CUES[i]);
+  const chosen = i => lines.includes(cueText(PR.CUES[i]));
+  /* one cue at a time, on the first line; what was typed by hand stays below it */
   const pick = (i, fk) => {
-    const d = ensureDay(date), prev = d.goal, t = cueText(PR.CUES[i]);
-    d.goal = d.goal.trim() === t ? '' : t;
+    const d = ensureDay(date), t = cueText(PR.CUES[i]);
+    const rest = d.goal.split('\n').filter(l => l.trim() && !isCue(l));
+    d.goal = (chosen(i) ? rest : [t, ...rest]).join('\n');
     touch(date);
     render({ focus: fk });
-    const custom = prev.trim() && !PR.CUES.some(c => cueText(c) === prev.trim());
-    if (custom && d.goal) toast(`오늘의 목표를 바꿨어요 · ${PR.CUES[i][0]}`, { action: '되돌리기', onAction: () => { ensureDay(date).goal = prev; touch(date); render(); } });
   };
   const toggle = v => { uiSet('cueOpen', v || null); render({ focus: 'cue-list' }); };
   const cues = open
@@ -2170,7 +2207,8 @@ function GoalSec(date, e) {
     h('div', { class: 'sec-h' }, h('h2', null, '오늘의 목표'), h('span', { class: 'sec-note' }, '오늘 집중할 것 하나')),
     autoTA({ class: 'input', rows: 1, placeholder: '예: 히싱 20초 넘기기, 후렴 음정 정확하게', value: e ? e.goal : '', 'data-fk': 'goal', 'aria-label': '오늘의 목표', oninput: ev => { ensureDay(date).goal = ev.target.value; touch(date); } }, 46),
     h('div', { class: 'cue-box' },
-      h('div', { class: 'cue-h' }, h('span', { class: 'lbl' }, '노래할 때 기억할 것'), h('span', { class: 'hint' }, '눌러서 오늘 집중할 것으로')),
+      h('div', { class: 'cue-h' }, h('span', { class: 'lbl' }, '노래할 때 기억할 것'), h('span', { class: 'hint' }, '눌러서 오늘 집중할 것으로'), h('span', { class: 'sp' }),
+        open ? null : h('button', { class: 'link', 'data-fk': 'cue-all', 'aria-label': '노래할 때 기억할 것 모두 펼치기', onclick: () => toggle(true) }, '모두 보기')),
       cues,
       h('p', { class: 'hint cue-one' }, PR.CUE_ONE)));
 }
@@ -2278,6 +2316,7 @@ function bump(date, id, delta, sec) {
   const before = Math.min(s.done || 0, s.target);
   const next = Math.max(0, Math.min(s.target, before + delta));
   if (next === before && sec == null) return;
+  if (next > before) resumeQuiet();
   s.done = next;
   if (sec != null) s.times = (s.times || []).concat(Math.round(sec * 10) / 10);
   touch(date);
@@ -2288,7 +2327,14 @@ function bump(date, id, delta, sec) {
       S.openDrills.delete(id);
       if (all) { S.justDone = date; Sound.fanfare(); vibrate([16, 60, 16, 60, 34]); toast('기초 연습을 모두 끝냈어요! 참 잘했어요'); }
       else { Sound.done(next - 1); vibrate([12, 50, 22]); toast(`${s.name} ${s.target}회 완료`); }
-      setTimeout(() => { if (S.tab === 'today' && S.date === date) softRender(); }, 1600);
+      setTimeout(() => {
+        if (S.tab !== 'today' || S.date !== date) return;
+        const hs = $$('#sec-drills .grp-h[aria-expanded="true"]'), a = hs[hs.length - 1];
+        const k = a ? a.dataset.fk : `dr-${id}-plus`, el0 = $(`[data-fk="${k}"]`), t0 = el0 ? el0.getBoundingClientRect().top : null;
+        softRender();
+        const el1 = $(`[data-fk="${k}"]`) || (a ? null : $(`[data-fk="dr-${id}-fold"]`));
+        if (t0 != null && el1 && !S.sheetOpen) window.scrollBy(0, el1.getBoundingClientRect().top - t0);
+      }, 1600);
     } else { Sound.rep(next - 1); vibrate(10); }
   } else if (next < before) vibrate(6);
   render();
@@ -2366,8 +2412,10 @@ function RecSec(date, e) {
       h('button', { class: 'btn', onclick: () => pickAudio(date) }, icon('upload', 18), '파일 불러오기')),
     note ? h('p', { class: 'hint', style: 'margin-top:6px' }, note) : null,
     recs.length ? h('div', { class: 'recs' }, recs.map(r => RecRow(r, date))) : null,
-    recs.length && !e.fb.some(it => it.from === '녹음 듣고') ? h('button', { class: 'link rec-heard', 'data-fk': 'rec-heard', onclick: () => { S.compose.fb.from = '녹음 듣고'; focusField('c-fb'); } }, '녹음 듣고 느낀 점 적기 ›') : null);
+    recs.length && !e.fb.some(it => it.from === '녹음 듣고') ? h('button', { class: 'link rec-heard', 'data-fk': 'rec-heard', onclick: () => { fromHeard(); focusField('c-fb'); } }, '녹음 듣고 느낀 점 적기 ›') : null);
 }
+/* a shortcut to write '녹음 듣고' feedback; 누가? goes back to what it was after that one note */
+function fromHeard() { const C = S.compose.fb; if (!C.once) C.prev = C.from; C.from = '녹음 듣고'; C.once = true; }
 /* ④ 오늘의 기록: each line of the lecture's daily record, filled from where it already lives; a tap goes to the blank */
 function RecordCard(date, e) {
   const has = (k, fn) => !!(e && e[k].some(fn));
@@ -2380,7 +2428,7 @@ function RecordCard(date, e) {
     ['pron', '찾은 모음·자음', !!(e && e.pron), () => openPron(date, e && e.pron && e.pron.v ? 'B' : 'A')],
     ['after', '끝난 후 목 상태', !!(e && e.after != null), () => focusField(`after-${(e && e.after) || 5}`)],
     ['good', '좋았던 느낌', has('good', () => true), () => focusField('c-good')],
-    ['heard', '녹음 듣고', has('fb', it => it.from === '녹음 듣고'), () => { S.compose.fb.from = '녹음 듣고'; focusField('c-fb'); }]
+    ['heard', '녹음 듣고', has('fb', it => it.from === '녹음 듣고'), () => { fromHeard(); focusField('c-fb'); }]
   ];
   const n = rows.filter(r => r[2]).length;
   return h('div', { class: 'rec-card' },
@@ -2393,7 +2441,7 @@ function AfterSec(date, e) {
   return h('div', { class: 'field after-sec', id: 'sec-after' },
     h('div', { class: 'lbl-row' }, h('span', { class: 'lbl' }, '끝난 후 목 상태 (1~10)'), h('span', { class: 'sp' }), a != null ? h('span', { class: 'after-val' + (a <= 5 ? ' low' : '') }, `${a}점`) : null),
     AfterGrid(date, (v, n) => render({ focus: `after-${n}` })),
-    a != null && a <= 5 ? h('p', { class: 'hint warn' }, AFTER_LOW) : h('p', { class: 'hint' }, '1 나쁨 · 10 아주 좋음. 노래를 끝낸 뒤의 목 상태예요.'));
+    a != null && a <= 5 ? h('p', { class: 'hint warn' }, afterLow(date)) : h('p', { class: 'hint' }, '1 나쁨 · 10 아주 좋음. 노래를 끝낸 뒤의 목 상태예요.'));
 }
 function ReflectSec(date, e) {
   return h('div', { class: 'sec', id: 'sec-reflect' },
@@ -2437,6 +2485,7 @@ function Composer(date, kind) {
     const it = { id: uid('i'), text, tag: C.tag || null, pinned: false, resolved: false, at: Date.now() };
     if (kind === 'fb') it.from = C.from || '선생님';
     d[kind].push(it);
+    if (kind === 'fb' && C.once) { C.from = C.prev || '선생님'; C.once = false; }
     C.tag = null; C.draft = '';
     touch(date);
     render({ focus: 'c-' + kind });
@@ -2448,13 +2497,14 @@ function Composer(date, kind) {
     extra.replaceChildren(...[
       again.length ? h('div', { class: 'chips scroll' }, h('span', { class: 'hint' }, '자주 적은 것'), again.map(x => h('button', { class: 'chip sm again', type: 'button', onpointerdown: keep, onmousedown: keep, onclick: () => { const draft = inp.value; inp.value = x.text; C.tag = x.tag || C.tag; add(); if (draft.trim()) { C.draft = draft; C.date = date; render({ focus: 'c-' + kind }); } } }, x.text))) : null,
       h('div', { class: 'chips scroll' }, h('span', { class: 'hint' }, '주제'), S.settings.tags.map(t => h('button', { class: 'chip sm', type: 'button', 'aria-pressed': String(C.tag === t), onpointerdown: keep, onmousedown: keep, onclick: () => { C.tag = C.tag === t ? null : t; inp.placeholder = (C.tag && PH_TAG[C.tag]) || KIND[kind].ph; drawExtra(); inp.focus({ preventScroll: true }); } }, t))),
-      kind === 'fb' ? h('div', { class: 'chips from-chips' }, h('span', { class: 'hint' }, '누가?'), FROM.map(f => h('button', { class: 'chip sm', type: 'button', 'aria-pressed': String(C.from === f), onpointerdown: keep, onmousedown: keep, onclick: () => { C.from = f; drawExtra(); inp.focus({ preventScroll: true }); } }, f))) : null].filter(Boolean));
+      kind === 'fb' ? h('div', { class: 'chips from-chips' }, h('span', { class: 'hint' }, '누가?'), FROM.map(f => h('button', { class: 'chip sm', type: 'button', 'aria-pressed': String(C.from === f), onpointerdown: keep, onmousedown: keep, onclick: () => { C.from = f; C.once = false; drawExtra(); inp.focus({ preventScroll: true }); } }, f))) : null].filter(Boolean));
   };
   drawExtra();
   inp.addEventListener('focus', () => wrap.classList.add('open'));
   wrap.addEventListener('focusout', () => setTimeout(() => {
     if (!wrap.isConnected) return;
     if (wrap.contains(document.activeElement) || inp.value.trim() || Date.now() - lastTap < 600 || C.tag) return;
+    if (kind === 'fb' && C.once) { C.from = C.prev || '선생님'; C.once = false; }
     wrap.classList.remove('open');
   }, 250));
   wrap.append(h('div', { class: 'composer' }, inp, h('button', { class: 'btn soft sq', type: 'button', 'aria-label': KIND[kind].label + ' 추가', onpointerdown: keep, onmousedown: keep, onclick: add }, icon('plus', 20))), extra);
@@ -2520,7 +2570,7 @@ function summaryText(date) {
   const dl = drillList(date).filter(d => d.done > 0 || date === todayStr());
   if (dl.length && Object.keys(e.drills).length) L.push(`기초 연습${rest != null && rOn ? '(①~③단계만)' : ''}: ${dl.map(d => `${d.name} ${d.done}/${d.target}`).join(', ')}`);
   const hs = e.drills[hissId()], wk = hissWeek(date);
-  if (rOn && wk && hs && hs.times && hs.times.length) L.push(`히싱 최고 ${fmtSec(Math.max.apply(null, hs.times))} (${wk}주차 목표 ${PR.HISS_SEC[wk - 1]}초)`);
+  if (rOn && hs && hs.times && hs.times.length) L.push(`히싱 최고 ${fmtSec(Math.max.apply(null, hs.times))}${wk ? ` (${wk}주차 목표 ${PR.HISS_SEC[wk - 1]}초)` : ''}`);
   if (e.pron) L.push(`발음 찾기: ${pronText(e.pron)}`);
   if (e.songs.length) L.push(`노래: ${e.songs.map(s => s.title + ([s.artist, s.tone].filter(Boolean).length ? ` (${[s.artist, s.tone].filter(Boolean).join(', ')})` : '') + (s.note ? ` - ${s.note}` : '')).join(' / ')}`);
   if (e.high != null) L.push(`오늘 낸 최고음: ${noteName(e.high)} (${noteSci(e.high)})`);
@@ -3029,7 +3079,7 @@ async function openRecorder(date) {
     rec.onerror = () => { try { if (rec.state !== 'inactive') rec.stop(); } catch (e) { /* ignore */ } };
     rec.start(1000);
     segStart = performance.now(); acc = 0;
-    stage = 'recording'; S.recording = true;
+    stage = 'recording'; S.recording = true; resumeQuiet();
     tick = setInterval(() => { timeEl.textContent = fmtDur(elapsed()); }, 250);
     status.style.color = '';
     status.textContent = '녹음 중이에요. 화면은 켜진 채로 둘게요.';
@@ -3247,7 +3297,7 @@ function openStopwatch(date, id) {
       h('button', { class: 'btn blue big wide', onclick: () => { const sec = elapsed; bump(date, id, full ? 0 : 1, sec); toast(`${fmtSec(sec)} 기록했어요${goal && sec >= goal ? ` · 목표 ${goal}초 넘었어요` : ''}`); state = 'idle'; elapsed = 0; reached = false; big.classList.remove('ok'); setBig(0); refresh(); draw(); } }, full ? '기록만 저장' : '기록하고 1회 체크'),
       h('button', { class: 'btn soft wide', onclick: () => { state = 'idle'; elapsed = 0; reached = false; big.classList.remove('ok'); setBig(0); draw(); } }, '버리고 다시 재기'));
   };
-  function go1() { start = performance.now(); state = 'run'; raf = requestAnimationFrame(frame); vibrate(10); Native.keepAwake(true); draw(); }
+  function go1() { resumeQuiet(); start = performance.now(); state = 'run'; raf = requestAnimationFrame(frame); vibrate(10); Native.keepAwake(true); draw(); }
   function stop1() { cancelAnimationFrame(raf); elapsed = (performance.now() - start) / 1000; setBig(elapsed); state = 'stopped'; vibrate(10); Native.keepAwake(false); draw(); }
   let swSheet = null;
   const onKey = ev => {
@@ -3281,8 +3331,8 @@ function DrillEditor() {
           h('button', { class: 'chip sm', 'aria-pressed': String(!!d.timed), onclick: ev => { d.timed = !d.timed; ev.currentTarget.setAttribute('aria-pressed', String(d.timed)); touchSettings(); } }, icon('timer', 15), '시간 재기 버튼'),
           routineOn() ? h('span', { class: 'hint drow-g' }, grpLabel(grpOf(d.id))) : null,
           h('span', { class: 'sp' }),
-          h('button', { class: 'icon-btn', 'aria-label': `${d.name} 위로`, disabled: i === 0, onclick: () => { const a = S.settings.drills; [a[i - 1], a[i]] = [a[i], a[i - 1]]; touchSettings(); draw(); } }, icon('up', 19)),
-          h('button', { class: 'icon-btn', 'aria-label': `${d.name} 아래로`, disabled: i === S.settings.drills.length - 1, onclick: () => { const a = S.settings.drills; [a[i + 1], a[i]] = [a[i], a[i + 1]]; touchSettings(); draw(); } }, icon('dn', 19)),
+          h('button', { class: 'icon-btn', 'aria-label': `${d.name} 위로`, disabled: i === 0 || (routineOn() && grpOf(S.settings.drills[i - 1].id) !== grpOf(d.id)), onclick: () => { const a = S.settings.drills; [a[i - 1], a[i]] = [a[i], a[i - 1]]; touchSettings(); draw(); } }, icon('up', 19)),
+          h('button', { class: 'icon-btn', 'aria-label': `${d.name} 아래로`, disabled: i === S.settings.drills.length - 1 || (routineOn() && grpOf(S.settings.drills[i + 1].id) !== grpOf(d.id)), onclick: () => { const a = S.settings.drills; [a[i + 1], a[i]] = [a[i], a[i + 1]]; touchSettings(); draw(); } }, icon('dn', 19)),
           h('button', { class: 'icon-btn', 'aria-label': `${d.name} 항목 지우기`, onclick: () => {
             const a = S.settings.drills; const [gone] = a.splice(i, 1);
             const te = S.days[todayStr()];
@@ -3346,7 +3396,7 @@ function openPron(date, tab = 'A') {
   const rules = x => h('ul', { class: 'pron-rules' }, h('li', null, x.back), h('li', null, x.front));
   const last = key => { const l = lastPron(date, key); return l ? h('p', { class: 'hint' }, `지난번 ${fmtMD(l.date)}: ${key === 'v' ? PR.syl('ㅁ', l.p.v) : PR.syl(l.p.c, l.p.v || 'ㅓ')}`) : null; };
   /* the syllable to sing now, with one-step moves along the order (front ← → back) */
-  const ladder = (list, curV, sylOf, savedV, setCur, fk, start, leftLbl, rightLbl, saveLbl, onSave) => {
+  const ladder = (list, curV, sylOf, savedV, setCur, fk, start, leftLbl, rightLbl, saveLbl, onSave, onClear) => {
     const i = list.indexOf(curV);
     return h('div', { class: 'lad-box' },
       h('div', { class: 'lad-now' }, h('span', { class: 'hint' }, '지금 부를 음절'), h('b', { class: 'hand' }, sylOf(curV))),
@@ -3358,7 +3408,8 @@ function openPron(date, tab = 'A') {
         'aria-label': `${sylOf(x)}${x === start ? ', 시작' : ''}${x === savedV ? ', 적어 둔 것' : ''}`, onclick: () => { setCur(x); draw(`${fk}-${k}`); }
       }, sylOf(x), x === start ? h('small', null, '시작') : x === savedV ? h('small', null, '적음') : null))),
       h('div', { class: 'lad-cap' }, h('span', null, '← 앞'), h('span', null, '뒤 →')),
-      h('button', { class: 'btn ink wide', 'data-fk': `${fk}-save`, onclick: onSave }, savedV === curV ? [icon('check', 18), `‘${sylOf(curV)}’ 적어 뒀어요`] : saveLbl(sylOf(curV))));
+      savedV === curV ? h('div', { class: 'lad-saved' }, icon('check', 18), h('span', null, `‘${sylOf(curV)}’로 적어 뒀어요`), h('span', { class: 'sp' }), h('button', { class: 'link', 'data-fk': `${fk}-save`, onclick: onClear }, '지우기'))
+        : h('button', { class: 'btn ink wide', 'data-fk': `${fk}-save`, onclick: onSave }, saveLbl(sylOf(curV))));
   };
   const tabA = () => {
     const sv = saved().v;
@@ -3367,10 +3418,9 @@ function openPron(date, tab = 'A') {
       h('button', { class: 'btn soft wide', 'data-fk': 'pron-keys', onclick: () => openScaleTrainer({ date, pat: 'five' }) }, icon('piano', 18), '건반으로 “머” 5음 스케일'),
       h('p', { class: 'hint' }, '반음 버튼으로 5음 꼭대기가 막히는 음 근처에 오게 맞춰요.'),
       rules(PR.PRON.A),
-      ladder(PR.V, vCur, v => PR.syl('ㅁ', v), sv, v => { vCur = v; }, 'pron-v', 'ㅓ', '뒤집혀요', '조이고 질러져요', t => `‘${t}’가 가장 편해요 · 적기`, () => {
-        if (sv === vCur) { save('v', ''); draw('pron-v-save'); toast('모음 기록을 지웠어요'); return; }
-        save('v', vCur); draw('pron-v-save'); toast(`편한 모음을 ‘${PR.syl('ㅁ', vCur)}’로 적었어요`);
-      }),
+      ladder(PR.V, vCur, v => PR.syl('ㅁ', v), sv, v => { vCur = v; }, 'pron-v', 'ㅓ', '뒤집혀요', '조이고 질러져요', t => `‘${t}’가 가장 편해요 · 적기`,
+        () => { save('v', vCur); draw('pron-v-save'); toast(`편한 모음을 ‘${PR.syl('ㅁ', vCur)}’로 적었어요`); },
+        () => { save('v', ''); draw('pron-v-save'); toast('모음 기록을 지웠어요'); }),
       h('p', { class: 'hint' }, PR.PRON.A.pick),
       last('v')];
   };
@@ -3380,10 +3430,9 @@ function openPron(date, tab = 'A') {
       h('p', { class: 'lead' }, PR.PRON.B.lead),
       h('p', { class: sv.v ? 'pron-from' : 'hint' }, sv.v ? `찾은 모음: ${sv.v} (${PR.syl('ㅁ', sv.v)})` : '모음 찾기를 먼저 해 보세요. 지금은 ‘ㅓ(머)’로 보여 줘요.'),
       rules(PR.PRON.B),
-      ladder(PR.C, cCur, c => PR.syl(c, v), sv.c, c => { cCur = c; }, 'pron-c', 'ㅁ', '바람 새요', '힘 들어가요', t => `‘${t}’가 가장 편해요 · 적기`, () => {
-        if (sv.c === cCur) { save('c', ''); draw('pron-c-save'); toast('자음 기록을 지웠어요'); return; }
-        save('c', cCur); draw('pron-c-save'); toast(`편한 조합을 ‘${PR.syl(cCur, v)}’로 적었어요`);
-      }),
+      ladder(PR.C, cCur, c => PR.syl(c, v), sv.c, c => { cCur = c; }, 'pron-c', 'ㅁ', '바람 새요', '힘 들어가요', t => `‘${t}’가 가장 편해요 · 적기`,
+        () => { save('c', cCur); draw('pron-c-save'); toast(`편한 조합을 ‘${PR.syl(cCur, v)}’로 적었어요`); },
+        () => { save('c', ''); draw('pron-c-save'); toast('자음 기록을 지웠어요'); }),
       h('p', { class: 'hint' }, PR.PRON.B.pick),
       last('c')];
   };
@@ -3405,14 +3454,18 @@ function openPron(date, tab = 'A') {
     const recent = [];
     for (const d of Object.keys(S.days).filter(x => x >= since && x <= date).sort().reverse()) for (const it of S.days[d].bad) if (!it.resolved && (it.tag === TAG_FLIP || it.tag === TAG_TIGHT) && recent.length < 6 && !recent.some(r => r.text === it.text)) recent.push(it);
     const useItem = hasItem('rt_pc') && item('rt_pc');
-    const done = useItem ? useItem.done : local;
-    const cnt = done >= 5 ? [icon('check', 18), '다 했어요'] : done < 3 ? `바꾼 가사로 1회 (${done}/3)` : `원래 가사로 1회 (${done - 3}/2) · 바꾼 느낌 유지`;
+    const cur = useItem || { id: 'rt_pc', target: 5, done: local };
+    const done = cur.done, ph = phaseOf(cur);
+    const cnt = done >= cur.target ? [icon('check', 18), '다 했어요'] : ph ? `${ph.label} 1회 (${ph.i}/${ph.n})${ph.label === '원래 가사로' ? ' · 바꾼 느낌 유지' : ''}` : `1회 (${done + 1}/${cur.target})`;
     return [
       h('p', { class: 'lead' }, PR.PRON.C.lead),
       field('연습곡 고음 가사', inp),
-      recent.length ? h('div', { class: 'chips scroll' }, h('span', { class: 'hint' }, '최근 뒤집힘·조임'), recent.map(it => h('button', { class: 'chip sm', onclick: () => { inp.value = it.text.slice(0, 80); inp.dispatchEvent(new Event('input')); } }, it.text.length > 20 ? it.text.slice(0, 20) + '…' : it.text))) : null,
+      recent.length ? h('div', { class: 'chips scroll' }, h('span', { class: 'hint' }, '최근 뒤집힘·조임'), recent.map(it => h('button', { class: 'chip sm', onclick: () => {
+        inp.value = lyricOf(it.text).slice(0, 80); inp.dispatchEvent(new Event('input'));
+        inp.focus({ preventScroll: true }); try { inp.select(); } catch (e) { /* ignore */ }
+      } }, it.text.length > 20 ? it.text.slice(0, 20) + '…' : it.text))) : null,
       out,
-      h('button', { class: 'btn blue wide', 'data-fk': 'pron-count', disabled: done >= 5, onclick: () => {
+      h('button', { class: 'btn blue wide', 'data-fk': 'pron-count', disabled: done >= cur.target, onclick: () => {
         if (useItem) bump(date, 'rt_pc', 1); else local++;
         draw('pron-count');
       } }, cnt),
@@ -3424,10 +3477,24 @@ function openPron(date, tab = 'A') {
       table(),
       h('div', { class: 'seg pron-tabs', role: 'group', 'aria-label': '발음 찾기 순서' }, [['A', '모음 찾기'], ['B', '자음 찾기'], ['C', '가사에 입히기']].map(([k, l]) => segBtn(l, cur === k, () => { cur = k; draw(`pron-${k}`); }, `pron-${k}`))),
       h('div', { class: 'pron-body' }, cur === 'A' ? tabA() : cur === 'B' ? tabB() : tabC()));
-    if (fk) { const el = $(`[data-fk="${fk}"]`, body); if (el && !el.disabled) el.focus({ preventScroll: true }); }
+    if (fk) {
+      const alt = /-(l|r)$/.test(fk) ? `${fk.slice(0, -1)}${fk.endsWith('l') ? 'r' : 'l'}` : fk === 'pron-count' ? `pron-${cur}` : null;
+      const el = [fk, alt].map(k => k && $(`[data-fk="${k}"]`, body)).find(x => x && !x.disabled) || $('.lad.cur', body);
+      if (el) el.focus({ preventScroll: true });
+    }
   }
   draw();
   openSheet({ title: '발음 찾기', body, onClose: () => softRender() });
+}
+/* the lyric inside a 뒤집힘/조임 note: '사랑해 (‘해’에서)' → 사랑해, '후렴 ‘너를 사랑해’에서 조였다' → 너를 사랑해 */
+function lyricOf(t) {
+  t = String(t || '').trim();
+  let m = /^(.+?)\s*\(/.exec(t);
+  if (m && /[‘'“"]/.test(t.slice(m[0].length))) return m[1].trim();
+  m = /^(.+?)의 ‘/.exec(t);
+  if (m) return m[1].trim();
+  m = /[‘'“"]([^’'”"]+)[’'”"]/.exec(t);
+  return m ? m[1].trim() : t;
 }
 /* 노래 전 루틴 안내: everything from the lecture in one place */
 function openGuide() {
@@ -3458,7 +3525,7 @@ function openGuide() {
     sec('노래할 때 기억할 것', h('ul', null, PR.CUES.map(c => h('li', null, h('b', null, c[0]), ' ', c[1])), h('li', null, PR.CUE_ONE))),
     sec('오늘의 기록', h('p', { class: 'hint' }, '따로 쓰지 않아도 이 자리에 모여요. ‘돌아보기’의 ‘오늘의 기록’에서 빈칸을 바로 채울 수 있어요.'),
       h('ul', null, REC_FIELDS.map(([k, w]) => h('li', null, h('b', null, k), ` → ${w}`)))));
-  s = openSheet({ title: '노래 전 루틴 안내', body, full: true, foot: rOn ? null : [h('button', { class: 'btn ink', onclick: () => { closeSheet(s, true); openRoutineInsert(); } }, '노래 전 루틴 넣기')] });
+  s = openSheet({ title: '노래 전 루틴 안내', body, full: true, onClose: () => softRender(), foot: rOn ? null : [h('button', { class: 'btn ink', onclick: () => { closeSheet(s, true); openRoutineInsert(); } }, '노래 전 루틴 넣기')] });
 }
 /* ④ 오늘의 기록 → where each line lives in the app */
 const REC_FIELDS = [
@@ -3483,11 +3550,17 @@ function dropToday(id) {
   if (!(td.done > 0)) delete te.drills[id]; else td.target = Math.min(td.done, td.target);
   touch(todayStr());
 }
-function findOwn(id, rx) { const ds = S.settings.drills; return ds.find(d => d.id === id) || ds.find(d => !PR.BY_ID[d.id] && rx.test(d.name)); }
+/* the user's own 히싱 / 개호흡: the one the routine adopted before, the default id, or one named like it */
+function findOwn(key, rx) {
+  const ds = S.settings.drills, r = S.settings.routine;
+  for (const id of [r && r[key], key === 'hiss' ? 'dr_hiss' : 'dr_pant']) { const d = id && ds.find(x => x.id === id); if (d) return d; }
+  return ds.find(d => !PR.BY_ID[d.id] && rx.test(d.name));
+}
 function openRoutineInsert() {
   if (routineOn()) { openGuide(); return; }
-  const hiss = findOwn('dr_hiss', /히싱|hiss/i), pant0 = findOwn('dr_pant', /개호흡|pant/i), pant = pant0 !== hiss ? pant0 : null;
-  const opts = { hiss5: true, pant2: true, dropOverlap: false };
+  const hiss = findOwn('hiss', /히싱|hiss/i), pant0 = findOwn('pant', /개호흡|pant/i), pant = pant0 !== hiss ? pant0 : null;
+  const opts = { hiss5: true, pant2: true, dropOverlap: false, memo: true };
+  const oldMemo = [hiss && hiss.memo && hiss.memo !== PR.HISS_MEMO ? `${hiss.name}: ${hiss.memo}` : '', pant && pant.memo && pant.memo !== PR.PANT_MEMO ? `${pant.name}: ${pant.memo}` : ''].filter(Boolean);
   const overlap = S.settings.drills.filter(d => d.id === 'dr_scale' || d.id === 'dr_diction');
   const newN = PR.ITEMS.length + (hiss ? 0 : 1) + (pant ? 0 : 1);
   let s = null;
@@ -3501,12 +3574,14 @@ function openRoutineInsert() {
       h('li', null, '지금까지 한 연습과 지난 기록은 바뀌지 않아요. 편집에서 이름·횟수를 바꾸거나 빼도 돼요.')),
     hiss && hiss.target !== 5 ? ToggleRow('히싱 목표를 5회로', true, v => { opts.hiss5 = v; }, `지금 ${hiss.target}회 · 강의: ×5`) : null,
     pant && pant.target !== 2 ? ToggleRow('개호흡 목표를 2회로', true, v => { opts.pant2 = v; }, `지금 ${pant.target}회 · 강의: 20초×2`) : null,
+    oldMemo.length ? ToggleRow('방법 메모를 강의 내용으로', true, v => { opts.memo = v; }, `지금: ${oldMemo.join(' / ')}`) : null,
     overlap.length ? ToggleRow(`겹치는 ${overlap.map(d => `‘${d.name}’`).join('·')} 빼기`, false, v => { opts.dropOverlap = v; }, '루틴의 빨대 5음·발음 찾기와 겹쳐요. 빼도 지난 기록은 남아요.') : null);
   const ok = h('button', { class: 'btn ink', onclick: () => {
     closeSheet(s, true);
     const undo = insertRoutine(opts);
-    toast('노래 전 루틴을 넣었어요. ① 몸 풀기부터 시작해요', { action: '되돌리기', onAction: undo });
     goSection('sec-drills');
+    render({ focus: 'grp-r1' });
+    toast('노래 전 루틴을 넣었어요. ① 몸 풀기부터 시작해요', { action: '되돌리기', onAction: undo });
   } }, '넣기');
   s = openSheet({ title: '노래 전 루틴 넣기', body, foot: [ok] });
 }
@@ -3514,15 +3589,15 @@ function openRoutineInsert() {
 function insertRoutine(opts = {}) {
   const today = todayStr(), te = S.days[today];
   const before = { drills: clone(S.settings.drills), tags: S.settings.tags.slice(), routine: clone(S.settings.routine), snap: te ? clone(te.drills) : null };
-  const ds = S.settings.drills;
-  let hiss = findOwn('dr_hiss', /히싱|hiss/i), pant = findOwn('dr_pant', /개호흡|pant/i);
+  const ds = S.settings.drills, had = new Set(ds.map(d => d.id));
+  let hiss = findOwn('hiss', /히싱|hiss/i), pant = findOwn('pant', /개호흡|pant/i);
   if (pant && pant === hiss) pant = null;
   const mk = (id, name, target) => ({ id: ds.some(d => d.id === id) ? uid('dr') : id, name, target, timed: true, memo: '' });
   if (!hiss) hiss = mk('dr_hiss', '히싱', 5);
   if (!pant) pant = mk('dr_pant', '개호흡', 2);
   hiss.timed = true; pant.timed = true;
-  if (!hiss.memo) hiss.memo = PR.HISS_MEMO;
-  if (!pant.memo) pant.memo = PR.PANT_MEMO;
+  if (!hiss.memo || opts.memo) hiss.memo = PR.HISS_MEMO;
+  if (!pant.memo || opts.memo) pant.memo = PR.PANT_MEMO;
   if (opts.hiss5 !== false && hiss.target !== 5) { hiss.target = 5; applyTargetToday(hiss.id, 5); }
   if (opts.pant2 !== false && pant.target !== 2) { pant.target = 2; applyTargetToday(pant.id, 2); }
   const added = PR.ITEMS.filter(p => !ds.some(d => d.id === p.id)).map(p => ({ id: p.id, name: p.name, target: p.target, timed: false, memo: p.memo }));
@@ -3530,11 +3605,20 @@ function insertRoutine(opts = {}) {
   let others = ds.filter(d => !rt.includes(d));
   if (opts.dropOverlap) { others.filter(d => d.id === 'dr_scale' || d.id === 'dr_diction').forEach(d => dropToday(d.id)); others = others.filter(d => d.id !== 'dr_scale' && d.id !== 'dr_diction'); }
   S.settings.drills = rt.concat(others);
-  S.settings.routine = { start: (S.settings.routine && S.settings.routine.start) || today, hiss: hiss.id, pant: pant.id };
+  const old = S.settings.routine && S.settings.routine.start;
+  const usedLately = !!old && Object.keys(S.days).some(d => d >= addDays(today, -14) && Object.keys(S.days[d].drills || {}).some(id => PR.BY_ID[id] && S.days[d].drills[id].done > 0));
+  S.settings.routine = { start: usedLately ? old : today, hiss: hiss.id, pant: pant.id };
   ensureTags([TAG_FLIP, TAG_TIGHT]);
   /* today's record gets the new items too (as the item editor does), so a half-done routine never shows as finished */
   const t2 = S.days[today];
-  if (t2 && t2.drills && Object.keys(t2.drills).length) { S.settings.drills.forEach(t => { if (!t2.drills[t.id]) t2.drills[t.id] = { name: t.name, target: t.target, done: 0, times: [] }; }); touch(today); }
+  if (t2 && t2.drills && Object.keys(t2.drills).length) {
+    S.settings.drills.forEach(t => {
+      const x = t2.drills[t.id];
+      if (!x) t2.drills[t.id] = { name: t.name, target: t.target, done: 0, times: [] };
+      else if (!had.has(t.id)) x.target = t.target; /* removed earlier today: its count was cut to the reps done */
+    });
+    touch(today);
+  }
   touchSettings(); S.openGroups.clear(); render();
   return () => {
     S.settings.drills = before.drills; S.settings.tags = before.tags; S.settings.routine = before.routine;

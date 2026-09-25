@@ -88,7 +88,7 @@ const syl = (c, v) => String.fromCharCode(0xAC00 + (C_CHO[c] * 21 + V_JUNG[v]) *
 const SHIFT = { 1: 5, 0: 4, 4: 8 }; /* 중성 index: ㅐ→ㅔ, ㅏ→ㅓ, ㅓ→ㅗ — once, never ㅏ→ㅓ→ㅗ */
 /* 사랑해 → 서렁헤; returns the text and which character positions changed */
 function shiftVowels(text) {
-  const chars = Array.from(String(text || '')), changed = [];
+  const chars = Array.from(String(text || '').normalize('NFC')), changed = [];
   const out = chars.map((ch, i) => {
     const code = ch.charCodeAt(0);
     if (code < 0xAC00 || code > 0xD7A3) return ch;

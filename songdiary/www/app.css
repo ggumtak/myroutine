@@ -223,7 +223,7 @@ input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none}
 .drill-bottom{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:6px}
 .drill-rec{flex:1 1 80px;min-width:0;font-size:12.5px;color:var(--ink-3);display:flex;flex-wrap:wrap;gap:0 10px}
 .drill-rec:empty{display:none}
-.drill-acts{display:flex;gap:6px;flex:none;margin-left:auto}
+.drill-acts{display:flex;gap:6px;flex:0 1 auto;min-width:0;flex-wrap:wrap;justify-content:flex-end;row-gap:6px;margin-left:auto}
 .btn-check{min-width:84px}
 .drill.done .btn-check{background:var(--blue-soft);border-color:transparent;color:var(--blue);opacity:1}
 .stamp{position:absolute;top:4px;right:92px;width:82px;height:82px;color:var(--red);pointer-events:none;transform:rotate(-13deg);opacity:.9;mix-blend-mode:multiply;z-index:2}
@@ -786,6 +786,8 @@ body::before{content:"";position:fixed;top:0;left:0;right:0;height:var(--sat);ba
 .stop-rule .link{min-height:0}
 .link.danger{color:var(--red)}
 .sr-s{margin:3px 0 0;font-size:13.5px;font-weight:700;color:var(--red);line-height:1.45}
+:root:not([data-theme="dark"]) .stop-rule.on .sr-s{color:#B42A24}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .stop-rule.on .sr-s{color:var(--red)}}
 .stop-rule.done .sr-s{color:var(--blue)}
 .stop-rule .hint{margin:2px 0 0;font-size:12.5px}
 .sr-a{margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -816,7 +818,7 @@ body::before{content:"";position:fixed;top:0;left:0;right:0;height:var(--sat);ba
 .grp-n{display:inline-flex;align-items:center;gap:3px;font-size:13px;color:var(--ink-3);font-variant-numeric:tabular-nums;flex:none}
 .grp-n.ok{color:var(--blue);font-weight:600}
 .grp-h .pill{flex:none;font-size:11.5px;padding:0 8px}
-.grp.rest .grp-t,.grp.rest .grp-n{opacity:.6}
+.grp.rest .grp-t b{color:var(--ink-3)}
 .grp-h + .drill{border-top:0;padding-top:2px}
 .drill.rt .drill-top{flex-wrap:wrap;row-gap:2px}
 .drill.rt .drill-memo{order:3;flex-basis:100%;white-space:normal;overflow:visible;line-height:1.45}
@@ -889,3 +891,12 @@ body::before{content:"";position:fixed;top:0;left:0;right:0;height:var(--sat);ba
 .guide .seg button{font-size:12.5px;padding:0 2px}
 .guide .btn{margin-top:8px}
 .rt-bul{margin:0 0 12px;padding-left:18px;display:grid;gap:6px;font-size:14px;line-height:1.5}
+
+/* bigger hit areas for the small inline links (the text layout stays) */
+.drill-hint .link,.stop-rule .link,.cue-h .link{position:relative}
+.drill-hint .link::after,.stop-rule .link::after,.cue-h .link::after{content:'';position:absolute;inset:-9px -8px}
+.sr-a .link + .link{margin-left:14px}
+.lad-saved{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 4px;color:var(--blue);font-weight:700;font-size:15px}
+.lad-saved .link{font-size:14px;color:var(--ink-3);position:relative}
+.lad-saved .link::after{content:'';position:absolute;inset:-12px -10px}
+.cue-h .link{font-size:13px;padding:0}
