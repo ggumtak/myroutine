@@ -156,7 +156,8 @@ input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none}
 .navbtn:disabled{opacity:.22}
 
 /* timer */
-.timer-row{display:flex;align-items:center;gap:12px;padding:16px 0}
+.timer-row{padding:16px 0}
+.timer-line{display:flex;align-items:center;gap:12px}
 .t-main{flex:1;min-width:0}
 .t-val{font-variant-numeric:tabular-nums;font-weight:700;font-size:21px;letter-spacing:-.02em;line-height:1.2}
 .timer-row.run .t-val{color:var(--red)}
@@ -755,3 +756,136 @@ body::before{content:"";position:fixed;top:0;left:0;right:0;height:var(--sat);ba
 .sc-pad .btn{padding:0 4px;font-size:13.5px}
 .sc-pad .btn.do{background:var(--blue-soft);color:var(--blue)}
 @media (prefers-reduced-motion: reduce){.sc-seq > span{transition:none}}
+
+/* ================= 1.3: 노래 전 루틴 · 멈춤 규칙 · 발음 찾기 · 오늘의 기록 ================= */
+.hint.warn{color:var(--red);font-weight:600}
+.dot.red{background:var(--red)}
+.banner.warn{background:var(--red-soft);color:var(--ink)}
+/* timer: this singing stretch, rest, water */
+.t-seg{font-size:12.5px;color:var(--ink-2);font-variant-numeric:tabular-nums;margin-top:2px}
+.timer-row.resting .t-val{color:var(--blue)}
+.t-focus{margin:10px 0 0;font-size:13.5px;color:var(--ink-2)}
+.t-focus b,.rc-focus b,.song-hint b{color:var(--blue);font-weight:700}
+.t-acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.t-w{font-size:12.5px;color:var(--ink-3);font-weight:600;margin-left:2px}
+.tb-timer.warn{background:var(--hl);color:var(--ink)}
+.tb-timer.rest{background:var(--blue-soft);color:var(--blue)}
+/* ⛔ 멈춤 규칙 */
+.stop-card{padding:10px 0 14px}
+.stop-h{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;border:0;background:none;padding:0;color:var(--ink);text-align:left}
+.stop-h b{font-weight:700;font-size:16.5px;letter-spacing:-.02em}
+.stop-h .hint{font-size:12.5px}
+.stop-ic{font-size:16px;line-height:1}
+.stop-list{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.stop-rule{display:grid;grid-template-columns:14px 1fr;column-gap:8px;padding:3px 0;font-size:14px}
+.sr-n{color:var(--ink-3);font-size:13px;font-weight:700;line-height:21px;text-align:right;font-variant-numeric:tabular-nums}
+.sr-c{min-width:0}
+.stop-rule.on,.stop-rule.done{margin:3px -10px;padding:8px 10px;border-radius:12px;background:var(--red-soft)}
+.stop-rule.done{background:var(--blue-soft)}
+.sr-t{margin:0;font-size:14px;font-weight:500;line-height:1.5}
+.stop-rule .link{min-height:0}
+.link.danger{color:var(--red)}
+.sr-s{margin:3px 0 0;font-size:13.5px;font-weight:700;color:var(--red);line-height:1.45}
+.stop-rule.done .sr-s{color:var(--blue)}
+.stop-rule .hint{margin:2px 0 0;font-size:12.5px}
+.sr-a{margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.stop-rule .link{padding:6px 0;font-size:13.5px}
+.stop-guide{margin-top:4px;font-size:13.5px;min-height:36px}
+/* 오늘의 목표 ← 노래할 때 기억할 것 */
+.cue-box{margin-top:12px}
+.cue-h{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.cue-h .hint{font-size:12px}
+.cue-one{margin:6px 0 0;font-size:12.5px}
+.cue-list{display:grid;gap:6px}
+.cue-row{display:flex;align-items:flex-start;gap:8px;width:100%;min-height:44px;text-align:left;border:1px solid var(--rule-2);background:var(--sheet);border-radius:12px;padding:9px 12px;font-size:14px;line-height:1.45;color:var(--ink-2)}
+.cue-row .cue-t{flex:1;min-width:0}
+.cue-row b{color:var(--ink);font-weight:700}
+.cue-row[aria-pressed="true"]{border-color:var(--blue);background:var(--blue-soft)}
+.cue-list .link{justify-self:start;min-height:36px}
+/* 기초 연습 as the routine's steps */
+.drill-hint{margin:8px 0 0;font-size:13px;color:var(--ink-3);line-height:1.5}
+.drill-hint.warn{color:var(--red);font-weight:600}
+.drill-hint .link{font-size:13px;padding:0}
+.grp{border-top:1px solid var(--rule-2)}
+.drills .drill-prog + .grp,.drills .drill-hint + .grp,.drills .stamp + .grp{margin-top:8px}
+.grp-h{display:flex;align-items:center;gap:8px;width:100%;min-height:48px;border:0;background:none;padding:6px 0;text-align:left;color:var(--ink)}
+.grp-t{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 2px;min-width:0}
+.grp-t b{font-size:15.5px;font-weight:700;letter-spacing:-.02em}
+.grp-m{font-size:13px;color:var(--ink-3)}
+.grp-t small{flex-basis:100%;font-size:12px;color:var(--ink-3)}
+.grp-n{display:inline-flex;align-items:center;gap:3px;font-size:13px;color:var(--ink-3);font-variant-numeric:tabular-nums;flex:none}
+.grp-n.ok{color:var(--blue);font-weight:600}
+.grp-h .pill{flex:none;font-size:11.5px;padding:0 8px}
+.grp.rest .grp-t,.grp.rest .grp-n{opacity:.6}
+.grp-h + .drill{border-top:0;padding-top:2px}
+.drill.rt .drill-top{flex-wrap:wrap;row-gap:2px}
+.drill.rt .drill-memo{order:3;flex-basis:100%;white-space:normal;overflow:visible;line-height:1.45}
+.drill.rt .drill-count{margin-left:auto}
+.drill-rec .ph{color:var(--blue);font-weight:600}
+.drill-rec .goal{color:var(--ink-2);font-weight:600}
+.rt-insert{display:block;margin-top:12px;font-size:14px;min-height:40px}
+.drow-g{font-size:12px}
+/* 끝난 후 목 상태 1~10 */
+.after-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:6px 0}
+.ag{min-height:44px;border-radius:10px;border:1px solid var(--rule);background:var(--sheet);font-weight:700;font-size:16px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.ag.on{background:var(--blue);border-color:var(--blue);color:var(--on-accent)}
+.ag.on.low{background:var(--red);border-color:var(--red);color:var(--on-accent)}
+.after-sec{margin-top:18px}
+.after-val{font-weight:700;color:var(--blue)}
+.after-val.low,.pv-meta .low,.j-meta .low{color:var(--red)}
+.after-sheet .lead,.rt-insert-sheet .lead{margin:0 0 10px;font-size:15px;line-height:1.5}
+.after-sheet .banner{margin:8px 0 0}
+/* 오늘의 기록 */
+.rec-card{padding:8px 12px 12px;border-radius:14px;background:var(--sheet-2);margin-bottom:16px}
+.rec-card .lbl-row{min-height:32px}
+.rec-card .chips{gap:6px}
+.chip.rc{background:var(--sheet)}
+.chip.rc.ok{color:var(--blue);border-color:transparent;background:var(--blue-soft)}
+.rec-card > .hint{margin:8px 0 0;font-size:12.5px}
+.song-hint{margin:-6px 0 10px}
+.rec-heard{margin-top:6px;min-height:40px}
+.rc-focus{margin:0 0 8px;font-size:13.5px;color:var(--ink-2)}
+/* 발음 찾기 */
+.pron-sub{margin:-6px 0 10px}
+.pron-tbl{border:1px solid var(--rule-2);border-radius:12px;padding:0 12px 4px;margin-bottom:12px}
+.pron-tbl-h{display:flex;align-items:center;width:100%;min-height:44px;border:0;background:none;padding:0;color:var(--ink);font-size:14.5px}
+.pt-row{display:grid;grid-template-columns:auto 1fr;gap:0 10px;padding:6px 0;border-top:1px dashed var(--rule-2);font-size:13.5px;align-items:baseline}
+.pt-k{color:var(--ink-3)}
+.pt-j{font-size:16px;letter-spacing:.06em}
+.pt-n{grid-column:1/-1;color:var(--ink-3);font-size:12.5px}
+.pron-tabs{margin-bottom:12px}
+.pron-tabs button{font-size:13.5px;padding:0 4px}
+.pron-body{display:grid;gap:10px}
+.pron-body .lead{margin:0;font-weight:600;font-size:15px;line-height:1.5}
+.pron-body > .hint{margin:0}
+.pron-rules{margin:0;padding-left:18px;font-size:13.5px;color:var(--ink-2);display:grid;gap:3px;line-height:1.45}
+.lad-box{display:grid;gap:10px;padding:12px;border-radius:14px;background:var(--sheet-2)}
+.lad-now{display:flex;align-items:baseline;justify-content:center;gap:10px}
+.lad-now b{font-size:44px;line-height:1.1;color:var(--ink);font-weight:700}
+.lad-steps{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.lad-steps .btn{padding:0 6px;font-size:14px;gap:4px;background:var(--sheet);border:1px solid var(--rule-2)}
+.ladder{display:grid;gap:4px}
+.lad{min-width:0;min-height:48px;border-radius:10px;border:1px solid var(--rule);background:var(--sheet);font-size:17px;font-weight:700;color:var(--ink-2);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2px 0;line-height:1.15}
+.lad small{font-size:10px;font-weight:600;color:var(--ink-3)}
+.lad.saved{background:var(--hl);color:var(--ink)}
+.lad.cur{border:2px solid var(--blue);color:var(--blue)}
+.lad.cur small{color:var(--blue)}
+.lad-cap{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3);margin-top:-4px}
+.pron-from{margin:0;font-weight:600;font-size:14px}
+.pron-out{padding:12px;border-radius:14px;background:var(--sheet-2);min-height:64px}
+.pron-out .hint{margin:0}
+.pron-new{margin:4px 0;font-size:30px;line-height:1.35;word-break:keep-all;overflow-wrap:anywhere}
+.pron-new b{background:var(--hl);border-radius:4px;font-weight:700}
+.sw-big.ok{color:var(--blue)}
+/* 노래 전 루틴 안내 · 넣기 */
+.guide-sec{padding:12px 0;border-top:1px solid var(--rule-2)}
+.guide-sec:first-child{border-top:0;padding-top:0}
+.guide-sec h3{margin:0 0 8px;font-size:16px;font-weight:700}
+.guide ul,.guide ol{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14px;line-height:1.5}
+.guide ol.guide-steps{list-style:none;padding-left:0;gap:8px}
+.guide-steps ul{margin-top:2px}
+.guide p{margin:8px 0 4px;font-size:14px;line-height:1.5}
+.guide .field{margin-top:10px}
+.guide .seg button{font-size:12.5px;padding:0 2px}
+.guide .btn{margin-top:8px}
+.rt-bul{margin:0 0 12px;padding-left:18px;display:grid;gap:6px;font-size:14px;line-height:1.5}
