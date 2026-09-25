@@ -312,7 +312,7 @@ const App = {
     if (!LN) return 'unsupported';
     const p = await LN.checkPermissions();
     if (p.display !== 'granted') return 'denied';
-    try { const pend = await LN.getPending(); if ((pend.notifications || []).some(n => +n.id === 1001)) return 'ok'; } catch (e) { /* schedule again below */ }
+    /* always schedule again: a force-stopped app loses its alarms while the plugin still lists them as pending */
     return this.setReminder(true, hour, minute, body);
   },
   /* daily practice reminder */

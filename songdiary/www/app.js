@@ -499,7 +499,9 @@ const Player = {
       const e = this.eng();
       if (!this.cur || e.paused) { this.sync(); return; }
       const L = this.loop;
-      if (L && L.id === this.cur.id && L.b > L.a && e.currentTime >= L.b) { try { e.currentTime = L.a; } catch (x) { /* ignore */ } }
+      /* <audio> loops A→end from its 'ended' handler; the decoded fallback needs it here */
+      const b = L && (isFinite(L.b) ? L.b : e === this.wa ? e.duration - 0.05 : Infinity);
+      if (L && L.id === this.cur.id && b > L.a && e.currentTime >= b) { try { e.currentTime = L.a; } catch (x) { /* ignore */ } }
       this.syncCur();
       this.raf = requestAnimationFrame(step);
     };
@@ -1802,12 +1804,13 @@ function bindTrack(track, r) {
     const x0 = ev.clientX, y0 = ev.clientY;
     let dragging = false;
     const move = e2 => {
+      if (e2.pointerType === 'mouse' && !e2.buttons) { end(e2); return; }
       if (!dragging && Math.abs(e2.clientX - x0) > 8 && Math.abs(e2.clientX - x0) > Math.abs(e2.clientY - y0)) { dragging = true; try { track.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ } }
       if (dragging && Player.isCur(r.id)) Player.seek(r, ratio(e2));
     };
     const end = e2 => {
       track.removeEventListener('pointermove', move); track.removeEventListener('pointerup', end); track.removeEventListener('pointercancel', end);
-      if (e2.type === 'pointerup' && !dragging && Math.hypot(e2.clientX - x0, e2.clientY - y0) < 10) Player.seek(r, ratio(e2));
+      if (e2.type === 'pointerup' && !dragging && Math.hypot(e2.clientX - x0, e2.clientY - y0) < 10 && e2.target && track.contains(e2.target)) Player.seek(r, ratio(e2));
     };
     track.addEventListener('pointermove', move);
     track.addEventListener('pointerup', end);
@@ -2048,8 +2051,10 @@ async function openImport(date, files, src) {
 /* next take number for a song on a day: one more than the highest so far ('밤양갱 3' after 1 and 3) */
 function nextTake(date, key) {
   const e = S.days[date];
-  const nums = e ? e.recs.filter(x => (x.song || '') === (key || '')).map(x => +((/ (\d+)$/.exec(x.title || '') || [])[1] || 0)) : [];
-  return Math.max(0, ...nums, e ? e.recs.filter(x => (x.song || '') === (key || '')).length : 0) + 1;
+  const same = e ? e.recs.filter(x => (x.song || '') === (key || '')) : [];
+  const base = `${songTitleFor(date, key) || '녹음'} `;
+  const nums = same.map(x => { const t = x.title || ''; return t.startsWith(base) && /^\d{1,3}$/.test(t.slice(base.length)) ? +t.slice(base.length) : 0; });
+  return Math.max(0, ...nums, same.length) + 1;
 }
 /* a finished take is kept until it is saved or thrown away — the app may be closed while you listen back */
 function saveDraft(d) { Store.put('meta', 'recDraft', d).catch(() => {}); }
@@ -2103,6 +2108,7 @@ function pickMime() {
 }
 async function openRecorder(date) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { micFallback(date, 'unsupported'); return; }
+  try { const d = await Store.get('meta', 'recDraft'); if (d && d.blob && d.blob.size) { offerDraft(); return; } } catch (e) { /* no draft */ }
   Player.stopAll();
   let actx = null;
   try { const AC = window.AudioContext || window.webkitAudioContext; if (AC) actx = new AC(); } catch (e) { actx = null; }
@@ -3133,6 +3139,7 @@ function lastBackupInfo() { const u = lsGet(LS_UI, {}); return u.lastFull ? `마
 let exporting = false;
 async function exportBackup(withAudio, how) {
   if (exporting) { toast('백업을 만드는 중이에요. 끝날 때까지 기다려 주세요.'); return; }
+  if (S.importing) { toast('백업을 불러오는 중이에요. 다 끝난 뒤에 백업해 주세요.'); return; }
   exporting = true;
   try { await exportBackupNow(withAudio, how); } finally { exporting = false; }
 }
@@ -3164,7 +3171,7 @@ async function exportBackupNow(withAudio, how) {
     if (how === 'share') {
       t.set('보낼 준비를 하는 중…');
       const r = await Files.share({ title: name, text: '노래일기 백업', files: [{ name, blob }] });
-      if (r === 'cancelled') { t.done('보내기를 취소했어요. 백업은 아직 안 됐어요.'); return; }
+      if (r === 'cancelled') { t.done('보내기 창을 닫았어요. 보냈다면 괜찮아요.'); return; }
       t.done();
     } else {
       const where = await Files.saveToDocuments('백업', name, blob, p => t.set(`폰에 저장하는 중… ${Math.round(p * 100)}%`));
@@ -3249,6 +3256,7 @@ function mergeSettings(cur, inc) {
   return normSettings(out);
 }
 function importBackup() {
+  if (exporting) { toast('백업을 만드는 중이에요. 끝난 뒤에 불러와 주세요.'); return; }
   const inp = $('#file-json');
   inp.value = '';
   inp.onchange = async () => {
