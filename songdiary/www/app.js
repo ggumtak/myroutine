@@ -1155,9 +1155,10 @@ function SongSuggest(inp, opts) {
       local.forEach(L => rows.push(option([artThumb(L.cat && L.cat.art, 40), h('span', { class: 'sg-t' }, h('b', null, L.title), h('small', null, [L.artist, `${L.dates.length}일 연습`].filter(Boolean).join(' · ')))], { title: L.title, artist: L.artist, key: L.key })));
     }
     const term = SS.onlineTerm(q);
+    let items = [];
     if (online() && term) {
       const mine = new Set(local.map(L => L.key));
-      const items = net.q === term ? net.items.filter(it => !mine.has(normKey(SS.cleanTitle(it.title)))).slice(0, 6) : [];
+      items = net.q === term ? net.items.filter(it => !mine.has(normKey(SS.cleanTitle(it.title)))).slice(0, 6) : [];
       if (items.length) {
         rows.push(h('div', { class: 'sg-h' }, '노래 찾기'));
         items.forEach(it => rows.push(option([artThumb(it.art, 40), h('span', { class: 'sg-t' }, h('b', null, it.title), h('small', null, [it.artist, it.album && it.album !== it.title ? it.album.replace(/ - (Single|EP)$/, '') : '', it.year].filter(Boolean).join(' · ')))], { title: SS.cleanTitle(it.title), artist: it.artist, cat: catOf(it) })));
@@ -1171,7 +1172,7 @@ function SongSuggest(inp, opts) {
       if (st) rows.push(h('div', { class: 'sg-status' + (busy ? ' busy' : ''), role: 'status' }, st));
     }
     if (opts.free) rows.push(option([h('span', { class: 'sg-art plus', 'aria-hidden': 'true' }, icon('plus', 18)), h('span', { class: 'sg-t' }, h('b', null, `‘${q}’ 그대로 추가`))], { free: q }, 'free'));
-    if (online() && term && net.q === term && net.items.length) rows.push(h('div', { class: 'sg-src' }, 'Apple Music 곡 정보'));
+    if (items.length) rows.push(h('div', { class: 'sg-src' }, 'Apple Music 곡 정보'));
     box.replaceChildren(...rows);
     const was = shown;
     box.hidden = !rows.length;
@@ -1233,7 +1234,8 @@ function SongHero(L, key, onChange) {
       c && c.prev ? h('button', { class: 'btn soft sm', onclick: ev => Preview.toggle(c.prev, ev.currentTarget) }, icon('play', 16), '원곡 미리듣기') : null,
       h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://www.youtube.com/results?search_query=${enc(q)}`) }, icon('video', 17), '유튜브'),
       h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://www.youtube.com/results?search_query=${enc(q + ' MR')}`) }, icon('music', 16), 'MR 찾기'),
-      h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://m.search.naver.com/search.naver?query=${enc(q + ' 가사')}`) }, icon('lyrics', 16), '가사')));
+      h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://m.search.naver.com/search.naver?query=${enc(q + ' 가사')}`) }, icon('lyrics', 16), '가사'),
+      h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://m.search.naver.com/search.naver?query=${enc(q + ' 노래방 번호')}`) }, icon('search', 16), '노래방 번호')));
 }
 function openSongLink(key, onDone) {
   const L = songLib().get(key);
@@ -2230,7 +2232,7 @@ function openItem(date, kind, id) {
       field('주제', tagChips),
       kind === 'fb' ? field('누가 말해 줬나요?', fromChips) : null,
       ToggleRow('잊지 말 것으로 고정', pinned, v => { pinned = v; }, '오늘 화면 맨 위에 계속 보여 줘요', 'pin'),
-      kind !== 'good' ? ToggleRow('해결했어요', resolved, v => { resolved = v; }, '피드백 모아보기에서 ‘해결함’으로 옮겨요', 'check') : null,
+      kind !== 'good' ? ToggleRow('해결했어요', resolved, v => { resolved = v; }, '피드백 탭에서 ‘해결함’ 쪽으로 옮겨요', 'check') : null,
       h('button', { class: 'btn ghost danger wide', style: 'margin-top:10px', onclick: () => { closeSheet(s, true); deleteItem(date, kind, id); } }, icon('trash', 18), '지우기')),
     foot: [save]
   });

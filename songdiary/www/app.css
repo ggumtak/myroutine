@@ -635,6 +635,7 @@ body.kb main{padding-bottom:40vh}
 .hero-t .link{display:inline-flex;align-items:center;gap:4px;font-size:13px;padding:6px 0 0}
 .hero-links{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:6px}
 .hero-links .btn.soft{background:var(--sheet)}
+.hero-links .btn:last-child:nth-child(odd){grid-column:1 / -1}
 .hero-links .btn.on{background:var(--blue);color:var(--on-accent)}
 
 /* what's new */
