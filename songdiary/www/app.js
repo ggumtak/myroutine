@@ -3208,7 +3208,7 @@ function importBackup() {
       const t = toastProgress('불러오는 중…');
       S.importing = true;
       try {
-        let n = 0, na = 0, left = 0, full = false;
+        let n = 0, na = 0, left = 0, full = false, noSound = 0;
         const fresh = !entryDates().length;
         const recHome = new Map();
         for (const d in S.days) S.days[d].recs.forEach(r => recHome.set(r.id, d));
@@ -3216,6 +3216,11 @@ function importBackup() {
           const inc = normDay(d, clone(data.days[d]));
           /* a recording moved to another date here already — keep only that copy */
           inc.recs = inc.recs.filter(r => !recHome.has(r.id) || recHome.get(r.id) === d);
+          /* a recording whose sound is neither on this phone nor in this file would be an unplayable row
+             (e.g. one deleted after a text-only backup was made) — a full backup brings it back with its sound */
+          const before = inc.recs.length;
+          inc.recs = inc.recs.filter(r => recHome.has(r.id) || !r.aud || AUD.has(r.aud) || (zip && audioMap[r.aud]));
+          noSound += before - inc.recs.length;
           if (!hasContent(inc)) continue;
           const cur = S.days[d];
           const merged = mergeDay(cur, inc);
@@ -3254,7 +3259,8 @@ function importBackup() {
         while (Sheets.length) closeSheet(null, true);
         render();
         const what = !n && !na ? '새로 불러올 기록이 없었어요' : na ? `${n ? `${n}일치 기록과 ` : ''}녹음 ${na}개를 불러왔어요` : `${n}일치 기록을 불러왔어요`;
-        t.done(full ? `${what}. 폰 공간이 부족해서 녹음 ${left}개는 못 넣었어요. 공간을 비우고 같은 파일을 다시 불러오면 이어서 넣어요.` : what);
+        const main = full ? `${what}. 폰 공간이 부족해서 녹음 ${left}개는 못 넣었어요. 공간을 비우고 같은 파일을 다시 불러오면 이어서 넣어요.` : what;
+        t.done(noSound ? `${main.replace(/\.?$/, '.')} 소리 파일이 없는 녹음 ${noSound}개는 빼고 넣었어요.` : main);
       } catch (err) { console.error(err); t.done(err && err.name === 'QuotaExceededError' ? '폰 저장 공간이 부족해서 다 불러오지 못했어요. 공간을 비운 뒤 다시 불러와 주세요.' : '불러오다가 문제가 생겼어요. 파일을 확인해 주세요.'); }
       finally { S.importing = false; }
     } });
