@@ -898,6 +898,12 @@ function render(opts = {}) {
   S.popNote = null; S.justDone = null;
 }
 function go(tab) { S.tab = tab; render({ top: true }); }
+/* Today, scrolled to one of its sections */
+function goSection(id) {
+  if (S.date !== todayStr()) { S.date = todayStr(); S.follow = true; }
+  go('today');
+  requestAnimationFrame(() => { const el = document.getElementById(id); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 64, behavior: 'smooth' }); });
+}
 function goDate(d) {
   if (d > todayStr()) return;
   S.date = d; S.follow = d === todayStr(); S.tab = 'today';
@@ -1729,7 +1735,8 @@ function RecRow(r, date, opts = {}) {
     marks.map(m => h('i', { class: 'tick', style: `left:${(m.t / r.dur * 100).toFixed(2)}%` })),
     h('div', { class: 'knob' }));
   bindTrack(track, r);
-  const sub = opts.label || (opts.showDate ? fmtMD(date) : (r.songTitle || ''));
+  const dup = r.songTitle && String(r.title || '').startsWith(r.songTitle);
+  const sub = opts.label || (opts.showDate ? fmtMD(date) : (dup ? '' : r.songTitle || ''));
   return h('div', { class: 'rec' + (hasAudio(r) ? '' : ' missing'), 'data-rec': r.id, 'data-dur': r.dur || 0 },
     h('button', { class: 'play', 'aria-label': '재생', 'data-state': 'play', onclick: () => Player.toggle(r) }, icon('play', 22)),
     h('div', { class: 'rec-top' }, h('span', { class: 'rec-title' }, r.title || '녹음'), sub ? h('span', { class: 'rec-song' }, sub) : null,
@@ -1744,7 +1751,7 @@ function RecRow(r, date, opts = {}) {
       softRender();
     } }, icon('star', 20)),
     h('div', { class: 'rec-bar' }, track, h('span', { class: 'rec-time' }, r.dur ? fmtDur(r.dur) : ''), h('button', { class: 'speed', hidden: true, 'aria-label': '재생 속도 바꾸기', onclick: () => Player.cycleRate() }, '1×')),
-    h('button', { class: 'icon-btn more', 'aria-label': '녹음 자세히 보기', onclick: () => openRecDetail(recHomeOf(r.id) || date, r.id) }, icon('more', 20)));
+    opts.noMore ? null : h('button', { class: 'icon-btn more', 'aria-label': '녹음 자세히 보기', onclick: () => openRecDetail(recHomeOf(r.id) || date, r.id) }, icon('more', 20)));
 }
 function bindTrack(track, r) {
   track.addEventListener('pointerdown', ev => {
@@ -1798,7 +1805,7 @@ function openRecDetail(date, id) {
   });
 
   /* player block */
-  const rowBox = h('div', { class: 'recs detail-row' }, RecRow(r, date, { label: fmtMD(date) }));
+  const rowBox = h('div', { class: 'recs detail-row' }, RecRow(r, date, { label: fmtMD(date), noMore: true }));
   const speedSeg = h('div', { class: 'seg speed-seg', role: 'group', 'aria-label': '재생 속도' });
   const drawSpeed = () => speedSeg.replaceChildren(...[0.5, 0.75, 1, 1.25].map(v => segBtn(v === 1 ? '보통' : v + '×', Player.rate === v, () => { Player.setRate(v); drawSpeed(); })));
   drawSpeed();
@@ -1851,7 +1858,7 @@ function openRecDetail(date, id) {
           h('button', { class: 'icon-btn', 'aria-label': '메모 지우기', onclick: () => { const cc = live(); if (!cc) return; cc.marks = (cc.marks || []).filter(x => x.id !== m.id); touch(curDate); drawMarks(); refreshRow(); } }, icon('x', 17)));
       })) : h('p', { class: 'hint' }, '들으면서 신경 쓰이는 곳에서 누르면 그 시간에 메모가 붙어요. 누르면 그 부분부터 다시 들어요.'));
   };
-  const refreshRow = () => { const c = live(); if (c) { rowBox.replaceChildren(RecRow(c, curDate, { label: fmtMD(curDate) })); Player.sync(); } };
+  const refreshRow = () => { const c = live(); if (c) { rowBox.replaceChildren(RecRow(c, curDate, { label: fmtMD(curDate), noMore: true })); Player.sync(); } };
   drawMarks();
 
   const info = [r.at ? fmtHM(r.at) : '', r.src === 'mic' ? '바로 녹음' : r.src === 'share' ? '다른 앱에서 받음' : '파일에서 불러옴', [r.dur ? fmtDur(r.dur) : '', r.size ? fmtMB(r.size) : ''].filter(Boolean).join(', ')].filter(Boolean);
@@ -2140,7 +2147,7 @@ async function openRecorder(date) {
         let peak = 0;
         for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i] - 128) / 128; if (v > peak) peak = v; }
         if (peak > 0.98) hotUntil = ts + 1200;
-        if (ts - last > 50) { last = ts; hist.shift(); hist.push(stage === 'paused' ? 0 : peak); bars.forEach((b, i) => { b.style.transform = `scaleY(${Math.max(0.06, Math.min(1, hist[i] * 1.5)).toFixed(3)})`; }); meter.classList.toggle('hot', ts < hotUntil); }
+        if (ts - last > 50) { last = ts; hist.shift(); hist.push(stage === 'recording' || stage === 'ready' ? peak : 0); bars.forEach((b, i) => { b.style.transform = `scaleY(${Math.max(0.06, Math.min(1, hist[i] * 1.5)).toFixed(3)})`; }); meter.classList.toggle('hot', ts < hotUntil); }
         raf = requestAnimationFrame(loop);
       };
       raf = requestAnimationFrame(loop);
@@ -2149,6 +2156,7 @@ async function openRecorder(date) {
   const drawMarks = () => { markInfo.textContent = marks.length ? `표시 ${marks.length}개: ${marks.map(m => fmtT(m.t)).join(', ')}` : ''; };
   const idle = () => {
     stage = 'ready';
+    meter.hidden = false;
     status.style.color = '';
     status.textContent = actx ? '소리를 내 보며 막대가 움직이는지 확인하고 시작하세요. 막대가 노랗게 되면 폰을 조금 멀리 두세요.' : '준비됐어요.';
     timeEl.textContent = '0:00';
@@ -2201,6 +2209,7 @@ async function openRecorder(date) {
   };
   const review = () => {
     stage = 'review';
+    meter.hidden = true;
     drawMr();
     box.classList.remove('on', 'paused');
     Native.keepAwake(false);
@@ -2783,7 +2792,7 @@ function SongsView() {
 }
 function SongListPanel() {
   const all = Array.from(songLib().values()).sort((a, b) => b.last.localeCompare(a.last) || b.dates.length - a.dates.length);
-  if (!all.length) return h('div', { class: 'page' }, h('div', { class: 'empty' }, h('span', { class: 'hand' }, '아직 부른 노래가 없어요'), '오늘 화면의 ‘노래’에 부른 곡을 적으면 곡마다 연습한 날과 녹음이 모여요.'));
+  if (!all.length) return h('div', { class: 'page' }, h('div', { class: 'empty' }, h('span', { class: 'hand' }, '아직 부른 노래가 없어요'), '오늘 화면의 ‘노래’에 부른 곡을 적으면 곡마다 연습한 날과 녹음이 모여요.', h('div', null, h('button', { class: 'btn soft mt', onclick: () => goSection('sec-songs') }, icon('music', 18), '오늘 부른 노래 적기'))));
   if (S.lib.status && !all.some(L => L.status === S.lib.status)) S.lib.status = null;
   const used = SONG_STATUS.filter(st => all.some(L => L.status === st));
   const lib = S.lib.status ? all.filter(L => L.status === S.lib.status) : all;
@@ -2868,8 +2877,12 @@ function AllRecsPanel() {
   const total = Object.values(S.days).reduce((a, e) => a + e.recs.length, 0);
   const page = h('div', { class: 'page' },
     h('div', { class: 'sec-h', style: 'margin:16px 0 6px' }, h('h2', null, '모든 녹음'), h('span', { class: 'sec-note' }, `${total}개`), h('span', { class: 'sp' }),
-      h('button', { class: 'chip sm', 'aria-pressed': String(S.lib.best), onclick: () => { S.lib.best = !S.lib.best; render(); } }, icon('star', 15), '베스트만')));
-  if (!rows.length) { page.append(h('div', { class: 'empty' }, S.lib.best ? '별표를 누른 베스트 녹음이 아직 없어요.' : '아직 녹음이 없어요. 오늘 화면의 ‘녹음’에서 바로 녹음하거나 파일을 불러오세요.')); return page; }
+      total ? h('button', { class: 'chip sm', 'aria-pressed': String(S.lib.best), onclick: () => { S.lib.best = !S.lib.best; render(); } }, icon('star', 15), '베스트만') : null));
+  if (!rows.length) {
+    page.append(h('div', { class: 'empty' }, S.lib.best ? '별표를 누른 베스트 녹음이 아직 없어요.' : '아직 녹음이 없어요. 오늘 화면의 ‘녹음’에서 바로 녹음하거나 파일을 불러오세요.',
+      !S.lib.best ? h('div', null, h('button', { class: 'btn soft mt', onclick: () => goSection('sec-recs') }, icon('mic', 18), '오늘 화면에서 녹음하기')) : null));
+    return page;
+  }
   let last = '';
   const box = h('div', { class: 'recs' });
   rows.forEach(({ d, r }) => {
@@ -3017,7 +3030,7 @@ function TagEditor() {
     };
     bindEnter(inp, add);
     box.replaceChildren(
-      h('div', { class: 'chips tag-edit' }, S.settings.tags.map((t, i) => h('span', { class: 'chip sm' }, t, h('button', { class: 'x', style: 'border:0;background:none;padding:0', 'aria-label': `${t} 주제 지우기`, onclick: () => { S.settings.tags.splice(i, 1); touchSettings(); draw(); } }, icon('x', 14))))),
+      h('div', { class: 'chips tag-edit' }, S.settings.tags.map((t, i) => h('span', { class: 'chip sm' }, t, h('button', { class: 'x', style: 'border:0;background:none;padding:0', 'aria-label': `${t} 주제 지우기`, onclick: () => { const [gone] = S.settings.tags.splice(i, 1); touchSettings(); draw(); toast(`‘${gone}’ 주제를 지웠어요`, { action: '되돌리기', onAction: () => { if (!S.settings.tags.includes(gone)) S.settings.tags.splice(Math.min(i, S.settings.tags.length), 0, gone); touchSettings(); draw(); } }); } }, icon('x', 14))))),
       h('div', { class: 'composer', style: 'margin-top:10px' }, inp, h('button', { class: 'btn soft sm', onclick: add }, '추가')));
   };
   draw();
@@ -3037,7 +3050,7 @@ function StorageBlock() {
       const bytes = all.reduce((a, [, v]) => a + ((v && v.size) || 0), 0);
       const used = usedAudioIds();
       const orphans = all.filter(([k]) => !used.has(k));
-      let txt = `녹음 ${all.length - orphans.length}개, ${fmtMB(bytes)}`;
+      let txt = `녹음 ${all.length - orphans.length}개, ${bytes ? fmtMB(bytes) : '0MB'}`;
       if (navigator.storage && navigator.storage.estimate) { try { const est = await navigator.storage.estimate(); if (est && est.quota) txt += ` (쓸 수 있는 공간 약 ${fmtMB(Math.max(0, est.quota - est.usage))})`; } catch (e) { /* ignore */ } }
       info.textContent = txt;
       if (orphans.length) {
