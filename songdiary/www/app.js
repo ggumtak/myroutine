@@ -284,7 +284,7 @@ async function loadAll() {
     S.days = {};
     for (const [k, v] of days) if (isDateKey(k)) S.days[k] = normDay(k, v);
     S.mode = 'ready';
-    if (!meta) { queueWrite('@s', 50); S.firstRun = true; }
+    if (!meta) { queueWrite('@s', 50); S.firstRun = true; const u = lsGet(LS_UI, {}); u.seen11 = 1; lsSet(LS_UI, u); }
   } catch (err) {
     console.error(err);
     S.mode = 'error'; S.loadErr = err;
@@ -659,7 +659,7 @@ const Player = {
     if (time) time.textContent = on ? `${fmtDur(t)} / ${d ? fmtDur(d) : '-:--'}` : (d ? fmtDur(d) : '');
     const sp = row.querySelector('.speed');
     /* shown only once the speed was changed (in the detail sheet), so the track doesn't jump when playback starts */
-    if (sp) { sp.hidden = !on || e !== this.el || this.rate === 1; sp.textContent = this.rate + '×'; }
+    if (sp) { sp.hidden = this.rate === 1; sp.style.visibility = on && e === this.el ? 'visible' : 'hidden'; sp.textContent = this.rate + '×'; }
     const lp = row.querySelector('.loop-band');
     if (lp) {
       const L = this.loop;
@@ -756,7 +756,7 @@ function toast(msg, opt = {}) {
   t.replaceChildren(...[h('span', null, msg), opt.action ? h('button', { onclick: () => { t.classList.remove('show'); opt.onAction(); } }, opt.action) : null].filter(Boolean));
   t.classList.add('show');
   clearTimeout(toastTimer);
-  const hide = () => t.classList.remove('show');
+  const hide = () => { t.classList.remove('show'); setTimeout(() => { if (!t.classList.contains('show')) t.replaceChildren(); }, 250); };
   toastTimer = setTimeout(hide, opt.action ? 5500 : 2600);
   t.onfocusin = () => clearTimeout(toastTimer);
   t.onfocusout = () => { clearTimeout(toastTimer); toastTimer = setTimeout(hide, 2600); };
@@ -820,7 +820,11 @@ function closeSheet(obj, force) {
     obj.bd.remove(); obj.sheet.remove();
     const p = obj.prevFocus, top = Sheets[Sheets.length - 1];
     if (top) { if (!top.sheet.contains(document.activeElement)) top.head.focus({ preventScroll: true }); }
-    else if (p && p.isConnected && p !== document.body && !/^(INPUT|TEXTAREA|SELECT)$/.test(p.tagName) && !isTyping()) p.focus({ preventScroll: true });
+    else if (p && p !== document.body && !/^(INPUT|TEXTAREA|SELECT)$/.test(p.tagName) && !isTyping()) {
+      const k = ctlKey(p);
+      const el = p.isConnected ? p : k ? $$('button,[role="slider"],select', $('#view')).find(x => ctlKey(x) === k) : null;
+      if (el) el.focus({ preventScroll: true });
+    }
   }, 300);
   if (!Sheets.length) { S.sheetOpen = false; document.body.classList.remove('noscroll'); NowPlaying.paint(); }
   try { if (obj.onClose) obj.onClose(); } catch (e) { console.error(e); }
@@ -905,7 +909,12 @@ function render(opts = {}) {
   main.replaceChildren(node);
   window.scrollTo(0, opts.top ? 0 : y);
   if (opts.focus) { const el = main.querySelector(`[data-fk="${opts.focus}"]`); if (el) el.focus({ preventScroll: true }); }
-  else if (keep) { const el = $$('button,[role="slider"],select', main).find(x => ctlKey(x) === keep); if (el) el.focus({ preventScroll: true }); }
+  else if (keep) {
+    const find = k => $$('button,[role="slider"],select', main).find(x => ctlKey(x) === k && !x.disabled);
+    const dm = /^dr-(.+)-(plus|staff|minus|fold)$/.exec(keep);
+    const el = find(keep) || (dm && (find(`dr-${dm[1]}-fold`) || find(`dr-${dm[1]}-plus`)));
+    if (el) el.focus({ preventScroll: true });
+  }
   Player.sync();
   tickTimer();
   updateSave();
@@ -986,7 +995,7 @@ function stopTimer() {
   if (!tm) return;
   lsSet(LS_TIMER, null);
   const add = Math.round((Date.now() - tm.start) / 60000);
-  if (add > 240) { render(); editMinutes(tm.date, ((S.days[tm.date] || {}).minutes || 0) + add, '4시간 넘게 켜져 있었어요. 이 날 연습한 시간을 모두 합쳐서 확인해 주세요.', () => { lsSet(LS_TIMER, tm); render(); toast('연습 시간을 계속 재고 있어요'); }); return; }
+  if (add > 240) { render(); editMinutes(tm.date, ((S.days[tm.date] || {}).minutes || 0) + add, '4시간 넘게 켜져 있었어요. 이 날 연습한 시간을 모두 합쳐서 확인해 주세요.', () => toast('기록하지 않았어요. 연필 버튼으로 직접 적을 수 있어요')); return; }
   if (add >= 1) { const e = ensureDay(tm.date); e.minutes = (e.minutes || 0) + add; touch(tm.date); toast(`${fmtMin(add)}을 기록했어요`); }
   else toast('1분이 안 돼서 기록하지 않았어요');
   render();
@@ -1141,6 +1150,14 @@ function linkSong(key, cat, artist, forceArtist) {
   touchSettings();
 }
 const catOf = it => normCat({ src: it.src, id: it.id, title: it.title, artist: it.artist, album: it.album, art: it.art, prev: it.prev, year: it.year, ms: it.ms, genre: it.genre });
+/* the diary's song that a title means — '사건의지평선' and '사건의 지평선' are the same song */
+function findSong(title, lib) {
+  lib = lib || songLib();
+  const L = lib.get(normKey(title));
+  if (L) return L;
+  const f = SS.fold(title);
+  return f ? Array.from(lib.values()).find(x => SS.fold(x.title) === f) || null : null;
+}
 function libMatches(q, skip) {
   const out = [];
   for (const L of songLib().values()) {
@@ -1174,8 +1191,9 @@ function SongSuggest(inp, opts) {
   const keep = ev => ev.preventDefault(); /* tapping a suggestion keeps the keyboard up */
   const online = () => opts.online !== false && S.settings.songSearch !== false;
   const hide = () => { box.hidden = true; shown = false; active = -1; inp.setAttribute('aria-expanded', 'false'); inp.removeAttribute('aria-activedescendant'); };
+  const cancel = () => { clearTimeout(timer); seq++; if (net.state === 'loading') net = { q: '', state: 'idle', items: [] }; };
   const pick = p => {
-    clearTimeout(timer); seq++;
+    cancel();
     hide();
     if (p.free != null) opts.onFree(p.free); else opts.onPick(p);
   };
@@ -1198,7 +1216,8 @@ function SongSuggest(inp, opts) {
       picks.push(p);
       return h('button', { type: 'button', class: 'sg-item' + (cls ? ' ' + cls : ''), role: 'option', id: `${box.id}-${i}`, 'aria-selected': String(i === active), tabindex: -1, onpointerdown: keep, onmousedown: keep, onclick: () => pick(p) }, content);
     };
-    const local = opts.local === false ? [] : libMatches(q, opts.skip && opts.skip());
+    const skipKeys = opts.skip ? opts.skip() : null;
+    const local = opts.local === false ? [] : libMatches(q, skipKeys);
     if (local.length) {
       rows.push(h('div', { class: 'sg-h' }, '내가 부른 노래'));
       local.forEach(L => rows.push(option([artThumb(L.cat && L.cat.art, 40), h('span', { class: 'sg-t' }, h('b', null, L.title), h('small', null, [L.artist, `${L.dates.length}일 연습`].filter(Boolean).join(' · ')))], { title: L.title, artist: L.artist, key: L.key })));
@@ -1206,8 +1225,8 @@ function SongSuggest(inp, opts) {
     const term = SS.onlineTerm(q);
     let items = [];
     if (online() && term) {
-      const mine = new Set(local.map(L => L.key));
-      items = net.q === term ? net.items.filter(it => !mine.has(normKey(SS.cleanTitle(it.title)))).slice(0, 6) : [];
+      const mine = new Set([...(opts.local === false ? [] : Array.from(songLib().values()).map(L => SS.fold(L.title))), ...Array.from(skipKeys || []).map(k => SS.fold(k))]);
+      items = net.q === term ? net.items.filter(it => !mine.has(SS.fold(SS.cleanTitle(it.title)))).slice(0, 6) : [];
       if (items.length) {
         rows.push(h('div', { class: 'sg-h' }, '노래 찾기'));
         items.forEach(it => rows.push(option([artThumb(it.art, 40), h('span', { class: 'sg-t' }, h('b', null, it.title), h('small', null, [it.artist, it.album && it.album !== it.title ? it.album.replace(/ - (Single|EP)$/, '') : '', it.year].filter(Boolean).join(' · ')))], { title: SS.cleanTitle(it.title), artist: it.artist, cat: catOf(it) })));
@@ -1229,7 +1248,9 @@ function SongSuggest(inp, opts) {
     inp.setAttribute('aria-expanded', String(shown));
     if (shown && !was && !opts.always) setTimeout(reveal, 60);
   };
+  let retry = 0;
   const search = async () => {
+    if (!inp.isConnected) return;
     const term = SS.onlineTerm(inp.value.trim());
     if (!term || !online() || (net.q === term && (net.state === 'done' || net.state === 'loading'))) return;
     const my = ++seq;
@@ -1242,6 +1263,8 @@ function SongSuggest(inp, opts) {
     } catch (e) {
       if (my !== seq) return;
       net = { q: term, state: e && e.offline ? 'offline' : e && e.busy ? 'busy' : 'error', items: [] };
+      /* rate limited: try again by itself once the pause is over */
+      if (net.state === 'busy') { clearTimeout(retry); retry = setTimeout(() => { if (inp.isConnected && SS.onlineTerm(inp.value.trim()) === term) { net = { q: '', state: 'idle', items: [] }; search(); } }, Math.max(0, SS.Catalog.coolUntil - Date.now()) + 100); }
     }
     if (inp.isConnected) draw();
   };
@@ -1264,10 +1287,11 @@ function SongSuggest(inp, opts) {
   /* Enter while a suggestion is highlighted picks it */
   box.takeActive = () => { if (!box.hidden && active >= 0 && picks[active]) { pick(picks[active]); return true; } return false; };
   box.search = () => { dirty = true; draw(); search(); };
+  box.cancel = cancel;
   return box;
 }
 /* album art, singer, and quick ways to hear the original / find an MR / read the lyrics */
-function SongHero(L, key, onChange) {
+function SongHero(L, key, onChange, beforeLink) {
   const c = L.cat;
   const q = [L.title, L.artist].filter(Boolean).join(' ');
   const enc = encodeURIComponent;
@@ -1278,7 +1302,7 @@ function SongHero(L, key, onChange) {
       h('div', { class: 'hero-t' },
         h('b', null, L.title),
         h('span', { class: sub ? '' : 'hint' }, sub || '가수는 아래에 적거나 실제 노래와 연결하면 채워져요'),
-        h('button', { class: 'link', onclick: () => openSongLink(key, onChange) }, icon('link', 15), c ? '다른 노래로 연결' : '실제 노래와 연결하기'))),
+        h('button', { class: 'link', onclick: () => { if (beforeLink) beforeLink(); openSongLink(key, onChange); } }, icon('link', 15), c ? '다른 노래로 연결' : '실제 노래와 연결하기'))),
     h('div', { class: 'hero-links' },
       c && c.prev ? h('button', { class: 'btn soft sm', onclick: ev => Preview.toggle(c.prev, ev.currentTarget) }, icon('play', 16), '원곡 미리듣기') : null,
       h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://www.youtube.com/results?search_query=${enc(q)}`) }, icon('video', 17), '유튜브'),
@@ -1449,7 +1473,8 @@ function CondSec(date, e) {
       h('div', { class: 'stepper' },
         h('button', { 'aria-label': sl === 0 ? '잠 기록 지우기' : '잠 30분 줄이기', onclick: () => setDay(d => { d.sleep = d.sleep == null ? 7 : d.sleep <= 0 ? null : Math.max(0, d.sleep - 0.5); }) }, '−'),
         h('span', { class: 'sv' + (sl == null ? ' none' : '') }, sl == null ? '안 적음' : `${sl}시간`),
-        h('button', { 'aria-label': '잠 30분 늘리기', onclick: () => setDay(d => { d.sleep = d.sleep == null ? 7 : Math.min(14, d.sleep + 0.5); }) }, '+'))),
+        h('button', { 'aria-label': '잠 30분 늘리기', onclick: () => setDay(d => { d.sleep = d.sleep == null ? 7 : Math.min(14, d.sleep + 0.5); }) }, '+')),
+      sl != null ? h('button', { class: 'icon-btn', 'aria-label': '잠 기록 지우기', onclick: () => setDay(d => { d.sleep = null; }) }, icon('x', 18)) : null),
     h('div', { class: 'cond-line' }, h('span', { class: 'lbl' }, '물'), cups, h('span', { class: 'val' }, `${w}잔`)));
 }
 function GoalSec(date, e) {
@@ -1535,7 +1560,7 @@ function SongSec(date, e) {
     onPick: p => addSong(date, p.title, p, true),
     onFree: t => addSong(date, t, null, true)
   });
-  const add = () => { if (!inp.isConnected || sugg.takeActive()) return; addSong(date, inp.value, null, true); };
+  const add = () => { if (!inp.isConnected || sugg.takeActive()) return; sugg.cancel(); addSong(date, inp.value, null, true); };
   bindEnter(inp, add);
   const recent = Array.from(lib.values()).filter(L => !songs.some(s => normKey(s.title) === L.key)).sort((a, b) => b.last.localeCompare(a.last)).slice(0, 8);
   const best = bestHigh();
@@ -1574,10 +1599,11 @@ function addSong(date, raw, pick, typing) {
   const e = ensureDay(date);
   const k = normKey(title);
   if (e.songs.some(s => normKey(s.title) === k)) { toast('이미 추가한 노래예요'); return; }
-  const L = songLib().get(k);
+  const L = findSong(title);
+  if (L && e.songs.some(s => normKey(s.title) === L.key)) { toast('이미 추가한 노래예요'); return; }
   const artist = (L && L.artist) || (pick && pick.artist) || '';
   e.songs.push({ id: uid('s'), title: L ? L.title : title, artist, tone: L ? L.tone : '', note: '' });
-  if (pick && pick.cat && !(L && L.cat)) linkSong(k, pick.cat, artist);
+  if (pick && pick.cat && !(L && L.cat)) linkSong(L ? L.key : k, pick.cat, artist);
   if (typing) S.songDraft = null;
   touch(date);
   render(typing ? { focus: 'song' } : {});
@@ -1753,10 +1779,10 @@ function RecRow(r, date, opts = {}) {
   const sub = opts.label || (opts.showDate ? fmtMD(date) : (dup ? '' : r.songTitle || ''));
   const name = r.title || '녹음';
   return h('div', { class: 'rec' + (hasAudio(r) ? '' : ' missing'), 'data-rec': r.id, 'data-dur': r.dur || 0, 'data-title': name },
-    h('button', { class: 'play', 'aria-label': `${name} 재생`, 'data-state': 'play', onclick: () => Player.toggle(r) }, icon('play', 22)),
+    h('button', { class: 'play', 'data-fk': `rec-play-${r.id}`, 'aria-label': `${name} 재생`, 'data-state': 'play', onclick: () => Player.toggle(r) }, icon('play', 22)),
     h('div', { class: 'rec-top' }, h('span', { class: 'rec-title' }, r.title || '녹음'), sub ? h('span', { class: 'rec-song' }, sub) : null,
       marks.length ? h('span', { class: 'rec-marks', 'aria-label': `구간 메모 ${marks.length}개` }, icon('flag', 13), marks.length) : null),
-    h('button', { class: 'icon-btn star' + (r.fav ? ' on' : ''), 'aria-label': `${name} 베스트`, 'aria-pressed': String(!!r.fav), onclick: ev => {
+    h('button', { class: 'icon-btn star' + (r.fav ? ' on' : ''), 'data-fk': `rec-star-${r.id}`, 'aria-label': `${name} 베스트`, 'aria-pressed': String(!!r.fav), onclick: ev => {
       const at = recHomeOf(r.id) || date;
       const cur = findRec(at, r.id); if (!cur) return;
       cur.fav = !cur.fav; touch(at);
@@ -1766,7 +1792,7 @@ function RecRow(r, date, opts = {}) {
       softRender();
     } }, icon('star', 20)),
     h('div', { class: 'rec-bar' }, track, h('span', { class: 'rec-time' }, r.dur ? fmtDur(r.dur) : ''), h('button', { class: 'speed', hidden: true, 'aria-label': '재생 속도 바꾸기', onclick: () => Player.cycleRate() }, '1×')),
-    opts.noMore ? null : h('button', { class: 'icon-btn more', 'aria-label': `${name} 자세히 보기`, onclick: () => openRecDetail(recHomeOf(r.id) || date, r.id) }, icon('more', 20)));
+    opts.noMore ? null : h('button', { class: 'icon-btn more', 'data-fk': `rec-more-${r.id}`, 'aria-label': `${name} 자세히 보기`, onclick: () => openRecDetail(recHomeOf(r.id) || date, r.id) }, icon('more', 20)));
 }
 function bindTrack(track, r) {
   track.addEventListener('pointerdown', ev => {
@@ -2142,7 +2168,7 @@ async function openRecorder(date) {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   };
   const sheet = openSheet({ title: '녹음', body: box, onClose: cleanup, beforeClose: () => {
-    if (stage === 'recording' || stage === 'paused') { status.textContent = '먼저 ‘끝내기’를 눌러 녹음을 마쳐 주세요.'; status.style.color = 'var(--red)'; return false; }
+    if (stage === 'recording' || stage === 'paused') { status.textContent = '먼저 ‘끝내기’를 눌러 녹음을 마쳐 주세요.'; status.style.color = 'var(--red)'; toast('먼저 ‘끝내기’를 눌러 녹음을 마쳐 주세요.'); return false; }
     if (stage === 'review' && Date.now() - warned > 3000) { warned = Date.now(); status.textContent = '저장하지 않은 녹음이 있어요. 그래도 닫으려면 한 번 더 누르세요.'; status.style.color = 'var(--red)'; return false; }
     if (stage === 'review') dropDraft();
     return true;
@@ -2314,7 +2340,7 @@ function openSongEntry(date, sid) {
   const nInp = autoTA({ class: 'input lined', value: so.note || '', placeholder: '예: 2절 브릿지 숨 위치 바꿔 봄', 'aria-label': '오늘 이 노래 메모' }, 66);
   /* a corrected title can be applied to every day this song was sung */
   const origKey = normKey(so.title);
-  const otherDays = Object.keys(S.days).filter(x => x !== date && S.days[x].songs.some(z => normKey(z.title) === origKey)).length;
+  const otherDays = Object.keys(S.days).filter(x => x !== date && (S.days[x].songs.some(z => normKey(z.title) === origKey) || S.days[x].recs.some(r => r.song === origKey))).length;
   let everywhere = true, saved = false;
   const orig = () => JSON.stringify([so.title, so.artist || '', so.tone || '', so.note || '']);
   const now = () => JSON.stringify([tInp.value.trim(), aInp.value.trim(), kInp.value.trim(), nInp.value.trim()]);
@@ -2418,14 +2444,15 @@ function openStopwatch(date, id) {
   };
   function go1() { start = performance.now(); state = 'run'; raf = requestAnimationFrame(frame); vibrate(10); Native.keepAwake(true); draw(); }
   function stop1() { cancelAnimationFrame(raf); elapsed = (performance.now() - start) / 1000; setBig(elapsed); state = 'stopped'; vibrate(10); Native.keepAwake(false); draw(); }
+  let swSheet = null;
   const onKey = ev => {
-    if (ev.code !== 'Space' || isTyping() || (ev.target && ev.target.closest && ev.target.closest('button'))) return;
+    if (ev.code !== 'Space' || isTyping() || Sheets[Sheets.length - 1] !== swSheet || (ev.target && ev.target.closest && ev.target.closest('button'))) return;
     ev.preventDefault();
     if (state === 'idle') go1(); else if (state === 'run') stop1();
   };
   document.addEventListener('keydown', onKey);
   refresh(); draw();
-  openSheet({ title: `${t.name} 시간 재기`, body: box, onClose: () => { cancelAnimationFrame(raf); Native.keepAwake(false); document.removeEventListener('keydown', onKey); } });
+  swSheet = openSheet({ title: `${t.name} 시간 재기`, body: box, onClose: () => { cancelAnimationFrame(raf); Native.keepAwake(false); document.removeEventListener('keydown', onKey); } });
 }
 function applyTargetToday(id, target) {
   const today = todayStr();
@@ -2453,10 +2480,18 @@ function DrillEditor() {
           h('button', { class: 'icon-btn', 'aria-label': `${d.name} 항목 지우기`, onclick: () => {
             const a = S.settings.drills; const [gone] = a.splice(i, 1);
             const te = S.days[todayStr()];
-            let snap = null;
-            if (te && te.drills && te.drills[gone.id] && !(te.drills[gone.id].done > 0)) { snap = te.drills[gone.id]; delete te.drills[gone.id]; touch(todayStr()); }
+            let snap = null, oldTarget = null;
+            const td = te && te.drills && te.drills[gone.id];
+            if (td && !(td.done > 0)) { snap = td; delete te.drills[gone.id]; touch(todayStr()); }
+            else if (td) { oldTarget = td.target; td.target = Math.min(td.done, td.target); touch(todayStr()); } /* today's reps stay, and count as finished */
             touchSettings(); draw(); render();
-            toast(`‘${gone.name}’ 항목을 지웠어요`, { action: '되돌리기', onAction: () => { S.settings.drills.splice(Math.min(i, S.settings.drills.length), 0, gone); if (snap) { const t2 = S.days[todayStr()]; if (t2) { t2.drills[gone.id] = snap; touch(todayStr()); } } touchSettings(); draw(); render(); } });
+            toast(`‘${gone.name}’ 항목을 지웠어요`, { action: '되돌리기', onAction: () => {
+              S.settings.drills.splice(Math.min(i, S.settings.drills.length), 0, gone);
+              const t2 = S.days[todayStr()];
+              if (t2 && snap) { t2.drills[gone.id] = snap; touch(todayStr()); }
+              if (t2 && oldTarget != null && t2.drills[gone.id]) { t2.drills[gone.id].target = oldTarget; touch(todayStr()); }
+              touchSettings(); draw(); render();
+            } });
           } }, icon('trash', 19)))));
     });
     box.append(h('button', { class: 'btn soft wide', style: 'margin-top:12px', onclick: () => {
@@ -2534,10 +2569,10 @@ function MonthPanel() {
     const cls = ['cell', dow === 0 ? 'sun' : '', dow === 6 ? 'sat' : '', has ? 'has' : '', key === today ? 'today' : '', key === S.cal.sel ? 'sel' : ''].filter(Boolean).join(' ');
     const said = [`${m + 1}월 ${d}일 ${WD[dow]}요일`, key === today ? '오늘' : ''];
     if (has) said.push(e.rating ? `만족도 ${RATE_LABELS[e.rating - 1]}` : '기록 있음', e.bad.concat(e.fb).some(x => !x.resolved) ? '아쉬운 점·피드백 있음' : '', drillsAllDone(key) ? '기초 연습 완료' : '', e.recs.length ? `녹음 ${e.recs.length}개` : '');
-    grid.append(h('button', { class: cls, 'data-fk': 'cal-' + key, 'data-r': has && e.rating ? e.rating : null, disabled: key > today, 'aria-pressed': String(key === S.cal.sel), 'aria-label': said.filter(Boolean).join(', '), onclick: () => { S.cal.sel = key; drawCalBody($('.cal-body')); revealPreview(); } },
+    grid.append(h('button', { class: cls, 'data-fk': 'cal-' + key, 'data-r': has && e.rating ? e.rating : null, disabled: key > today, 'aria-pressed': String(key === S.cal.sel), 'aria-label': said.filter(Boolean).join(', '), onclick: () => { S.cal.sel = key; drawCalBody($('.cal-body')); const c = $(`[data-fk="cal-${key}"]`); if (c) c.focus({ preventScroll: true }); revealPreview(); } },
       h('span', { class: 'n' }, d),
       h('span', { class: 'ind' },
-        has && e.bad.concat(e.fb).some(x => !x.resolved) ? h('i', { class: 'i-tri' }) : null,
+        has && (e.bad.length || e.fb.length) ? h('i', { class: 'i-tri' }) : null,
         has && drillsAllDone(key) ? h('i', { class: 'i-stamp' }) : null,
         has && e.recs.length ? h('i', { class: 'i-mic' }) : null)));
   }
@@ -2641,9 +2676,9 @@ function MonthList() {
 }
 function EntryCard(d) {
   const e = S.days[d], dt = parseYmd(d);
-  const open = e.bad.concat(e.fb).filter(x => !x.resolved);
-  const issues = open.length;
-  const first = open[0];
+  const all = e.bad.concat(e.fb), open = all.filter(x => !x.resolved);
+  const issues = all.length;
+  const first = open[0] || all[0];
   return h('button', { class: 'ecard', onclick: () => goDate(d) },
     h('div', { class: 'ec-d' + dowClass(d) }, h('b', null, dt.getDate()), h('span', null, WD[dt.getDay()])),
     h('div', { class: 'ec-b' },
@@ -2654,7 +2689,7 @@ function EntryCard(d) {
         e.recs.length ? h('span', null, `녹음 ${e.recs.length}`) : null),
       e.goal.trim() ? h('div', { class: 'clip ec-goal' }, e.goal.trim()) : null,
       e.songs.length ? h('div', { class: 'clip' }, '♪ ' + e.songs.map(s => s.title).join(', ')) : null,
-      first ? h('div', { class: 'clip ec-bad' }, first.text + (issues > 1 ? ` 외 ${issues - 1}개` : '')) : null,
+      first ? h('div', { class: 'clip ec-bad' + (first.resolved ? ' resolved' : '') }, first.text + (issues > 1 ? ` 외 ${issues - 1}개` : '')) : null,
       !e.goal.trim() && !e.songs.length && !first && e.memo.trim() ? h('div', { class: 'clip' }, e.memo.trim()) : null));
 }
 /* search that ignores spacing: '좋은날' finds '좋은 날', '사건의지평선' finds '사건의 지평선' */
@@ -2875,8 +2910,8 @@ function openSongDetail(key) {
   let hero = null;
   const drawHero = () => {
     const LL = songLib().get(key) || L;
-    const nh = SongHero(LL, key, () => { drawHero(); if (LL.artist && !aInp.value.trim()) aInp.value = LL.artist; });
-    if (hero) hero.replaceWith(nh);
+    const nh = SongHero(LL, key, () => { drawHero(); const now = songLib().get(key); if (now) aInp.value = now.artist || ''; }, () => saveMeta.flush());
+    if (hero) { Preview.stop(); hero.replaceWith(nh); }
     hero = nh;
   };
   drawHero();
@@ -2917,7 +2952,7 @@ function RangePanel() {
   const pts = entryDates().filter(d => S.days[d].high != null).map(d => ({ d, m: S.days[d].high }));
   if (!pts.length) return h('div', { class: 'page' }, h('div', { class: 'empty' }, h('span', { class: 'hand' }, '음역 기록이 아직 없어요'), '오늘 화면 ‘노래’ 아래 ‘오늘 낸 최고음’을 골라 두면 여기에 그래프가 그려져요.'));
   const shown = pts.slice(-40);
-  const best = pts.reduce((a, b) => (b.m >= a.m ? b : a));
+  const best = pts.reduce((a, b) => (b.m > a.m ? b : a));
   const latest = pts[pts.length - 1];
   const lo = Math.min(...shown.map(p => p.m)) - 2, hi = Math.max(...shown.map(p => p.m)) + 2;
   const W = 340, H = 200, L = 58, R = 12, T = 12, B = 26;
@@ -2958,11 +2993,12 @@ function DayJournal(d, o = {}) {
   if (e.memo.trim()) {
     const t = e.memo.trim();
     const memo = h('p', { class: 'j-memo' + (o.compact ? ' c3' : ' c6') }, hl(t));
-    box.append(memo);
-    if (t.length > (o.compact ? 110 : 220) || t.split('\n').length > (o.compact ? 3 : 6)) {
-      const more = h('button', { class: 'link j-more', 'aria-expanded': 'false', onclick: () => { const open = memo.classList.toggle('open'); more.textContent = open ? '접기' : '더 보기'; more.setAttribute('aria-expanded', String(open)); } }, '더 보기');
-      box.append(more);
-    }
+    const rx = q && searchRx(q);
+    if (rx && rx.test(t)) memo.classList.add('open'); /* a search hit is never hidden in the folded part */
+    const more = h('button', { class: 'link j-more', 'aria-expanded': String(memo.classList.contains('open')), hidden: true, onclick: () => { const open = memo.classList.toggle('open'); more.textContent = open ? '접기' : '더 보기'; more.setAttribute('aria-expanded', String(open)); } }, memo.classList.contains('open') ? '접기' : '더 보기');
+    box.append(memo, more);
+    /* the button shows when the text is actually cut off at this width */
+    requestAnimationFrame(() => { if (memo.isConnected) more.hidden = !memo.classList.contains('open') && memo.scrollHeight <= memo.clientHeight + 1; });
   }
   if (!o.compact) e.songs.filter(s => s.note && s.note.trim()).forEach(s => box.append(h('p', { class: 'j-line' }, h('span', { class: 'j-k clip' }, s.title), h('span', null, hl(s.note.trim())))));
   const items = ['good', 'bad', 'fb'].flatMap(k => e[k].map(it => ({ k, it })));
@@ -2993,7 +3029,7 @@ function journalDays() {
   const J = S.lib, rx = searchRx((J.jq || '').trim());
   return entryDates().reverse().filter(d => {
     const e = S.days[d], t = journalText(e);
-    if (!J.jall && !t) return false;
+    if (!J.jall && !t && !rx) return false; /* a search also finds days that only have a song */
     return !rx || rx.test(t + '\n' + e.songs.map(s => s.title).join('\n'));
   });
 }
@@ -3011,7 +3047,7 @@ function drawJournal(body) {
     if (m !== month) { month = m; nodes.push(h('h3', { class: 'j-month' }, `${+m.slice(0, 4)}년 ${+m.slice(5)}월`)); }
     nodes.push(JournalCard(d, q));
   }
-  if (days.length > shown.length) nodes.push(h('button', { class: 'btn soft wide j-next', onclick: () => { J.jn += 20; drawJournal(body); } }, `이전 일지 ${Math.min(20, days.length - shown.length)}일 더 보기`));
+  if (days.length > shown.length) nodes.push(h('button', { class: 'btn soft wide j-next', onclick: () => { const n0 = shown.length; J.jn += 20; drawJournal(body); const next = body.querySelectorAll('.j-head')[n0]; if (next) next.focus({ preventScroll: true }); } }, `이전 일지 ${Math.min(20, days.length - shown.length)}일 더 보기`));
   body.replaceChildren(...nodes);
 }
 function JournalPanel() {
@@ -3170,8 +3206,11 @@ function mergeDay(cur, inc) {
   for (const k of ['memo', 'goal', 'next']) {
     const a = (out[k] || '').trim(), b = (older[k] || '').trim();
     if (b && !a) out[k] = older[k];
-    else if (!same && b && a !== b && !a.includes(b)) out[k] = `${out[k]}
-${older[k]}`;
+    else if (!same && b && a !== b && !a.includes(b)) {
+      const have = new Set(a.split('\n').map(x => x.trim()));
+      const add = older[k].split('\n').filter(x => x.trim() && !have.has(x.trim()));
+      if (add.length) out[k] = `${out[k]}\n${add.join('\n')}`;
+    }
   }
   for (const k of ['cond', 'sleep', 'rating', 'high']) if (out[k] == null && older[k] != null) out[k] = older[k];
   if (same) {
@@ -3194,6 +3233,11 @@ function mergeSettings(cur, inc) {
   if (!cur.updatedAt) { const o = clone(inc); o.updatedAt = Date.now(); return normSettings(o); }
   if ( (inc.updatedAt || 0) > cur.updatedAt) { cur = { ...inc, reminder: cur.updatedAt ? cur.reminder : inc.reminder }; inc = S.settings; }
   const out = clone(cur);
+  const def = defaultSettings();
+  if (out.title === def.title && inc.title) out.title = inc.title;
+  const plain = ds => JSON.stringify(ds.map(d => [d.id, d.name, d.target, !!d.timed, d.memo || '']));
+  if (plain(out.drills) === plain(def.drills) && inc.drills.length) out.drills = clone(inc.drills);
+  if (JSON.stringify(out.tags) === JSON.stringify(def.tags) && inc.tags.length) out.tags = inc.tags.slice();
   inc.drills.forEach(d => { if (!out.drills.some(x => x.id === d.id)) out.drills.push(clone(d)); });
   inc.tags.forEach(tg => { if (!out.tags.includes(tg)) out.tags.push(tg); });
   inc.songs.forEach(m => {
@@ -3240,7 +3284,7 @@ function importBackup() {
           /* a recording whose sound is neither on this phone nor in this file would be an unplayable row
              (e.g. one deleted after a text-only backup was made) — a full backup brings it back with its sound */
           const before = inc.recs.length;
-          inc.recs = inc.recs.filter(r => recHome.has(r.id) || !r.aud || AUD.has(r.aud) || (zip && audioMap[r.aud]));
+          if (S.days[d] && hasContent(S.days[d])) inc.recs = inc.recs.filter(r => recHome.has(r.id) || !r.aud || AUD.has(r.aud) || (zip && audioMap[r.aud]));
           noSound += before - inc.recs.length;
           if (!hasContent(inc)) continue;
           const cur = S.days[d];
@@ -3253,7 +3297,7 @@ function importBackup() {
           S.settings = fresh ? normSettings({ ...incS, reminder: S.settings.reminder, updatedAt: Date.now() }) : mergeSettings(S.settings, incS);
           queueWrite('@s', 100); applyTheme();
           const Rm = S.settings.reminder;
-          if (Rm.on) Native.ensureReminder(Rm.h, Rm.m, REMIND_TEXT).then(r => { if (r === 'denied') { Rm.on = false; touchSettings(); } }).catch(() => {});
+          if (Rm.on) Native.ensureReminder(Rm.h, Rm.m, REMIND_TEXT).then(r => { if (r === 'denied') toast('알림 권한이 꺼져 있어서 연습 알림이 오지 않아요', { action: '설정 열기', onAction: () => Native.openAppSettings() }); }).catch(() => {});
         }
         await flushWrites();
         /* recordings after the text, so the diary is back even if the phone runs out of space */
@@ -3306,16 +3350,20 @@ function ReminderBlock() {
     let res;
     try { res = await Native.setReminder(R.on, R.h, R.m, REMIND_TEXT); }
     catch (e) { console.error(e); R.on = false; touchSettings(); draw(); toast('알림을 맞추지 못했어요. 다시 시도해 주세요.'); return; }
-    if (res === 'denied') { R.on = false; touchSettings(); draw(); toast('알림 권한이 꺼져 있어요. 폰 설정에서 노래일기 알림을 허용해 주세요.'); }
+    if (res === 'denied') { R.on = false; touchSettings(); draw(); toast('알림 권한이 꺼져 있어요. 폰 설정에서 노래일기 알림을 허용해 주세요.', { action: '설정 열기', onAction: () => Native.openAppSettings() }); }
     else if (res === 'unsupported' && R.on) toast('알림은 설치한 앱에서만 쓸 수 있어요');
     else if (R.on) toast(`매일 ${fmtHM(new Date(2000, 0, 1, R.h, R.m).getTime())}에 알려 드릴게요`);
   };
   time.addEventListener('change', () => { const [hh, mm] = time.value.split(':').map(Number); if (isNaN(hh)) return; R.h = hh; R.m = mm || 0; touchSettings(); if (R.on) apply(); });
   const box = h('div');
+  let allowed = null;
   const draw = () => box.replaceChildren(...[
     ToggleRow('매일 연습 알림', R.on, v => { R.on = v; touchSettings(); draw(); apply(); }, '정한 시간에 노래할 시간이라고 알려 줘요', 'bell'),
-    R.on ? h('div', { class: 'cond-line' }, h('span', { class: 'lbl', style: 'width:auto' }, '알림 시간'), time) : null].filter(Boolean));
+    R.on ? h('div', { class: 'cond-line' }, h('span', { class: 'lbl', style: 'width:auto' }, '알림 시간'), time) : null,
+    R.on && allowed === false ? h('div', { class: 'banner', style: 'margin:8px 0 0' }, '폰 설정에서 노래일기 알림이 꺼져 있어서 알림이 오지 않아요. ',
+      h('button', { class: 'link', onclick: () => Native.openAppSettings() }, '설정 열기')) : null].filter(Boolean));
   draw();
+  Native.notifyAllowed().then(v => { allowed = v; if (box.isConnected) draw(); });
   return box;
 }
 function openSettings() {
@@ -3388,11 +3436,12 @@ function bindViewport() {
     }, 320);
   });
 }
-function followToday() {
+function followToday(fromResume) {
   if (!(S.follow && S.mode === 'ready' && S.date !== todayStr())) return;
   S.date = todayStr();
-  /* fields save as you type, so dropping the focus loses nothing — and taps must not land on yesterday */
-  if (!S.sheetOpen && isTyping()) document.activeElement.blur();
+  /* back in the app on a new day: fields and drafts are saved, so dropping the focus loses nothing,
+     and taps must not land on yesterday. The clock tick never does this (someone may be typing at midnight). */
+  if (fromResume === true && !S.sheetOpen && isTyping()) document.activeElement.blur();
   softRender();
 }
 function bindGlobal() {
@@ -3413,7 +3462,7 @@ function bindGlobal() {
   document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && Sheets.length) closeSheet(); });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { flushWrites(); autoBackup(); }
-    else followToday();
+    else followToday(true);
   });
   window.addEventListener('pagehide', () => { flushWrites(); });
   if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme); } catch (e) { /* old webview */ } }
@@ -3433,7 +3482,7 @@ function bindGlobal() {
     toast('한 번 더 누르면 앱을 닫아요');
   });
   Native.onPause(() => { flushWrites(); autoBackup(); });
-  Native.onResume(followToday);
+  Native.onResume(() => followToday(true));
 }
 async function takeShared(list) {
   const files = [];
@@ -3457,11 +3506,8 @@ function afterLoad() {
   setTimeout(() => { if (!Sheets.length) offerDraft(); }, 800);
   if (!Native.isNative) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S };
   const R = S.settings.reminder;
-  if (R.on) Native.ensureReminder(R.h, R.m, REMIND_TEXT).then(r => {
-    if (r !== 'denied') return;
-    R.on = false; touchSettings();
-    toast('알림 권한이 꺼져 있어서 연습 알림을 껐어요', { action: '권한 켜기', onAction: () => Native.openAppSettings() });
-  }).catch(() => {});
+  /* the switch stays on: once notifications are allowed again, the reminder comes back by itself */
+  if (R.on) Native.ensureReminder(R.h, R.m, REMIND_TEXT).catch(() => {});
   setTimeout(() => autoBackup(), 4000);
 }
 async function init() {

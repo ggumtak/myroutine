@@ -301,6 +301,11 @@ const App = {
     a.href = url; a.rel = 'noopener';
     document.body.append(a); a.click(); a.remove();
   },
+  async notifyAllowed() {
+    const LN = plug('LocalNotifications');
+    if (!LN) return null;
+    try { return (await LN.checkPermissions()).display === 'granted'; } catch (e) { return null; }
+  },
   /* at app start: keep an existing reminder scheduled without asking for anything */
   async ensureReminder(hour, minute, body) {
     const LN = plug('LocalNotifications');
@@ -320,7 +325,8 @@ const App = {
     if (p.display !== 'granted') return 'denied';
     try { await LN.cancel({ notifications: [{ id: 1001 }] }); } catch (e) { /* ignore */ }
     try { await LN.createChannel({ id: 'practice', name: '연습 알림', description: '매일 노래 연습할 시간을 알려줘요', importance: 4, vibration: true }); } catch (e) { /* ignore */ }
-    await LN.schedule({ notifications: [{ id: 1001, title: '노래일기', body, channelId: 'practice', smallIcon: 'ic_stat_note', schedule: { on: { hour, minute }, allowWhileIdle: true } }] });
+    /* a daily nudge doesn't need an exact alarm; asking for one sends Android 14+ users to a system settings page */
+    await LN.schedule({ notifications: [{ id: 1001, title: '노래일기', body, channelId: 'practice', smallIcon: 'ic_stat_note', isExactNotification: false, schedule: { on: { hour, minute }, allowWhileIdle: true } }] });
     return 'ok';
   }
 };
