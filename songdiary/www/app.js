@@ -2088,7 +2088,7 @@ async function offerDraft() {
       url ? h('audio', { controls: true, src: url, preload: 'metadata' }) : null,
       field('이름', titleInp), field('어떤 노래의 녹음인가요?', songSel)),
     foot: [discard, save],
-    onClose: () => { if (url) URL.revokeObjectURL(url); if (!done) toast('나중에 앱을 다시 열면 또 물어볼게요'); }
+    onClose: () => { if (url) URL.revokeObjectURL(url); if (!done) toast('다음에 녹음하거나 앱을 다시 열면 또 물어볼게요'); }
   });
 }
 function micFallback(date, reason) {
@@ -3280,6 +3280,7 @@ function importBackup() {
     const audioMap = data.audio || {};
     const nAudio = zip ? Object.keys(audioMap).length : 0;
     confirmSheet({ title: '백업을 불러올까요?', text: `${dates.length}일치 기록${nAudio ? `과 녹음 ${nAudio}개가` : '이'} 들어 있어요. 지금 기록은 지우지 않고 합쳐요. 같은 날짜는 더 나중에 고친 내용을 기준으로 합쳐요.`, ok: '불러오기', onOk: async () => {
+      if (exporting) { toast('백업을 만드는 중이에요. 끝난 뒤에 불러와 주세요.'); return; }
       const t = toastProgress('불러오는 중…');
       S.importing = true;
       try {
