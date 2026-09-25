@@ -208,6 +208,37 @@ const Files = {
   }
 };
 
+/* ================= network (song search only — diary data never leaves the phone) ================= */
+/* The page is served from https://localhost, so other sites are reached through Capacitor's native HTTP (no CORS). */
+function httpErr(status) { const e = new Error('http ' + status); e.status = status; return e; }
+const Net = {
+  async getJson(url, timeoutMs = 8000) {
+    if (navigator.onLine === false) { const e = new Error('offline'); e.offline = true; throw e; }
+    if (isNative && typeof Cap.nativePromise === 'function' && !Net.noNative) {
+      let timer = 0;
+      try {
+        const r = await Promise.race([
+          Cap.nativePromise('CapacitorHttp', 'request', { url, method: 'GET', headers: { Accept: 'application/json' }, connectTimeout: timeoutMs, readTimeout: timeoutMs }),
+          new Promise((res, rej) => { timer = setTimeout(() => rej(new Error('timeout')), timeoutMs + 1500); })
+        ]);
+        if (!r || r.status < 200 || r.status >= 300) throw httpErr(r ? r.status : 0);
+        return typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
+      } catch (e) {
+        /* only if the native HTTP plugin itself is missing, fall back to the WebView's fetch */
+        if (!(e && /UNIMPLEMENTED|UNAVAILABLE/.test(String(e.code || '')))) throw e;
+        Net.noNative = true;
+      } finally { clearTimeout(timer); }
+    }
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = setTimeout(() => { if (ctl) ctl.abort(); }, timeoutMs);
+    try {
+      const res = await fetch(url, { signal: ctl ? ctl.signal : undefined, credentials: 'omit' });
+      if (!res.ok) throw httpErr(res.status);
+      return JSON.parse(await res.text());
+    } finally { clearTimeout(timer); }
+  }
+};
+
 /* ================= Android pieces ================= */
 const App = {
   isNative,
@@ -235,6 +266,15 @@ const App = {
   minimize() { const A = plug('App'); if (A && A.minimizeApp) A.minimizeApp().catch(() => A.exitApp()); },
   async version() { const A = plug('App'); if (!A) return null; try { return await A.getInfo(); } catch (e) { return null; } },
   setBars(dark) { const B = plug('SystemBars'); if (B) B.setStyle({ style: dark ? 'DARK' : 'LIGHT' }).catch(() => {}); },
+  /* YouTube, lyrics … open in their own app / the browser. Capacitor hands any navigation away from
+     the app's own origin to Android as a VIEW intent, so a plain link click leaves this page untouched. */
+  openUrl(url) {
+    if (!/^https:\/\//.test(url)) return;
+    if (!isNative) { window.open(url, '_blank', 'noopener'); return; }
+    const a = document.createElement('a');
+    a.href = url; a.rel = 'noopener';
+    document.body.append(a); a.click(); a.remove();
+  },
   /* daily practice reminder */
   async setReminder(on, hour, minute, body) {
     const LN = plug('LocalNotifications');
@@ -250,5 +290,5 @@ const App = {
   }
 };
 
-window.SD = { Store, makeZip, readZip, Files, App, safeName };
+window.SD = { Store, makeZip, readZip, Files, App, Net, safeName };
 })();

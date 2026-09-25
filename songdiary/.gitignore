@@ -1,0 +1,5 @@
+# signing keys and built APKs never go in the repo
+*.p12
+*.jks
+*.keystore
+*.apk

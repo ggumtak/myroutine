@@ -90,7 +90,11 @@ const IC = {
   send: '<path d="M20.5 3.5L10 14M20.5 3.5l-6.5 17-4-6.5-6.5-4z"/>',
   chevd: '<path d="M6 9l6 6 6-6"/>',
   chevu: '<path d="M6 15l6-6 6 6"/>',
-  undo: '<path d="M9 7.5L4.5 12 9 16.5"/><path d="M4.5 12h10a5 5 0 010 10h-2"/>'
+  undo: '<path d="M9 7.5L4.5 12 9 16.5"/><path d="M4.5 12h10a5 5 0 010 10h-2"/>',
+  book: '<path d="M5 5.5a2 2 0 012-2h12v14H7a2 2 0 00-2 2z"/><path d="M5 19.5a2 2 0 002 2h12v-4"/><path d="M9 8h6"/>',
+  video: '<rect x="3" y="5.5" width="18" height="13" rx="3.5"/><path d="M10.3 9.3v5.4l4.6-2.7z" fill="currentColor" stroke="none"/>',
+  lyrics: '<path d="M4.5 6h15M4.5 10.5h15M4.5 15h7.5"/><path d="M17.5 13.5v6"/><circle cx="16" cy="19.5" r="1.6"/>',
+  link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>'
 };
 function icon(name, size = 22) {
   const s = document.createElement('span');
@@ -135,7 +139,8 @@ const HIGH_MIN = 48, HIGH_MAX = 91;
 const LS_TIMER = 'songdiary:v1:timer', LS_UI = 'songdiary:v1:ui';
 const SONG_STATUS = ['연습 중', '거의 완성', '완성', '쉬는 중'];
 const THEMES = [['auto', '폰 설정 따라'], ['light', '밝게'], ['dark', '어둡게']];
-const { Store, makeZip, readZip, Files, App: Native, safeName } = window.SD;
+const { Store, makeZip, readZip, Files, App: Native, Net, safeName } = window.SD;
+const SS = window.SongSearch;
 
 /* ================= state ================= */
 const S = {
@@ -144,14 +149,21 @@ const S = {
   tab: 'today', date: todayStr(), follow: true,
   cal: { y: new Date().getFullYear(), m: new Date().getMonth(), sel: todayStr(), q: '' },
   fb: { status: 'open', kinds: ['bad', 'fb'], tag: null, pinned: false },
-  lib: { seg: 'songs', best: false, status: null },
+  lib: { seg: 'songs', best: false, status: null, jq: '', jall: false, jn: 20 },
   compose: { good: { tag: null }, bad: { tag: null }, fb: { tag: null, from: '선생님' } },
   saveErr: null, openDrills: new Set(),
   popNote: null, justDone: null, sheetOpen: false
 };
 
 function defaultSettings() {
-  return { v: 2, title: '껌딱의 노래일기', drills: DEFAULT_DRILLS.map(d => ({ ...d })), tags: DEFAULT_TAGS.slice(), sound: true, haptic: true, theme: 'auto', reminder: { on: false, h: 20, m: 0 }, autoBackup: true, songs: [], updatedAt: 0 };
+  return { v: 2, title: '껌딱의 노래일기', drills: DEFAULT_DRILLS.map(d => ({ ...d })), tags: DEFAULT_TAGS.slice(), sound: true, haptic: true, theme: 'auto', reminder: { on: false, h: 20, m: 0 }, autoBackup: true, songSearch: true, songs: [], updatedAt: 0 };
+}
+/* a link to a real song from the catalog (album art, 30-second preview) */
+function normCat(c) {
+  if (!c || typeof c !== 'object') return null;
+  const str = (v, n) => String(v || '').slice(0, n);
+  const https = v => (/^https:\/\//.test(String(v || '')) ? String(v).slice(0, 400) : '');
+  return { src: str(c.src, 12) || 'itunes', id: +c.id || 0, title: str(c.title, 80), artist: str(c.artist, 60), album: str(c.album, 80), art: https(c.art), prev: https(c.prev), year: +c.year || null, ms: +c.ms || null, genre: str(c.genre, 30) };
 }
 function normSettings(s) {
   const d = defaultSettings();
@@ -167,7 +179,8 @@ function normSettings(s) {
     theme: ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : 'auto',
     reminder: { on: !!rm.on, h: clampInt(rm.h, 0, 23, 20), m: clampInt(rm.m, 0, 59, 0) },
     autoBackup: s.autoBackup !== false,
-    songs: Array.isArray(s.songs) ? s.songs.filter(x => x && typeof x.k === 'string').map(x => ({ k: x.k, artist: String(x.artist || ''), memo: String(x.memo || ''), status: SONG_STATUS.includes(x.status) ? x.status : '' })) : [],
+    songSearch: s.songSearch !== false,
+    songs: Array.isArray(s.songs) ? s.songs.filter(x => x && typeof x.k === 'string').map(x => ({ k: x.k, artist: String(x.artist || ''), memo: String(x.memo || ''), status: SONG_STATUS.includes(x.status) ? x.status : '', cat: normCat(x.cat) })) : [],
     updatedAt: +s.updatedAt || 0
   };
 }
@@ -455,7 +468,7 @@ const Player = {
   },
   eng() { return this.wa && this.cur && this.waFor === this.cur.id ? this.wa : this.el; },
   playing() { return !!this.cur && !this.eng().paused; },
-  stopAll() { try { this.el.pause(); } catch (e) { /* ignore */ } if (this.wa) this.wa.pause(); },
+  stopAll() { try { this.el.pause(); } catch (e) { /* ignore */ } if (this.wa) this.wa.pause(); Preview.stop(); },
   watch() {
     cancelAnimationFrame(this.raf);
     const step = () => {
@@ -469,6 +482,7 @@ const Player = {
     this.raf = requestAnimationFrame(step);
   },
   async toggle(r, opts = {}) {
+    Preview.stop();
     if (this.cur && this.cur.id === r.id && (this.el.getAttribute('src') || this.waFor === r.id)) {
       const e = this.eng();
       if (e.paused) { e.play().catch(() => {}); this.watch(); } else e.pause();
@@ -636,6 +650,38 @@ const Player = {
   }
 };
 
+/* 30-second preview of the original song (streamed; needs the internet) */
+const Preview = {
+  a: null, btn: null,
+  paint() {
+    const b = this.btn, a = this.a;
+    if (!b || !b.isConnected) return;
+    const on = !!(a && !a.paused);
+    b.classList.toggle('on', on);
+    b.replaceChildren(icon(on ? 'pause' : 'play', 16), on ? '멈추기' : '원곡 미리듣기');
+  },
+  toggle(url, btn) {
+    if (this.a && this.btn === btn) { if (this.a.paused) this.a.play().catch(() => {}); else this.a.pause(); return; }
+    Player.stopAll();
+    const a = this.a = new Audio();
+    this.btn = btn;
+    a.preload = 'auto';
+    ['play', 'pause', 'ended'].forEach(ev => a.addEventListener(ev, () => this.paint()));
+    a.addEventListener('error', () => { if (this.a !== a) return; toast('미리듣기를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.'); this.stop(); });
+    a.src = url;
+    btn.replaceChildren(icon('play', 16), '불러오는 중…');
+    a.play().catch(err => { if (this.a === a && err && err.name !== 'AbortError') { toast('미리듣기를 재생하지 못했어요.'); this.stop(); } });
+  },
+  stop() {
+    const a = this.a;
+    if (!a) return;
+    this.a = null;
+    try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) { /* ignore */ }
+    this.paint();
+    this.btn = null;
+  }
+};
+
 /* ================= toast & sheets ================= */
 let toastTimer = 0;
 function toast(msg, opt = {}) {
@@ -789,6 +835,21 @@ function BackupNudge() {
       h('button', { class: 'btn ghost sm', onclick: () => { const v = lsGet(LS_UI, {}); v.nudgeSnooze = Date.now() + 7 * 86400000; lsSet(LS_UI, v); box.remove(); } }, '나중에')));
   return box;
 }
+/* one-time note about what this version added */
+function WhatsNew() {
+  const u = lsGet(LS_UI, {});
+  if (u.seen11 || S.firstRun || !entryDates().length) return null;
+  const close = () => { const v = lsGet(LS_UI, {}); v.seen11 = 1; lsSet(LS_UI, v); };
+  const box = h('div', { class: 'banner news' },
+    h('b', null, '새로워졌어요'),
+    h('ul', null,
+      h('li', null, '노래 제목을 몇 글자만 쳐도 실제 노래를 찾아 줘요. 초성(ㅂㅇㄱ)이나 가수 이름으로도 돼요.'),
+      h('li', null, '‘모아보기’ 탭에서 그동안 쓴 일지를 한곳에 모아 읽을 수 있어요.')),
+    h('div', { class: 'btn-row', style: 'margin-top:8px' },
+      h('button', { class: 'btn ink sm', onclick: () => { close(); S.lib.seg = 'journal'; go('songs'); } }, icon('book', 16), '일지 보러 가기'),
+      h('button', { class: 'btn ghost sm', onclick: () => { close(); box.remove(); } }, '닫기')));
+  return box;
+}
 function LoadingView() {
   return h('div', { class: 'loading' },
     h('div', { class: 'ld-staff', html: staffSVG(5, 0, false, false) }),
@@ -926,7 +987,7 @@ function songLib() {
       if (d < L.first) L.first = d;
     }
   }
-  for (const m of (S.settings.songs || [])) { const L = map.get(m.k); if (L) { if (m.artist) L.artist = m.artist; L.memo = m.memo || ''; L.status = m.status || ''; } }
+  for (const m of (S.settings.songs || [])) { const L = map.get(m.k); if (L) { if (m.artist) L.artist = m.artist; L.memo = m.memo || ''; L.status = m.status || ''; L.cat = m.cat || null; } }
   return map;
 }
 function defaultSongKey(date) { const e = S.days[date]; return e && e.songs.length ? normKey(e.songs[e.songs.length - 1].title) : ''; }
@@ -952,6 +1013,176 @@ function songSelect(date, current) {
   if (others.length) { const g = h('optgroup', { label: '다른 노래' }); others.forEach(L => g.append(h('option', { value: L.key }, L.title))); sel.append(g); }
   sel.value = current || '';
   return sel;
+}
+
+/* ================= song search: a few letters, 초성 or the singer — like a karaoke remote ================= */
+function linkSong(key, cat, artist, forceArtist) {
+  let m = S.settings.songs.find(x => x.k === key);
+  if (!m) { m = { k: key, artist: '', memo: '', status: '', cat: null }; S.settings.songs.push(m); }
+  m.cat = cat ? normCat(cat) : null;
+  if (artist && (forceArtist || !m.artist)) m.artist = artist;
+  touchSettings();
+}
+const catOf = it => normCat({ src: it.src, id: it.id, title: it.title, artist: it.artist, album: it.album, art: it.art, prev: it.prev, year: it.year, ms: it.ms, genre: it.genre });
+function libMatches(q, skip) {
+  const out = [];
+  for (const L of songLib().values()) {
+    if (skip && skip.has(L.key)) continue;
+    const s = Math.max(SS.match(q, L.title), SS.match(q, L.artist || '') * 0.8);
+    if (s > 0) out.push({ L, s });
+  }
+  return out.sort((a, b) => b.s - a.s || b.L.dates.length - a.L.dates.length || b.L.last.localeCompare(a.L.last)).slice(0, 4).map(x => x.L);
+}
+function artThumb(url, size = 40) {
+  const box = h('span', { class: 'sg-art', style: `width:${size}px;height:${size}px`, 'aria-hidden': 'true' }, icon('music', Math.round(size * 0.46)));
+  if (url) {
+    const img = h('img', { alt: '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer', width: size, height: size });
+    img.addEventListener('load', () => box.classList.add('has'));
+    img.addEventListener('error', () => img.remove());
+    img.src = url;
+    box.append(img);
+  }
+  return box;
+}
+/* Suggestions under a song-title input.
+   opts: onPick({ title, artist, key?, cat? }), free (offer adding the typed text), onFree(text),
+         skip() → keys to leave out, local (default true), online (default true), always (show without focus) */
+function SongSuggest(inp, opts) {
+  const box = h('div', { class: 'sg', hidden: true, role: 'listbox', id: uid('sg'), 'aria-label': '노래 찾기 결과' });
+  inp.setAttribute('role', 'combobox');
+  inp.setAttribute('aria-autocomplete', 'list');
+  inp.setAttribute('aria-expanded', 'false');
+  inp.setAttribute('aria-controls', box.id);
+  let seq = 0, timer = 0, net = { q: '', state: 'idle', items: [] }, active = -1, picks = [], dirty = !!opts.always, shown = false;
+  const keep = ev => ev.preventDefault(); /* tapping a suggestion keeps the keyboard up */
+  const online = () => opts.online !== false && S.settings.songSearch !== false;
+  const hide = () => { box.hidden = true; shown = false; active = -1; inp.setAttribute('aria-expanded', 'false'); inp.removeAttribute('aria-activedescendant'); };
+  const pick = p => {
+    clearTimeout(timer); seq++;
+    hide();
+    if (p.free != null) opts.onFree(p.free); else opts.onPick(p);
+  };
+  /* keep the list in sight above the keyboard */
+  const reveal = () => {
+    const vv = window.visualViewport, vh = vv ? vv.height : window.innerHeight;
+    const r = inp.getBoundingClientRect();
+    if (r.top < vh * 0.42) return;
+    const sb = inp.closest('.sheet-body');
+    if (sb) sb.scrollBy({ top: r.top - sb.getBoundingClientRect().top - 8, behavior: 'smooth' });
+    else window.scrollBy({ top: r.top - 72, behavior: 'smooth' });
+  };
+  const draw = () => {
+    const q = inp.value.trim();
+    if (!q || !dirty || (!opts.always && document.activeElement !== inp)) { hide(); return; }
+    const rows = [];
+    picks = [];
+    const option = (content, p, cls) => {
+      const i = picks.length;
+      picks.push(p);
+      return h('button', { type: 'button', class: 'sg-item' + (cls ? ' ' + cls : ''), role: 'option', id: `${box.id}-${i}`, 'aria-selected': String(i === active), tabindex: -1, onpointerdown: keep, onmousedown: keep, onclick: () => pick(p) }, content);
+    };
+    const local = opts.local === false ? [] : libMatches(q, opts.skip && opts.skip());
+    if (local.length) {
+      rows.push(h('div', { class: 'sg-h' }, '내가 부른 노래'));
+      local.forEach(L => rows.push(option([artThumb(L.cat && L.cat.art, 40), h('span', { class: 'sg-t' }, h('b', null, L.title), h('small', null, [L.artist, `${L.dates.length}일 연습`].filter(Boolean).join(' · ')))], { title: L.title, artist: L.artist, key: L.key })));
+    }
+    const term = SS.onlineTerm(q);
+    if (online() && term) {
+      const mine = new Set(local.map(L => L.key));
+      const items = net.q === term ? net.items.filter(it => !mine.has(normKey(SS.cleanTitle(it.title)))).slice(0, 6) : [];
+      if (items.length) {
+        rows.push(h('div', { class: 'sg-h' }, '노래 찾기'));
+        items.forEach(it => rows.push(option([artThumb(it.art, 40), h('span', { class: 'sg-t' }, h('b', null, it.title), h('small', null, [it.artist, it.album && it.album !== it.title ? it.album.replace(/ - (Single|EP)$/, '') : '', it.year].filter(Boolean).join(' · ')))], { title: SS.cleanTitle(it.title), artist: it.artist, cat: catOf(it) })));
+      }
+      const busy = net.q !== term || net.state === 'loading';
+      const st = busy ? '노래 찾는 중…'
+        : net.state === 'offline' ? '인터넷에 연결되지 않아서 내가 부른 노래에서만 찾았어요.'
+        : net.state === 'busy' ? '검색이 잠깐 몰렸어요. 1분쯤 뒤에 다시 찾아요.'
+        : net.state === 'error' ? '노래를 찾지 못했어요. 인터넷 연결을 확인해 주세요.'
+        : !items.length && !local.length ? `‘${term}’에 맞는 노래를 찾지 못했어요.` : '';
+      if (st) rows.push(h('div', { class: 'sg-status' + (busy ? ' busy' : ''), role: 'status' }, st));
+    }
+    if (opts.free) rows.push(option([h('span', { class: 'sg-art plus', 'aria-hidden': 'true' }, icon('plus', 18)), h('span', { class: 'sg-t' }, h('b', null, `‘${q}’ 그대로 추가`))], { free: q }, 'free'));
+    if (online() && term && net.q === term && net.items.length) rows.push(h('div', { class: 'sg-src' }, 'Apple Music 곡 정보'));
+    box.replaceChildren(...rows);
+    const was = shown;
+    box.hidden = !rows.length;
+    shown = !box.hidden;
+    inp.setAttribute('aria-expanded', String(shown));
+    if (shown && !was && !opts.always) setTimeout(reveal, 60);
+  };
+  const search = async () => {
+    const term = SS.onlineTerm(inp.value.trim());
+    if (!term || !online() || (net.q === term && (net.state === 'done' || net.state === 'loading'))) return;
+    const my = ++seq;
+    net = { q: term, state: 'loading', items: [] };
+    draw();
+    try {
+      const items = await SS.Catalog.search(term, url => Net.getJson(url));
+      if (my !== seq) return;
+      net = { q: term, state: 'done', items };
+    } catch (e) {
+      if (my !== seq) return;
+      net = { q: term, state: e && e.offline ? 'offline' : e && e.busy ? 'busy' : 'error', items: [] };
+    }
+    if (inp.isConnected) draw();
+  };
+  inp.addEventListener('input', () => {
+    dirty = true; active = -1;
+    draw();
+    clearTimeout(timer);
+    timer = setTimeout(search, 380);
+  });
+  inp.addEventListener('focus', () => { if (dirty && inp.value.trim()) { draw(); clearTimeout(timer); timer = setTimeout(search, 60); } });
+  inp.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== inp && !opts.always) hide(); }, 160));
+  inp.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape' && !box.hidden && !opts.always) { ev.stopPropagation(); hide(); return; }
+    if (box.hidden || !picks.length || (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp')) return;
+    ev.preventDefault();
+    active = (active + (ev.key === 'ArrowDown' ? 1 : -1) + picks.length) % picks.length;
+    draw();
+    inp.setAttribute('aria-activedescendant', `${box.id}-${active}`);
+  });
+  /* Enter while a suggestion is highlighted picks it */
+  box.takeActive = () => { if (!box.hidden && active >= 0 && picks[active]) { pick(picks[active]); return true; } return false; };
+  box.search = () => { dirty = true; draw(); search(); };
+  return box;
+}
+/* album art, singer, and quick ways to hear the original / find an MR / read the lyrics */
+function SongHero(L, key, onChange) {
+  const c = L.cat;
+  const q = [L.title, L.artist].filter(Boolean).join(' ');
+  const enc = encodeURIComponent;
+  const sub = [L.artist, c && c.album && c.album !== L.title ? c.album.replace(/ - (Single|EP)$/, '') : '', c && c.year].filter(Boolean).join(' · ');
+  return h('div', { class: 'hero' },
+    h('div', { class: 'hero-top' },
+      artThumb(c && c.art ? c.art.replace(/\/100x100bb\./, '/200x200bb.') : '', 64),
+      h('div', { class: 'hero-t' },
+        h('b', null, L.title),
+        h('span', { class: sub ? '' : 'hint' }, sub || '가수는 아래에 적거나 실제 노래와 연결하면 채워져요'),
+        h('button', { class: 'link', onclick: () => openSongLink(key, onChange) }, icon('link', 15), c ? '다른 노래로 연결' : '실제 노래와 연결하기'))),
+    h('div', { class: 'hero-links' },
+      c && c.prev ? h('button', { class: 'btn soft sm', onclick: ev => Preview.toggle(c.prev, ev.currentTarget) }, icon('play', 16), '원곡 미리듣기') : null,
+      h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://www.youtube.com/results?search_query=${enc(q)}`) }, icon('video', 17), '유튜브'),
+      h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://www.youtube.com/results?search_query=${enc(q + ' MR')}`) }, icon('music', 16), 'MR 찾기'),
+      h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://m.search.naver.com/search.naver?query=${enc(q + ' 가사')}`) }, icon('lyrics', 16), '가사')));
+}
+function openSongLink(key, onDone) {
+  const L = songLib().get(key);
+  if (!L) return;
+  const inp = h('input', { class: 'input', type: 'search', value: [L.title, L.artist].filter(Boolean).join(' '), enterkeyhint: 'search', autocomplete: 'off', spellcheck: 'false', 'aria-label': '연결할 노래 찾기' });
+  let s = null;
+  const done = msg => { closeSheet(s, true); if (onDone) onDone(); toast(msg); };
+  const sugg = SongSuggest(inp, { local: false, always: true, onPick: p => { linkSong(key, p.cat, p.artist, true); done(`연결했어요: ${p.title}${p.artist ? ` - ${p.artist}` : ''}`); } });
+  s = openSheet({
+    title: '실제 노래와 연결',
+    body: h('div', null,
+      h('p', { class: 'hint', style: 'margin-bottom:10px' }, `‘${L.title}’에 맞는 곡을 고르면 앨범 사진, 가수, 원곡 미리듣기가 붙어요. 일기에 적은 제목은 그대로예요.`),
+      S.settings.songSearch === false ? h('p', { class: 'banner' }, '설정에서 ‘실제 노래 검색’이 꺼져 있어요.') : null,
+      inp, sugg,
+      L.cat ? h('button', { class: 'btn ghost danger wide', style: 'margin-top:14px', onclick: () => { linkSong(key, null); done('연결을 풀었어요'); } }, icon('x', 17), '연결 풀기') : null)
+  });
+  sugg.search();
 }
 
 /* ================= staff & stamp ================= */
@@ -1014,7 +1245,7 @@ function TodayView() {
     isToday ? LastSec(date) : null,
     isToday ? MemorySec(date) : null,
     CondSec(date, e), GoalSec(date, e), DrillSec(date), SongSec(date, e), RecSec(date, e), ReflectSec(date, e));
-  return h('div', { class: 'v-today' }, isToday ? BackupNudge() : null, head, jump, page,
+  return h('div', { class: 'v-today' }, isToday ? (WhatsNew() || BackupNudge()) : null, head, jump, page,
     h('div', { class: 'today-foot' },
       h('button', { class: 'btn soft sm', onclick: () => copySummary(date) }, icon('copy', 18), '요약 복사'),
       h('button', { class: 'btn soft sm', onclick: () => shareSummary(date) }, icon('send', 18), '요약 보내기'),
@@ -1175,8 +1406,14 @@ function bump(date, id, delta, sec) {
 function SongSec(date, e) {
   const lib = songLib();
   const songs = e ? e.songs : [];
-  const inp = h('input', { class: 'input', placeholder: '부른 노래 제목', list: 'dl-songs', 'data-fk': 'song', enterkeyhint: 'done', autocomplete: 'off', 'aria-label': '부른 노래 추가' });
-  const add = () => { if (inp.isConnected) addSong(date, inp.value); };
+  const inp = h('input', { class: 'input', placeholder: '제목이나 가수, 초성(ㅂㅇㄱ)도 돼요', 'data-fk': 'song', enterkeyhint: 'done', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': '부른 노래 찾아서 추가' });
+  const sugg = SongSuggest(inp, {
+    free: true,
+    skip: () => new Set(((S.days[date] || {}).songs || []).map(s => normKey(s.title))),
+    onPick: p => addSong(date, p.title, p),
+    onFree: t => addSong(date, t)
+  });
+  const add = () => { if (!inp.isConnected || sugg.takeActive()) return; addSong(date, inp.value); };
   bindEnter(inp, add);
   const recent = Array.from(lib.values()).filter(L => !songs.some(s => normKey(s.title) === L.key)).sort((a, b) => b.last.localeCompare(a.last)).slice(0, 8);
   const best = bestHigh();
@@ -1194,7 +1431,9 @@ function SongSec(date, e) {
       const L = lib.get(normKey(s.title));
       const nth = L ? L.dates.filter(x => x <= date).length : 1;
       const sub = [s.artist, s.tone].filter(Boolean).join('  ');
+      const art = L && L.cat && L.cat.art;
       return h('li', { class: 'song' },
+        art ? artThumb(art, 40) : null,
         h('button', { class: 'song-btn', onclick: () => openSongEntry(date, s.id) },
           h('span', { class: 'song-t' }, s.title),
           sub ? h('span', { class: 'song-a' }, sub) : null,
@@ -1202,18 +1441,21 @@ function SongSec(date, e) {
         h('span', { class: 'nth' }, nth === 1 ? '처음' : `${nth}번째`));
     })) : null,
     h('div', { class: 'composer' }, inp, h('button', { class: 'btn ink', onpointerdown: ev => ev.preventDefault(), onclick: add }, '추가')),
-    h('datalist', { id: 'dl-songs' }, Array.from(lib.values()).map(L => h('option', { value: L.title }, L.artist || ''))),
+    sugg,
     recent.length ? h('div', { class: 'chips scroll quick' }, h('span', { class: 'hint' }, '다시 부르기'), recent.map(L => h('button', { class: 'chip sm', onclick: () => addSong(date, L.title) }, L.title))) : null,
     h('div', { class: 'high-row' }, h('span', { class: 'lbl' }, '오늘 낸 최고음'), sel, best ? h('span', { class: 'hint' }, `지금까지 최고 ${noteName(best.m)}`) : null));
 }
-function addSong(date, raw) {
-  const title = String(raw || '').trim();
+/* pick: a suggestion ({ artist, cat } when it came from the song catalog) */
+function addSong(date, raw, pick) {
+  const title = String(raw || '').trim().slice(0, 60);
   if (!title) return;
   const e = ensureDay(date);
   const k = normKey(title);
   if (e.songs.some(s => normKey(s.title) === k)) { toast('이미 추가한 노래예요'); return; }
   const L = songLib().get(k);
-  e.songs.push({ id: uid('s'), title: L ? L.title : title, artist: L ? L.artist : '', tone: L ? L.tone : '', note: '' });
+  const artist = (L && L.artist) || (pick && pick.artist) || '';
+  e.songs.push({ id: uid('s'), title: L ? L.title : title, artist, tone: L ? L.tone : '', note: '' });
+  if (pick && pick.cat && !(L && L.cat)) linkSong(k, pick.cat, artist);
   touch(date);
   render({ focus: 'song' });
 }
@@ -1842,6 +2084,9 @@ function openSongEntry(date, sid) {
   if (!so) return;
   const tInp = h('input', { class: 'input', value: so.title, maxlength: 60, 'aria-label': '노래 제목' });
   const aInp = h('input', { class: 'input', value: so.artist || '', maxlength: 40, placeholder: '예: 아이유', 'aria-label': '가수' });
+  let picked = null;
+  const tSugg = SongSuggest(tInp, { onPick: p => { tInp.value = p.title; if (p.artist) aInp.value = p.artist; picked = p; } });
+  tInp.addEventListener('input', () => { picked = null; });
   const kInp = h('input', { class: 'input', value: so.tone || '', maxlength: 20, placeholder: '예: 원키, -2키', 'aria-label': '키' });
   const quickKeys = h('div', { class: 'chips', style: 'margin-top:8px' }, ['원키', '+1키', '-1키', '-2키', '-3키'].map(k => h('button', { class: 'chip sm', onclick: () => { kInp.value = k; } }, k)));
   const nInp = autoTA({ class: 'input lined', value: so.note || '', placeholder: '예: 2절 브릿지 숨 위치 바꿔 봄', 'aria-label': '오늘 이 노래 메모' }, 66);
@@ -1853,13 +2098,14 @@ function openSongEntry(date, sid) {
     if (!t) { toast('제목을 적어 주세요'); return; }
     const oldKey = normKey(cur.title), newKey = normKey(t);
     Object.assign(cur, { title: t, artist: aInp.value.trim(), tone: kInp.value.trim(), note: nInp.value.trim() });
+    if (picked && picked.cat && normKey(picked.title) === newKey) linkSong(newKey, picked.cat, cur.artist);
     if (oldKey !== newKey) d.recs.forEach(r => { if (r.song === oldKey) { r.song = newKey; r.songTitle = t; } });
     touch(date); closeSheet(s, true); render();
   } }, '저장');
   s = openSheet({
     title: so.title,
     body: h('div', null,
-      field('제목', tInp), field('가수', aInp),
+      field('제목', h('div', null, tInp, tSugg)), field('가수', aInp),
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, '키'), kInp, quickKeys),
       field('오늘 이 노래 메모', nInp),
       h('div', { class: 'btn-row' },
@@ -2247,13 +2493,16 @@ function SongsView() {
   let content;
   if (seg === 'songs') content = SongListPanel();
   else if (seg === 'recs') content = AllRecsPanel();
+  else if (seg === 'journal') content = JournalPanel();
   else content = RangePanel();
+  const pickSeg = v => { if (S.lib.seg === v) return; S.lib.seg = v; render({ top: true }); };
   return h('div', { class: 'v-songs' }, Banner(),
-    h('div', { class: 'view-head' }, h('h1', { class: 'view-title' }, '노래')),
+    h('div', { class: 'view-head' }, h('h1', { class: 'view-title' }, '모아보기')),
     h('div', { class: 'seg', style: 'margin-bottom:12px', role: 'group', 'aria-label': '보기' },
-      segBtn('곡별', seg === 'songs', () => { S.lib.seg = 'songs'; render(); }),
-      segBtn('녹음', seg === 'recs', () => { S.lib.seg = 'recs'; render(); }),
-      segBtn('음역', seg === 'range', () => { S.lib.seg = 'range'; render(); })),
+      segBtn('곡별', seg === 'songs', () => pickSeg('songs')),
+      segBtn('녹음', seg === 'recs', () => pickSeg('recs')),
+      segBtn('일지', seg === 'journal', () => pickSeg('journal')),
+      segBtn('음역', seg === 'range', () => pickSeg('range'))),
     content);
 }
 function SongListPanel() {
@@ -2265,7 +2514,8 @@ function SongListPanel() {
     used.length ? h('div', { class: 'chips scroll', style: 'padding-top:14px;padding-bottom:4px' },
       h('button', { class: 'chip sm', 'aria-pressed': String(!S.lib.status), onclick: () => { S.lib.status = null; render(); } }, `전체 ${all.length}`),
       used.map(st => h('button', { class: 'chip sm', 'aria-pressed': String(S.lib.status === st), onclick: () => { S.lib.status = S.lib.status === st ? null : st; render(); } }, `${st} ${all.filter(L => L.status === st).length}`))) : null,
-    lib.map(L => h('button', { class: 'song-card', onclick: () => openSongDetail(L.key) },
+    lib.map(L => h('button', { class: 'song-card' + (L.cat && L.cat.art ? ' has-art' : ''), onclick: () => openSongDetail(L.key) },
+      L.cat && L.cat.art ? artThumb(L.cat.art, 48) : null,
       h('span', { class: 'sc-t' }, L.title, L.status ? h('span', { class: 'st-pill', 'data-st': SONG_STATUS.indexOf(L.status) }, L.status) : null),
       h('span', { class: 'sc-days' }, L.dates.length, h('small', null, '일 연습')),
       L.artist ? h('span', { class: 'sc-a' }, L.artist) : null,
@@ -2274,7 +2524,7 @@ function SongListPanel() {
 function openSongDetail(key) {
   const L = songLib().get(key);
   if (!L) { toast('이 노래의 기록을 찾지 못했어요'); return; }
-  const metaOf = () => { let m = S.settings.songs.find(x => x.k === key); if (!m) { m = { k: key, artist: '', memo: '', status: '' }; S.settings.songs.push(m); } return m; };
+  const metaOf = () => { let m = S.settings.songs.find(x => x.k === key); if (!m) { m = { k: key, artist: '', memo: '', status: '', cat: null }; S.settings.songs.push(m); } return m; };
   const stChips = h('div', { class: 'chips' });
   const drawSt = () => stChips.replaceChildren(...SONG_STATUS.map(st => h('button', { class: 'chip sm', 'aria-pressed': String(L.status === st), onclick: () => { L.status = L.status === st ? '' : st; const m = metaOf(); m.status = L.status; touchSettings(); drawSt(); } }, st)));
   drawSt();
@@ -2296,11 +2546,20 @@ function openSongDetail(key) {
     return h('div', null,
       h('div', { class: 'tl-d' }, h('button', { onclick: () => { closeSheet(null, true); goDate(d); } }, fmtMD(d)), h('span', { class: 'hint wd' + dowClass(d) }, WD[parseYmd(d).getDay()] + '요일')),
       v.notes.map(n => h('p', { class: 'tl-n' }, [n.tone ? `[${n.tone}] ` : '', n.note].join(''))),
+      DayJournal(d, { compact: true }),
       v.recs.length ? h('div', { class: 'recs' }, v.recs.map(r => RecRow(r, d))) : null);
   });
+  let hero = null;
+  const drawHero = () => {
+    const LL = songLib().get(key) || L;
+    const nh = SongHero(LL, key, () => { drawHero(); if (LL.artist && !aInp.value.trim()) aInp.value = LL.artist; });
+    if (hero) hero.replaceWith(nh);
+    hero = nh;
+  };
+  drawHero();
   openSheet({
     title: L.title,
-    body: h('div', null, story,
+    body: h('div', null, hero, story,
       field('지금 이 곡은', stChips), field('가수', aInp), field('곡 메모', memo),
       recsSorted.length >= 2 ? h('div', { class: 'field' }, h('span', { class: 'lbl' }, '처음과 지금 비교해 듣기'),
         h('div', { class: 'cmp' },
@@ -2308,7 +2567,7 @@ function openSongDetail(key) {
           favs.length && favs[favs.length - 1] !== lastRec ? [h('span', { class: 'cmp-l' }, '베스트'), RecRow(favs[favs.length - 1].r, favs[favs.length - 1].d, { label: fmtMD(favs[favs.length - 1].d) })] : null,
           h('span', { class: 'cmp-l' }, '가장 최근 녹음'), RecRow(lastRec.r, lastRec.d, { label: fmtMD(lastRec.d) }))) : null,
       h('div', { class: 'lbl', style: 'margin-top:6px' }, '연습 기록'), timeline),
-    onClose: () => { saveMeta.flush(); render(); }
+    onClose: () => { saveMeta.flush(); Preview.stop(); render(); }
   });
 }
 function AllRecsPanel() {
@@ -2354,6 +2613,100 @@ function RangePanel() {
       h('div', null, h('b', null, noteName(latest.m)), h('span', null, `최근 ${noteSci(latest.m)}, ${fmtMD(latest.d)}`))),
     h('div', { html: svg, style: 'padding:6px 0 4px' }),
     h('p', { class: 'hint', style: 'padding-bottom:14px' }, `빨간 점이 가장 높이 낸 날이에요. 최근 ${shown.length}번의 기록을 보여 줘요.`));
+}
+
+/* ================= journal: every day's writing in one place ================= */
+function journalText(e) {
+  return [e.goal, e.memo, e.next, ...e.songs.map(s => s.note), ...e.good.map(i => i.text), ...e.bad.map(i => i.text), ...e.fb.map(i => i.text)]
+    .filter(t => t && String(t).trim()).join('\n');
+}
+/* the written part of one day; compact = inside a song's timeline */
+function DayJournal(d, o = {}) {
+  const e = S.days[d];
+  if (!e) return null;
+  const q = o.q || '';
+  const hl = t => (q ? highlight(t, q) : t);
+  const box = h('div', { class: 'jbody' + (o.compact ? ' compact' : '') });
+  if (!o.compact && e.songs.length) box.append(h('p', { class: 'j-songs' }, '♪ ', hl(e.songs.map(s => s.title + (s.tone ? ` (${s.tone})` : '')).join(', '))));
+  if (e.goal.trim()) box.append(h('p', { class: 'j-line' }, h('span', { class: 'j-k' }, '목표'), h('span', null, hl(e.goal.trim()))));
+  if (e.memo.trim()) {
+    const t = e.memo.trim();
+    const memo = h('p', { class: 'j-memo' + (o.compact ? ' c3' : ' c6') }, hl(t));
+    box.append(memo);
+    if (t.length > (o.compact ? 110 : 220) || t.split('\n').length > (o.compact ? 3 : 6)) {
+      const more = h('button', { class: 'link j-more', 'aria-expanded': 'false', onclick: () => { const open = memo.classList.toggle('open'); more.textContent = open ? '접기' : '더 보기'; more.setAttribute('aria-expanded', String(open)); } }, '더 보기');
+      box.append(more);
+    }
+  }
+  if (!o.compact) e.songs.filter(s => s.note && s.note.trim()).forEach(s => box.append(h('p', { class: 'j-line' }, h('span', { class: 'j-k clip' }, s.title), h('span', null, hl(s.note.trim())))));
+  const items = ['good', 'bad', 'fb'].flatMap(k => e[k].map(it => ({ k, it })));
+  if (items.length) box.append(h('ul', { class: 'j-items' }, items.map(({ k, it }) => h('li', { class: it.resolved ? 'resolved' : '' }, mark(k), h('span', { class: 'j-it' }, hl(it.text)), k === 'fb' && it.from ? h('span', { class: 'from' }, it.from) : null))));
+  if (!o.compact && e.next.trim()) box.append(h('p', { class: 'j-line' }, h('span', { class: 'j-k' }, '다음에'), h('span', null, hl(e.next.trim()))));
+  if (!box.childNodes.length) {
+    if (o.compact) return null;
+    box.append(h('p', { class: 'hint' }, '적은 글 없이 연습만 기록한 날이에요.'));
+  }
+  return box;
+}
+function JournalCard(d, q) {
+  const e = S.days[d], dt = parseYmd(d);
+  const meta = [
+    e.rating ? rateDots(e.rating) : null,
+    e.minutes ? h('span', null, fmtMin(e.minutes)) : null,
+    e.cond ? h('span', null, `목 ${COND_LABELS[e.cond - 1]}`) : null,
+    e.recs.length ? h('span', null, `녹음 ${e.recs.length}`) : null,
+    drillsAllDone(d) ? h('span', { class: 'mini-stamp' }, '참 잘했어요') : null].filter(Boolean);
+  return h('article', { class: 'jcard' },
+    h('button', { class: 'j-head', 'aria-label': `${fmtMDW(d)} 기록 펼쳐 보기`, onclick: () => goDate(d) },
+      h('span', { class: 'j-date' + dowClass(d) }, h('b', null, dt.getDate()), h('span', null, WD[dt.getDay()])),
+      h('span', { class: 'j-meta' }, meta),
+      icon('right', 18)),
+    DayJournal(d, { q }));
+}
+function journalDays() {
+  const J = S.lib, ql = (J.jq || '').trim().toLowerCase();
+  return entryDates().reverse().filter(d => {
+    const e = S.days[d], t = journalText(e);
+    if (!J.jall && !t) return false;
+    return !ql || (t + '\n' + e.songs.map(s => s.title).join('\n')).toLowerCase().includes(ql);
+  });
+}
+function drawJournal(body) {
+  const J = S.lib, q = (J.jq || '').trim();
+  const days = journalDays();
+  if (!entryDates().length) { body.replaceChildren(h('div', { class: 'empty' }, h('span', { class: 'hand' }, '아직 쓴 일지가 없어요'), '오늘 화면의 목표, 메모, 돌아보기에 적은 글이 날짜별로 여기에 모여요.')); return; }
+  if (!days.length) { body.replaceChildren(h('div', { class: 'empty' }, q ? '찾는 내용이 없어요. 다른 낱말로 찾아보세요.' : '글을 적은 날이 아직 없어요. ‘연습만 한 날도’를 누르면 모든 기록을 보여 줘요.')); return; }
+  const shown = days.slice(0, J.jn);
+  const nodes = [h('div', { class: 'j-top' }, h('span', { class: 'sec-note' }, `${days.length}일`), h('span', { class: 'sp' }),
+    h('button', { class: 'btn ghost sm', onclick: () => shareJournal(days) }, icon('send', 16), '글로 모아 보내기'))];
+  let month = '';
+  for (const d of shown) {
+    const m = d.slice(0, 7);
+    if (m !== month) { month = m; nodes.push(h('h3', { class: 'j-month' }, `${+m.slice(0, 4)}년 ${+m.slice(5)}월`)); }
+    nodes.push(JournalCard(d, q));
+  }
+  if (days.length > shown.length) nodes.push(h('button', { class: 'btn soft wide j-next', onclick: () => { J.jn += 20; drawJournal(body); } }, `이전 일지 ${Math.min(20, days.length - shown.length)}일 더 보기`));
+  body.replaceChildren(...nodes);
+}
+function JournalPanel() {
+  const J = S.lib;
+  const body = h('div', { class: 'jlist' });
+  const search = h('div', { class: 'search' }, icon('search', 20),
+    h('input', { class: 'input', type: 'search', placeholder: '일지에서 찾기 (메모, 피드백, 노래)', value: J.jq, 'data-fk': 'j-q', enterkeyhint: 'search', 'aria-label': '일지 검색', oninput: ev => { J.jq = ev.target.value; J.jn = 20; drawJournal(body); } }));
+  drawJournal(body);
+  return [search, h('div', { class: 'page' },
+    h('div', { class: 'chips j-chips' },
+      h('button', { class: 'chip sm', 'aria-pressed': String(!J.jall), onclick: () => { J.jall = false; J.jn = 20; render(); } }, '글 쓴 날'),
+      h('button', { class: 'chip sm', 'aria-pressed': String(!!J.jall), onclick: () => { J.jall = true; J.jn = 20; render(); } }, '연습만 한 날도')),
+    body)];
+}
+async function shareJournal(days) {
+  const text = ['[노래일기] 일지 모음', ...days.slice().reverse().map(summaryText)].join('\n\n────────\n\n');
+  try { if (!(await Files.share({ title: '노래일기 일지 모음', text }))) throw new Error('no share'); }
+  catch (e) {
+    const ta = h('textarea', { class: 'input', readOnly: true, rows: 12, value: text, style: 'min-height:260px' });
+    openSheet({ title: '일지 모음', body: h('div', null, h('p', { class: 'hint', style: 'margin-bottom:10px' }, '아래 글을 길게 눌러 전체 선택한 뒤 복사하세요.'), ta) });
+  }
 }
 
 /* ================= settings & backup ================= */
@@ -2489,7 +2842,7 @@ function mergeSettings(cur, inc) {
   inc.songs.forEach(m => {
     const o = out.songs.find(x => x.k === m.k);
     if (!o) out.songs.push(clone(m));
-    else { if (!o.artist) o.artist = m.artist; if (!o.memo) o.memo = m.memo; if (!o.status) o.status = m.status; }
+    else { if (!o.artist) o.artist = m.artist; if (!o.memo) o.memo = m.memo; if (!o.status) o.status = m.status; if (!o.cat && m.cat) o.cat = m.cat; }
   });
   out.updatedAt = Date.now();
   return normSettings(out);
@@ -2607,6 +2960,8 @@ function openSettings() {
       h('div', { class: 'set-block' },
         ToggleRow('체크할 때 음 소리', S.settings.sound, v => { S.settings.sound = v; touchSettings(); }, '횟수를 채울 때마다 도레미파솔 음이 울려요', 'sound'),
         ToggleRow('진동', S.settings.haptic, v => { S.settings.haptic = v; touchSettings(); if (v) vibrate(12); }, '체크하거나 표시할 때 살짝 떨려요', 'vibe')),
+      h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '노래 찾기')),
+        ToggleRow('실제 노래 검색', S.settings.songSearch, v => { S.settings.songSearch = v; touchSettings(); }, '노래 제목을 몇 글자 치면 Apple Music 곡 목록에서 찾아 줘요. 입력한 검색어만 보내고 일기 내용은 보내지 않아요. 끄면 내가 부른 노래에서만 찾아요.', 'search')),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '알림')), ReminderBlock()),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '백업')),
         h('p', { class: 'hint', style: 'margin-bottom:6px' }, '모든 기록과 녹음은 이 폰 안에만 저장돼요. 폰을 바꾸거나 앱을 지우기 전에 꼭 전체 백업을 해 두세요.'),
