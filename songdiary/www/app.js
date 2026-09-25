@@ -762,12 +762,13 @@ function openSheet({ title, body, foot, onClose, beforeClose, full }) {
   const bd = h('div', { class: 'backdrop', style: `z-index:${50 + depth * 2}` });
   const closeBtn = h('button', { class: 'icon-btn', 'aria-label': '닫기' }, icon('x', 22));
   const grab = h('div', { class: 'sheet-grab-area' }, h('div', { class: 'sheet-grab' }));
-  const headEl = h('div', { class: 'sheet-head' }, h('h3', null, title), closeBtn);
+  const titleEl = h('h3', { tabindex: -1 }, title);
+  const headEl = h('div', { class: 'sheet-head' }, titleEl, closeBtn);
   const sheet = h('div', { class: 'sheet' + (full ? ' full' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title, style: `z-index:${51 + depth * 2}` },
     grab, headEl,
     h('div', { class: 'sheet-body' }, body),
     foot ? h('div', { class: 'sheet-foot' }, foot) : null);
-  const obj = { bd, sheet, onClose, beforeClose, prevFocus: document.activeElement };
+  const obj = { bd, sheet, head: titleEl, onClose, beforeClose, prevFocus: document.activeElement };
   bd.addEventListener('click', () => closeSheet(obj));
   closeBtn.addEventListener('click', () => closeSheet(obj));
   /* drag the top of the sheet down to close it */
@@ -789,18 +790,29 @@ function openSheet({ title, body, foot, onClose, beforeClose, full }) {
   NowPlaying.paint();
   document.body.classList.add('noscroll');
   requestAnimationFrame(() => requestAnimationFrame(() => { bd.classList.add('open'); sheet.classList.add('open'); }));
-  setTimeout(() => { const f = sheet.querySelector('[data-autofocus]'); if (f) f.focus({ preventScroll: true }); }, 320);
+  setTimeout(() => {
+    if (obj.closed || sheet.contains(document.activeElement)) return;
+    const f = sheet.querySelector('[data-autofocus]');
+    (f || titleEl).focus({ preventScroll: true });
+  }, 320);
   return obj;
 }
 function closeSheet(obj, force) {
   obj = obj || Sheets[Sheets.length - 1];
   if (!obj || obj.closed) return;
   if (!force && obj.beforeClose && obj.beforeClose() === false) return;
+  const a = document.activeElement;
+  if (a && obj.sheet.contains(a)) a.blur(); /* lets a typed number's change event land before onClose re-renders */
   obj.closed = true;
   const i = Sheets.indexOf(obj);
   if (i >= 0) Sheets.splice(i, 1);
   obj.bd.classList.remove('open'); obj.sheet.classList.remove('open');
-  setTimeout(() => { obj.bd.remove(); obj.sheet.remove(); }, 300);
+  setTimeout(() => {
+    obj.bd.remove(); obj.sheet.remove();
+    const p = obj.prevFocus, top = Sheets[Sheets.length - 1];
+    if (top) { if (!top.sheet.contains(document.activeElement)) top.head.focus({ preventScroll: true }); }
+    else if (p && p.isConnected && p !== document.body && !/^(INPUT|TEXTAREA|SELECT)$/.test(p.tagName) && !isTyping()) p.focus({ preventScroll: true });
+  }, 300);
   if (!Sheets.length) { S.sheetOpen = false; document.body.classList.remove('noscroll'); NowPlaying.paint(); }
   try { if (obj.onClose) obj.onClose(); } catch (e) { console.error(e); }
   if (deferred && !Sheets.length) setTimeout(() => softRender(), 320);
@@ -954,7 +966,7 @@ function stopTimer() {
   if (!tm) return;
   lsSet(LS_TIMER, null);
   const add = Math.round((Date.now() - tm.start) / 60000);
-  if (add > 240) { render(); editMinutes(tm.date, ((S.days[tm.date] || {}).minutes || 0) + add, '4시간 넘게 켜져 있었어요. 이 날 연습한 시간을 모두 합쳐서 확인해 주세요.'); return; }
+  if (add > 240) { render(); editMinutes(tm.date, ((S.days[tm.date] || {}).minutes || 0) + add, '4시간 넘게 켜져 있었어요. 이 날 연습한 시간을 모두 합쳐서 확인해 주세요.', () => { lsSet(LS_TIMER, tm); render(); toast('연습 시간을 계속 재고 있어요'); }); return; }
   if (add >= 1) { const e = ensureDay(tm.date); e.minutes = (e.minutes || 0) + add; touch(tm.date); toast(`${fmtMin(add)}을 기록했어요`); }
   else toast('1분이 안 돼서 기록하지 않았어요');
   render();
@@ -968,14 +980,16 @@ function tickTimer() {
   const v = $('#timer-val');
   if (v) v.textContent = t;
 }
-function editMinutes(date, suggested, note) {
+/* onCancel: called when the sheet is closed without saving */
+function editMinutes(date, suggested, note, onCancel) {
   const e = S.days[date];
   let val = suggested != null ? suggested : (e ? e.minutes : 0);
   const out = h('input', { class: 'input', type: 'number', inputmode: 'numeric', min: 0, max: 1440, value: val, 'aria-label': '연습 시간(분)', 'data-autofocus': '' });
   const quick = h('div', { class: 'btn-row' }, [-10, -5, 5, 10, 30].map(n => h('button', { class: 'btn soft sm', onclick: () => { out.value = Math.max(0, (parseInt(out.value, 10) || 0) + n); } }, (n > 0 ? '+' : '−') + Math.abs(n) + '분')));
   let s = null;
-  const save = h('button', { class: 'btn ink', onclick: () => { const v = clampInt(out.value, 0, 1440, 0); const d = ensureDay(date); d.minutes = v; touch(date); closeSheet(s, true); render(); toast(`연습 시간을 ${fmtMin(v)}으로 적었어요`); } }, '저장');
-  s = openSheet({ title: `${fmtMD(date)} 연습 시간`, body: h('div', null, note ? h('p', { class: 'banner' }, note) : null, field('모두 몇 분 연습했나요?', out), quick), foot: [save] });
+  let saved = false;
+  const save = h('button', { class: 'btn ink', onclick: () => { const v = clampInt(out.value, 0, 1440, 0); const d = ensureDay(date); d.minutes = v; saved = true; touch(date); closeSheet(s, true); render(); toast(`연습 시간을 ${fmtMin(v)}으로 적었어요`); } }, '저장');
+  s = openSheet({ title: `${fmtMD(date)} 연습 시간`, body: h('div', null, note ? h('p', { class: 'banner' }, note) : null, field('모두 몇 분 연습했나요?', out), quick), foot: [save], onClose: () => { if (!saved && onCancel) onCancel(); } });
 }
 
 /* ================= data helpers ================= */
@@ -987,6 +1001,14 @@ function snapshotDrills(e) {
 function drillList(date) {
   const e = S.days[date];
   const snap = (e && e.drills) || {};
+  /* a past day keeps the drills it had then (adding or removing drills later doesn't rewrite it) */
+  if (date !== todayStr() && Object.keys(snap).length) {
+    const pos = id => { const i = S.settings.drills.findIndex(t => t.id === id); return i < 0 ? 1e3 : i; };
+    return Object.keys(snap).sort((a, b) => pos(a) - pos(b)).map(id => {
+      const s = snap[id], t = S.settings.drills.find(x => x.id === id);
+      return { id, name: (t && t.name) || s.name || '연습', memo: t ? t.memo : '', timed: t ? t.timed : (s.times || []).length > 0, target: s.target, done: Math.min(s.done || 0, s.target), times: s.times || [] };
+    });
+  }
   const list = S.settings.drills.map(t => {
     const s = snap[t.id];
     const target = s ? s.target : t.target;
@@ -999,7 +1021,7 @@ function drillList(date) {
   return list;
 }
 function drillsAllDone(date) {
-  if (date === todayStr()) { const l = drillList(date); return l.length > 0 && l.every(d => d.done >= d.target); }
+  if (date === todayStr()) { const l = drillList(date).filter(d => !d.orphan); return l.length > 0 && l.every(d => d.done >= d.target); }
   const e = S.days[date];
   if (!e || !e.drills) return false;
   const v = Object.values(e.drills);
@@ -1349,13 +1371,14 @@ function MemorySec(date) {
 }
 function TimerSec(date, e, isToday) {
   const tm = lsGet(LS_TIMER, null);
-  const running = !!(tm && tm.date === date);
+  const carried = !!(isToday && tm && tm.date < date); /* started before midnight */
+  const running = !!(tm && (tm.date === date || carried));
   const mins = e ? e.minutes : 0;
   return h('div', { class: 'sec timer-row' + (running ? ' run' : '') },
     (isToday && !tm) || running ? h('button', { class: 'btn ' + (running ? 'redb' : 'ink'), onclick: () => (running ? stopTimer() : startTimer(date)) }, running ? icon('stop', 18) : h('span', { class: 'dot white' }), running ? '연습 끝' : '연습 시작') : null,
     h('div', { class: 't-main' },
       running ? h('div', { class: 't-val', id: 'timer-val' }, fmtClock(Date.now() - tm.start)) : h('div', { class: 't-val' }, fmtMin(mins)),
-      h('div', { class: 't-sub' }, running ? (mins ? `이 날 이미 ${fmtMin(mins)} 기록됨` : '연습하는 동안 시간을 재고 있어요') : (isToday ? '오늘 연습한 시간' : '이 날 연습한 시간'))),
+      h('div', { class: 't-sub' }, carried ? `${fmtMD(tm.date)}에 시작한 연습을 재고 있어요` : running ? (mins ? `이 날 이미 ${fmtMin(mins)} 기록됨` : '연습하는 동안 시간을 재고 있어요') : (isToday ? '오늘 연습한 시간' : '이 날 연습한 시간'))),
     h('button', { class: 'icon-btn', 'aria-label': '연습 시간 직접 고치기', onclick: () => editMinutes(date) }, icon('edit', 20)));
 }
 function PinsSec() {
@@ -1404,7 +1427,7 @@ function CondSec(date, e) {
     })),
     h('div', { class: 'cond-line' }, h('span', { class: 'lbl' }, '잠'),
       h('div', { class: 'stepper' },
-        h('button', { 'aria-label': '잠 30분 줄이기', onclick: () => setDay(d => { d.sleep = d.sleep == null ? 7 : Math.max(0, d.sleep - 0.5); }) }, '−'),
+        h('button', { 'aria-label': sl === 0 ? '잠 기록 지우기' : '잠 30분 줄이기', onclick: () => setDay(d => { d.sleep = d.sleep == null ? 7 : d.sleep <= 0 ? null : Math.max(0, d.sleep - 0.5); }) }, '−'),
         h('span', { class: 'sv' + (sl == null ? ' none' : '') }, sl == null ? '안 적음' : `${sl}시간`),
         h('button', { 'aria-label': '잠 30분 늘리기', onclick: () => setDay(d => { d.sleep = d.sleep == null ? 7 : Math.min(14, d.sleep + 0.5); }) }, '+'))),
     h('div', { class: 'cond-line' }, h('span', { class: 'lbl' }, '물'), cups, h('span', { class: 'val' }, `${w}잔`)));
@@ -1416,12 +1439,13 @@ function GoalSec(date, e) {
 }
 function DrillSec(date) {
   const list = drillList(date);
-  const doneN = list.filter(d => d.done >= d.target).length;
-  const all = list.length > 0 && doneN === list.length;
-  const reps = list.reduce((a, d) => a + Math.min(d.done, d.target), 0), total = list.reduce((a, d) => a + d.target, 0);
-  const ordered = list.filter(d => d.done < d.target).concat(list.filter(d => d.done >= d.target));
+  const counted = list.filter(d => !d.orphan); /* a drill removed in 편집 still shows today's reps but isn't required */
+  const doneN = counted.filter(d => d.done >= d.target).length;
+  const all = counted.length > 0 && doneN === counted.length;
+  const reps = counted.reduce((a, d) => a + Math.min(d.done, d.target), 0), total = counted.reduce((a, d) => a + d.target, 0);
+  const ordered = list; /* settings order: a row never moves under the finger when it completes */
   return h('div', { class: 'sec drills' + (all ? ' all' : ''), id: 'sec-drills' },
-    h('div', { class: 'sec-h' }, h('h2', null, '기초 연습'), list.length ? h('span', { class: 'sec-note' }, all ? '모두 완료!' : `${list.length}개 중 ${doneN}개 완료`) : null, h('span', { class: 'sp' }),
+    h('div', { class: 'sec-h' }, h('h2', null, '기초 연습'), counted.length ? h('span', { class: 'sec-note' }, all ? '모두 완료!' : `${counted.length}개 중 ${doneN}개 완료`) : null, h('span', { class: 'sp' }),
       h('button', { class: 'icon-btn', 'aria-label': S.settings.sound ? '체크 소리 끄기' : '체크 소리 켜기', onclick: () => { S.settings.sound = !S.settings.sound; touchSettings(); render(); toast(S.settings.sound ? '체크할 때 음이 울려요' : '체크 소리를 껐어요'); } }, icon(S.settings.sound ? 'sound' : 'mute', 20)),
       h('button', { class: 'btn ghost sm', onclick: openDrillEditor }, '편집')),
     list.length ? h('div', { class: 'drill-prog', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': reps, 'aria-label': `기초 연습 ${reps}/${total}회` }, h('i', { style: `width:${total ? (reps / total * 100).toFixed(1) : 0}%` })) : null,
@@ -1460,7 +1484,7 @@ function bump(date, id, delta, sec) {
   const e = ensureDay(date);
   snapshotDrills(e);
   let s = e.drills[id];
-  if (!s) { if (!t) return; s = e.drills[id] = { name: t.name, target: t.target, done: 0, times: [] }; }
+  if (!s) { if (!t || date !== todayStr()) return; s = e.drills[id] = { name: t.name, target: t.target, done: 0, times: [] }; }
   if (t) s.name = t.name;
   const before = Math.min(s.done || 0, s.target);
   const next = Math.max(0, Math.min(s.target, before + delta));
@@ -1483,14 +1507,15 @@ function bump(date, id, delta, sec) {
 function SongSec(date, e) {
   const lib = songLib();
   const songs = e ? e.songs : [];
-  const inp = h('input', { class: 'input', placeholder: '제목이나 가수, 초성(ㅂㅇㄱ)도 돼요', 'data-fk': 'song', enterkeyhint: 'done', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': '부른 노래 찾아서 추가' });
+  const inp = h('input', { class: 'input', placeholder: '제목이나 가수, 초성(ㅂㅇㄱ)도 돼요', 'data-fk': 'song', enterkeyhint: 'done', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': '부른 노래 찾아서 추가', value: S.songDraft && S.songDraft.date === date ? S.songDraft.text : '' });
+  inp.addEventListener('input', () => { S.songDraft = { date, text: inp.value }; });
   const sugg = SongSuggest(inp, {
     free: true,
     skip: () => new Set(((S.days[date] || {}).songs || []).map(s => normKey(s.title))),
-    onPick: p => addSong(date, p.title, p),
-    onFree: t => addSong(date, t)
+    onPick: p => addSong(date, p.title, p, true),
+    onFree: t => addSong(date, t, null, true)
   });
-  const add = () => { if (!inp.isConnected || sugg.takeActive()) return; addSong(date, inp.value); };
+  const add = () => { if (!inp.isConnected || sugg.takeActive()) return; addSong(date, inp.value, null, true); };
   bindEnter(inp, add);
   const recent = Array.from(lib.values()).filter(L => !songs.some(s => normKey(s.title) === L.key)).sort((a, b) => b.last.localeCompare(a.last)).slice(0, 8);
   const best = bestHigh();
@@ -1523,7 +1548,7 @@ function SongSec(date, e) {
     h('div', { class: 'high-row' }, h('span', { class: 'lbl' }, '오늘 낸 최고음'), sel, best ? h('span', { class: 'hint' }, `지금까지 최고 ${noteName(best.m)}`) : null));
 }
 /* pick: a suggestion ({ artist, cat } when it came from the song catalog) */
-function addSong(date, raw, pick) {
+function addSong(date, raw, pick, typing) {
   const title = String(raw || '').trim().slice(0, 60);
   if (!title) return;
   const e = ensureDay(date);
@@ -1533,8 +1558,9 @@ function addSong(date, raw, pick) {
   const artist = (L && L.artist) || (pick && pick.artist) || '';
   e.songs.push({ id: uid('s'), title: L ? L.title : title, artist, tone: L ? L.tone : '', note: '' });
   if (pick && pick.cat && !(L && L.cat)) linkSong(k, pick.cat, artist);
+  if (typing) S.songDraft = null;
   touch(date);
-  render({ focus: 'song' });
+  render(typing ? { focus: 'song' } : {});
 }
 function RecSec(date, e) {
   const recs = e ? e.recs : [];
@@ -1574,7 +1600,8 @@ function ItemList(date, e, kind) {
 }
 function Composer(date, kind) {
   const C = S.compose[kind];
-  const inp = h('input', { class: 'input', placeholder: KIND[kind].ph, 'data-fk': 'c-' + kind, enterkeyhint: 'enter', autocomplete: 'off', 'aria-label': KIND[kind].label + ' 적기' });
+  const inp = h('input', { class: 'input', placeholder: KIND[kind].ph, 'data-fk': 'c-' + kind, enterkeyhint: 'enter', autocomplete: 'off', 'aria-label': KIND[kind].label + ' 적기', value: C.draft && C.date === date ? C.draft : '' });
+  inp.addEventListener('input', () => { C.draft = inp.value; C.date = date; });
   const extra = h('div', { class: 'c-extra' });
   const wrap = h('div', { class: 'composer-wrap' });
   let lastTap = 0;
@@ -1586,7 +1613,7 @@ function Composer(date, kind) {
     const it = { id: uid('i'), text, tag: C.tag || null, pinned: false, resolved: false, at: Date.now() };
     if (kind === 'fb') it.from = C.from || '선생님';
     d[kind].push(it);
-    C.tag = null;
+    C.tag = null; C.draft = '';
     touch(date);
     render({ focus: 'c-' + kind });
   };
@@ -1595,7 +1622,7 @@ function Composer(date, kind) {
   const again = kind !== 'fb' ? frequentItems(kind, date) : [];
   const drawExtra = () => {
     extra.replaceChildren(...[
-      again.length ? h('div', { class: 'chips scroll' }, h('span', { class: 'hint' }, '자주 적은 것'), again.map(x => h('button', { class: 'chip sm again', type: 'button', onpointerdown: keep, onmousedown: keep, onclick: () => { inp.value = x.text; C.tag = x.tag || C.tag; add(); } }, x.text))) : null,
+      again.length ? h('div', { class: 'chips scroll' }, h('span', { class: 'hint' }, '자주 적은 것'), again.map(x => h('button', { class: 'chip sm again', type: 'button', onpointerdown: keep, onmousedown: keep, onclick: () => { const draft = inp.value; inp.value = x.text; C.tag = x.tag || C.tag; add(); if (draft.trim()) { C.draft = draft; C.date = date; render({ focus: 'c-' + kind }); } } }, x.text))) : null,
       h('div', { class: 'chips scroll' }, h('span', { class: 'hint' }, '주제'), S.settings.tags.map(t => h('button', { class: 'chip sm', type: 'button', 'aria-pressed': String(C.tag === t), onpointerdown: keep, onmousedown: keep, onclick: () => { C.tag = C.tag === t ? null : t; drawExtra(); inp.focus({ preventScroll: true }); } }, t))),
       kind === 'fb' ? h('div', { class: 'chips from-chips' }, h('span', { class: 'hint' }, '누가?'), FROM.map(f => h('button', { class: 'chip sm', type: 'button', 'aria-pressed': String(C.from === f), onpointerdown: keep, onmousedown: keep, onclick: () => { C.from = f; drawExtra(); inp.focus({ preventScroll: true }); } }, f))) : null].filter(Boolean));
   };
@@ -1607,7 +1634,7 @@ function Composer(date, kind) {
     wrap.classList.remove('open');
   }, 250));
   wrap.append(h('div', { class: 'composer' }, inp, h('button', { class: 'btn soft sq', type: 'button', 'aria-label': KIND[kind].label + ' 추가', onpointerdown: keep, onmousedown: keep, onclick: add }, icon('plus', 20))), extra);
-  if (C.tag) wrap.classList.add('open');
+  if (C.tag || inp.value) wrap.classList.add('open');
   return wrap;
 }
 /* texts written two or more times before (not on this day) — one tap to write them again */
@@ -2375,7 +2402,7 @@ function openStopwatch(date, id) {
 function applyTargetToday(id, target) {
   const today = todayStr();
   const e = S.days[today];
-  if (e && e.drills && e.drills[id]) { e.drills[id].target = target; e.drills[id].done = Math.min(e.drills[id].done || 0, target); touch(today); }
+  if (e && e.drills && e.drills[id]) { e.drills[id].target = target; touch(today); } /* done stays; views cap it at the target */
 }
 function DrillEditor() {
   const box = h('div', { class: 'dedit' });
@@ -3313,7 +3340,11 @@ function bindViewport() {
   });
 }
 function followToday() {
-  if (S.follow && S.mode === 'ready' && S.date !== todayStr()) { S.date = todayStr(); softRender(); }
+  if (!(S.follow && S.mode === 'ready' && S.date !== todayStr())) return;
+  S.date = todayStr();
+  /* fields save as you type, so dropping the focus loses nothing — and taps must not land on yesterday */
+  if (!S.sheetOpen && isTyping()) document.activeElement.blur();
+  softRender();
 }
 function bindGlobal() {
   $$('.tab').forEach(b => b.addEventListener('click', () => {

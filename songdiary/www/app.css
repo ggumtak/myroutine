@@ -687,3 +687,6 @@ body.np .toast{bottom:calc(var(--tabbar-h) + 70px + var(--sab))}
 body.kb .now-playing{display:none}
 .wk.sel{outline:2px solid var(--ink);outline-offset:1px}
 .page > .month-stats:first-child{border-top:0}
+.sheet-head h3:focus{outline:none}
+/* 360dp phones: the 물 row stays on one line */
+@media (max-width:374px){.cup{width:24px}.cond-line{gap:8px}.bar{width:26px}}
