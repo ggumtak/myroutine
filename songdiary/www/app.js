@@ -805,6 +805,12 @@ function closeSheet(obj, force) {
   try { if (obj.onClose) obj.onClose(); } catch (e) { console.error(e); }
   if (deferred && !Sheets.length) setTimeout(() => softRender(), 320);
 }
+/* for beforeClose: returns true when it is fine to close now */
+function guardUnsaved(isDirty, close) {
+  if (!isDirty()) return true;
+  confirmSheet({ title: '저장하지 않은 내용이 있어요', text: '적은 내용을 버리고 닫을까요?', ok: '버리고 닫기', danger: true, onOk: close });
+  return false;
+}
 function confirmSheet({ title, text, ok, danger, onOk }) {
   let s = null;
   const yes = h('button', { class: 'btn ' + (danger ? 'redb' : 'ink'), onclick: () => { closeSheet(s, true); onOk(); } }, ok || '확인');
@@ -1051,6 +1057,7 @@ function songLib() {
       if (!r.song) continue;
       const L = get(r.song, r.songTitle || r.song, d);
       L.recs.push({ d, r });
+      if (!L.dates.includes(d)) L.dates.push(d);
       if (d > L.last) L.last = d;
       if (d < L.first) L.first = d;
     }
@@ -1298,7 +1305,7 @@ function TodayView() {
   const head = h('div', { class: 'day-head' },
     h('button', { class: 'navbtn', 'aria-label': '하루 전', onclick: () => goDate(addDays(date, -1)) }, icon('left', 24)),
     h('div', { class: 'day-mid' },
-      h('button', { class: 'day-date', 'aria-label': `${fmtMDW(date)}, 달력에서 다른 날 고르기`, onclick: () => { S.cal.y = d.getFullYear(); S.cal.m = d.getMonth(); S.cal.sel = date; go('calendar'); } }, fmtMD(date)),
+      h('button', { class: 'day-date', 'aria-label': `${fmtMDW(date)}, 달력에서 다른 날 고르기`, onclick: () => { S.cal.y = d.getFullYear(); S.cal.m = d.getMonth(); S.cal.sel = date; S.cal.q = ''; go('calendar'); } }, fmtMD(date)),
       h('div', { class: 'day-sub' },
         h('span', { class: 'wd' + dowClass(date) }, WD[d.getDay()] + '요일'),
         isToday && st >= 2 ? h('span', { class: 'pill blue' }, `연속 ${st}일째`) : null,
@@ -1838,6 +1845,7 @@ function openRecDetail(date, id) {
       savers.forEach(f => f.flush());
       if (Player.loop && Player.loop.id === id) Player.loop = null;
       render();
+      if (songDetailRefresh) songDetailRefresh();
     }
   });
   const onTick = () => {
@@ -1858,6 +1866,7 @@ function confirmDeleteRec(date, id) {
     e.recs = e.recs.filter(x => x.id !== id);
     touch(date); render();
     $$(`[data-rec="${id}"]`).forEach(el => el.remove());
+    if (songDetailRefresh) songDetailRefresh();
     try { if (r.aud && !usedAudioIds().has(r.aud)) { await Store.del('audio', r.aud); AUD.delete(r.aud); } } catch (err) { /* cleaned up later in settings */ }
     toast('녹음을 지웠어요');
   } });
@@ -2205,7 +2214,8 @@ function openItem(date, kind, id) {
   const it = findItem(date, kind, id);
   if (!it) return;
   const ta = autoTA({ class: 'input', value: it.text, 'aria-label': '내용' }, 70);
-  let tag = it.tag || null, from = it.from || '선생님', pinned = !!it.pinned, resolved = !!it.resolved;
+  let tag = it.tag || null, from = it.from || '선생님', pinned = !!it.pinned, resolved = !!it.resolved, saved = false;
+  const orig = JSON.stringify([it.text, tag, from, pinned, resolved]);
   const tagChips = h('div', { class: 'chips' }), fromChips = h('div', { class: 'chips' });
   const draw = () => {
     tagChips.replaceChildren(...S.settings.tags.map(t => h('button', { class: 'chip sm', 'aria-pressed': String(tag === t), onclick: () => { tag = tag === t ? null : t; draw(); } }, t)));
@@ -2222,6 +2232,7 @@ function openItem(date, kind, id) {
       cur.pinned = pinned;
       if (kind !== 'good') { if (resolved && !cur.resolved) cur.resolvedOn = todayStr(); if (!resolved) delete cur.resolvedOn; cur.resolved = resolved; }
     });
+    saved = true;
     closeSheet(s, true); render();
   } }, '저장');
   s = openSheet({
@@ -2234,7 +2245,8 @@ function openItem(date, kind, id) {
       ToggleRow('잊지 말 것으로 고정', pinned, v => { pinned = v; }, '오늘 화면 맨 위에 계속 보여 줘요', 'pin'),
       kind !== 'good' ? ToggleRow('해결했어요', resolved, v => { resolved = v; }, '피드백 탭에서 ‘해결함’ 쪽으로 옮겨요', 'check') : null,
       h('button', { class: 'btn ghost danger wide', style: 'margin-top:10px', onclick: () => { closeSheet(s, true); deleteItem(date, kind, id); } }, icon('trash', 18), '지우기')),
-    foot: [save]
+    foot: [save],
+    beforeClose: () => saved || guardUnsaved(() => JSON.stringify([ta.value.trim(), tag, from, pinned, resolved]) !== orig && !!ta.value.trim(), () => { saved = true; closeSheet(s, true); })
   });
 }
 function openSongEntry(date, sid) {
@@ -2252,7 +2264,9 @@ function openSongEntry(date, sid) {
   /* a corrected title can be applied to every day this song was sung */
   const origKey = normKey(so.title);
   const otherDays = Object.keys(S.days).filter(x => x !== date && S.days[x].songs.some(z => normKey(z.title) === origKey)).length;
-  let everywhere = true;
+  let everywhere = true, saved = false;
+  const orig = () => JSON.stringify([so.title, so.artist || '', so.tone || '', so.note || '']);
+  const now = () => JSON.stringify([tInp.value.trim(), aInp.value.trim(), kInp.value.trim(), nInp.value.trim()]);
   const allRow = h('div', { hidden: true }, otherDays ? ToggleRow('다른 날 기록도 같이 바꾸기', true, v => { everywhere = v; }, `이 노래를 부른 다른 ${otherDays}일의 제목과 녹음도 새 제목으로 바꿔요`, 'edit') : null);
   tInp.addEventListener('input', () => { allRow.hidden = !otherDays || normKey(tInp.value) === origKey || !tInp.value.trim(); });
   let s = null;
@@ -2272,6 +2286,7 @@ function openSongEntry(date, sid) {
       }
     }
     if (picked && picked.cat && normKey(picked.title) === newKey) linkSong(newKey, picked.cat, cur.artist);
+    saved = true;
     touch(date); closeSheet(s, true); render();
   } }, '저장');
   s = openSheet({
@@ -2283,7 +2298,8 @@ function openSongEntry(date, sid) {
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn soft', onclick: () => { closeSheet(s, true); openSongDetail(normKey(so.title)); } }, icon('music', 18), '이 노래 기록 모아보기'),
         h('button', { class: 'btn ghost danger', onclick: () => { closeSheet(s, true); deleteItem(date, 'songs', sid); } }, icon('trash', 18), '오늘 목록에서 빼기'))),
-    foot: [save]
+    foot: [save],
+    beforeClose: () => saved || guardUnsaved(() => now() !== orig(), () => { saved = true; closeSheet(s, true); })
   });
 }
 /* rename a song on every day (and its recordings and notes) — e.g. fixing a typo */
@@ -2416,7 +2432,14 @@ function CalendarView() {
 function drawCalBody(body) {
   const q = S.cal.q.trim();
   if (q) { body.replaceChildren(SearchResults(q)); return; }
-  body.replaceChildren(...[MonthPanel(), DayPreview(S.cal.sel), MonthList(), WeeksStrip()].filter(Boolean));
+  body.replaceChildren(...[MonthPanel(), DayPreview(S.cal.sel), MonthStats(`${S.cal.y}-${pad(S.cal.m + 1)}-`), MonthList(), WeeksStrip()].filter(Boolean));
+}
+/* after picking a day, make sure its preview is on screen */
+function revealPreview(start) {
+  const pv = $('.cal-body .pv-head');
+  if (!pv) return;
+  const r = pv.getBoundingClientRect(), vh = window.innerHeight;
+  if (start || r.top < 60 || r.bottom > vh - 150) window.scrollTo({ top: r.top + window.scrollY - 70, behavior: 'smooth' });
 }
 function moveMonth(delta) {
   let { y, m } = S.cal;
@@ -2453,10 +2476,10 @@ function MonthPanel() {
   for (let d = 1; d <= daysIn; d++) {
     const key = prefix + pad(d), e = S.days[key], has = hasContent(e), dow = (startDow + d - 1) % 7;
     const cls = ['cell', dow === 0 ? 'sun' : '', dow === 6 ? 'sat' : '', has ? 'has' : '', key === today ? 'today' : '', key === S.cal.sel ? 'sel' : ''].filter(Boolean).join(' ');
-    grid.append(h('button', { class: cls, 'data-r': has && e.rating ? e.rating : null, disabled: key > today, 'aria-pressed': String(key === S.cal.sel), 'aria-label': `${m + 1}월 ${d}일${has ? ', 기록 있음' : ''}`, onclick: () => { S.cal.sel = key; drawCalBody($('.cal-body')); } },
+    grid.append(h('button', { class: cls, 'data-r': has && e.rating ? e.rating : null, disabled: key > today, 'aria-pressed': String(key === S.cal.sel), 'aria-label': `${m + 1}월 ${d}일${has ? ', 기록 있음' : ''}`, onclick: () => { S.cal.sel = key; drawCalBody($('.cal-body')); revealPreview(); } },
       h('span', { class: 'n' }, d),
       h('span', { class: 'ind' },
-        has && (e.bad.length || e.fb.length) ? h('i', { class: 'i-tri' }) : null,
+        has && e.bad.concat(e.fb).some(x => !x.resolved) ? h('i', { class: 'i-tri' }) : null,
         has && drillsAllDone(key) ? h('i', { class: 'i-stamp' }) : null,
         has && e.recs.length ? h('i', { class: 'i-mic' }) : null)));
   }
@@ -2472,8 +2495,7 @@ function MonthPanel() {
       h('span', null, h('i', { class: 'i-tri' }), '아쉬운 점, 피드백'),
       h('span', null, h('i', { class: 'i-stamp' }), '기초 연습 완료'),
       h('span', null, h('i', { class: 'i-mic' }), '녹음')),
-    !isCur ? h('div', { style: 'text-align:center;padding-bottom:12px' }, h('button', { class: 'link', onclick: () => { const n = new Date(); S.cal.y = n.getFullYear(); S.cal.m = n.getMonth(); S.cal.sel = todayStr(); render(); } }, '이번 달로 돌아가기')) : null,
-    MonthStats(prefix));
+    !isCur ? h('div', { style: 'text-align:center;padding-bottom:12px' }, h('button', { class: 'link', onclick: () => { const n = new Date(); S.cal.y = n.getFullYear(); S.cal.m = n.getMonth(); S.cal.sel = todayStr(); render(); } }, '이번 달로 돌아가기')) : null);
 }
 /* what this month looked like: drill completion, songs, recurring issues */
 function MonthStats(prefix) {
@@ -2486,9 +2508,10 @@ function MonthStats(prefix) {
     const e = S.days[d];
     for (const id in e.drills) { const s = e.drills[id]; const c = drillDays.get(s.name) || { n: 0, full: 0 }; if (s.done > 0) c.n++; if (s.done >= s.target) c.full++; drillDays.set(s.name, c); }
     e.songs.forEach(s => songs.set(s.title, (songs.get(s.title) || 0) + 1));
-    e.bad.concat(e.fb).forEach(it => { if (it.tag) tags.set(it.tag, (tags.get(it.tag) || 0) + 1); if (it.resolved) resolved++; });
+    e.bad.concat(e.fb).forEach(it => { if (it.tag) tags.set(it.tag, (tags.get(it.tag) || 0) + 1); });
     if (e.rating) { rated++; rsum += e.rating; }
   }
+  resolved = allItems().filter(x => x.kind !== 'good' && x.it.resolved && (x.it.resolvedOn || x.date).startsWith(prefix)).length;
   const topSongs = Array.from(songs.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const topTags = Array.from(tags.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const lines = [];
@@ -2511,7 +2534,7 @@ function WeeksStrip() {
     const e = S.days[d], has = hasContent(e);
     const lvl = !has ? 0 : e.minutes >= 60 ? 4 : e.minutes >= 30 ? 3 : e.minutes > 0 || drillsAllDone(d) ? 2 : 1;
     const dd = d;
-    grid.append(h('button', { class: 'wk', 'data-l': lvl, 'aria-label': `${fmtMD(dd)}${has ? ', 기록 있음' : ''}`, onclick: () => { const p = parseYmd(dd); S.cal.y = p.getFullYear(); S.cal.m = p.getMonth(); S.cal.sel = dd; render(); } }));
+    grid.append(h('button', { class: 'wk' + (dd === S.cal.sel ? ' sel' : ''), 'data-l': lvl, 'aria-label': `${fmtMD(dd)}${has ? ', 기록 있음' : ''}`, onclick: () => { const p = parseYmd(dd); S.cal.y = p.getFullYear(); S.cal.m = p.getMonth(); S.cal.sel = dd; render(); revealPreview(true); } }));
     if (has) n++;
     d = addDays(d, 1);
   }
@@ -2560,8 +2583,9 @@ function MonthList() {
 }
 function EntryCard(d) {
   const e = S.days[d], dt = parseYmd(d);
-  const issues = e.bad.length + e.fb.length;
-  const first = e.bad[0] || e.fb[0];
+  const open = e.bad.concat(e.fb).filter(x => !x.resolved);
+  const issues = open.length;
+  const first = open[0];
   return h('button', { class: 'ecard', onclick: () => goDate(d) },
     h('div', { class: 'ec-d' + dowClass(d) }, h('b', null, dt.getDate()), h('span', null, WD[dt.getDay()])),
     h('div', { class: 'ec-b' },
@@ -2575,36 +2599,47 @@ function EntryCard(d) {
       first ? h('div', { class: 'clip ec-bad' }, first.text + (issues > 1 ? ` 외 ${issues - 1}개` : '')) : null,
       !e.goal.trim() && !e.songs.length && !first && e.memo.trim() ? h('div', { class: 'clip' }, e.memo.trim()) : null));
 }
-function snippet(t, ql) {
-  const i = t.toLowerCase().indexOf(ql);
-  const s = Math.max(0, i - 18), end = i + ql.length + 40;
+/* search that ignores spacing: '좋은날' finds '좋은 날', '사건의지평선' finds '사건의 지평선' */
+function searchRx(q) {
+  const chars = Array.from(String(q || '').replace(/\s+/g, ''));
+  if (!chars.length) return null;
+  return new RegExp(chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*'), 'i');
+}
+function snippet(t, q) {
+  const rx = searchRx(q), m = rx && rx.exec(t);
+  const i = m ? m.index : 0, len = m ? m[0].length : 0;
+  const s = Math.max(0, i - 18), end = i + len + 40;
   return (s > 0 ? '…' : '') + t.slice(s, end) + (end < t.length ? '…' : '');
 }
 function highlight(text, q) {
   const span = h('span');
-  const tl = text.toLowerCase(), ql = q.toLowerCase();
-  let i = 0, j;
-  while ((j = tl.indexOf(ql, i)) >= 0) { span.append(text.slice(i, j), h('mark', null, text.slice(j, j + q.length))); i = j + q.length; }
+  const rx = searchRx(q);
+  if (!rx) { span.append(text); return span; }
+  const g = new RegExp(rx.source, 'gi');
+  let i = 0, m;
+  while ((m = g.exec(text)) && m[0].length) { span.append(text.slice(i, m.index), h('mark', null, m[0])); i = m.index + m[0].length; }
   span.append(text.slice(i));
   return span;
 }
 function SearchResults(q) {
-  const ql = q.toLowerCase();
+  const rx = searchRx(q);
   const hits = [];
   for (const d of entryDates().reverse()) {
     const e = S.days[d];
     const fields = [['목표', e.goal], ['메모', e.memo], ['다음에 할 것', e.next],
-      ...e.songs.map(s => ['노래', [s.title, s.artist, s.tone, s.note].filter(Boolean).join(', ')]),
+      ...e.songs.map(s => [`♪ ${s.title}`, [s.title, s.artist, s.tone, s.note].filter(Boolean).join(', ')]),
       ...e.good.map(i => ['잘 된 점', i.text]), ...e.bad.map(i => ['아쉬웠던 점', i.text]), ...e.fb.map(i => ['받은 피드백', i.text]),
-      ...e.recs.map(r => ['녹음', r.title || '']), ...e.bad.concat(e.fb, e.good).filter(i => i.tag).map(i => ['주제', `${i.tag}: ${i.text}`])];
-    const found = fields.filter(([, t]) => t && t.toLowerCase().includes(ql));
+      ...e.recs.map(r => ['녹음', r.title || '']),
+      ...e.recs.flatMap(r => (r.marks || []).filter(m => m.text).map(m => ['구간 메모', `${r.title || '녹음'} ${fmtT(m.t)} ${m.text}`])),
+      ...e.bad.concat(e.fb, e.good).filter(i => i.tag && rx && rx.test(i.tag)).map(i => ['주제', `${i.tag}: ${i.text}`])];
+    const found = rx ? fields.filter(([, t]) => t && rx.test(t)) : [];
     if (found.length) hits.push({ d, found });
   }
   return h('div', { class: 'page' },
     h('div', { class: 'sec-h', style: 'margin:16px 0 4px' }, h('h2', null, '찾은 기록'), h('span', { class: 'sec-note' }, `${hits.length}일`)),
     hits.length ? hits.map(({ d, found }) => h('button', { class: 'hit', onclick: () => goDate(d) },
       h('div', { class: 'hit-d' }, fmtMDW(d)),
-      found.slice(0, 3).map(([label, t]) => h('div', { class: 'hit-l' }, h('span', { class: 'hit-k' }, label), highlight(snippet(t, ql), q)))))
+      found.slice(0, 3).map(([label, t]) => h('div', { class: 'hit-l' }, h('span', { class: 'hit-k clip' }, label), highlight(snippet(t, q), q)))))
       : h('p', { class: 'empty' }, '찾는 내용이 없어요. 다른 낱말로 찾아보세요.'));
 }
 
@@ -2617,7 +2652,7 @@ function FeedbackView() {
   const head = h('div', { class: 'view-head' }, h('h1', { class: 'view-title' }, '피드백'), h('span', { class: 'sp' }), h('button', { class: 'btn ink sm', onclick: openAddFeedback }, icon('plus', 18), '추가'));
   if (!all.length) return h('div', { class: 'v-fb' }, Banner(), head, h('div', { class: 'page' }, h('div', { class: 'empty' }, h('span', { class: 'hand' }, '아직 모인 피드백이 없어요'), '오늘 화면의 ‘아쉬웠던 점’, ‘받은 피드백’, ‘잘 된 점’에 적으면 여기에 날짜별로 모여요. 레슨에서 들은 말은 위의 추가 버튼으로 바로 적어도 돼요.')));
   const counts = new Map();
-  fix.forEach(x => { if (x.it.tag) counts.set(x.it.tag, (counts.get(x.it.tag) || 0) + 1); });
+  fix.filter(x => F.status === 'all' || (F.status === 'open' ? !x.it.resolved : x.it.resolved)).forEach(x => { if (x.it.tag) counts.set(x.it.tag, (counts.get(x.it.tag) || 0) + 1); });
   const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const max = top.length ? top[0][1] : 1;
   const list = all.filter(x => F.kinds.includes(x.kind)
@@ -2669,6 +2704,7 @@ function openAddFeedback() {
   const fromField = field('누가 말해 줬나요?', fromChips);
   const ta = autoTA({ class: 'input', placeholder: KIND.fb.ph, 'data-autofocus': '', 'aria-label': '내용' }, 70);
   const dateInp = h('input', { class: 'input', type: 'date', max: todayStr(), value: todayStr(), 'aria-label': '날짜' });
+  let saved = false;
   const draw = () => {
     kindSeg.replaceChildren(...['bad', 'fb', 'good'].map(k => segBtn(KIND[k].label, kind === k, () => { kind = k; ta.placeholder = KIND[k].ph; draw(); })));
     tagChips.replaceChildren(...S.settings.tags.map(t => h('button', { class: 'chip sm', 'aria-pressed': String(tag === t), onclick: () => { tag = tag === t ? null : t; draw(); } }, t)));
@@ -2686,10 +2722,17 @@ function openAddFeedback() {
     const it = { id: uid('i'), text, tag, pinned: false, resolved: false, at: Date.now() };
     if (kind === 'fb') it.from = from;
     e[kind].push(it);
+    saved = true;
+    const F = S.fb;
+    if (!F.kinds.includes(kind)) F.kinds = F.kinds.concat(kind);
+    if (F.status === 'done') F.status = 'open';
+    if (F.tag && F.tag !== tag) F.tag = null;
+    F.pinned = false;
     touch(d); closeSheet(s, true); render();
     toast(`${fmtMD(d)} 기록에 넣었어요`);
   } }, '추가');
-  s = openSheet({ title: '피드백 추가', body: h('div', null, h('div', { class: 'field' }, kindSeg), field('내용', ta), field('주제', tagChips), fromField, field('날짜', dateInp)), foot: [save] });
+  s = openSheet({ title: '피드백 추가', body: h('div', null, h('div', { class: 'field' }, kindSeg), field('내용', ta), field('주제', tagChips), fromField, field('날짜', dateInp)), foot: [save],
+    beforeClose: () => saved || guardUnsaved(() => !!ta.value.trim(), () => { saved = true; closeSheet(s, true); }) });
 }
 
 /* ================= songs ================= */
@@ -2713,6 +2756,7 @@ function SongsView() {
 function SongListPanel() {
   const all = Array.from(songLib().values()).sort((a, b) => b.last.localeCompare(a.last) || b.dates.length - a.dates.length);
   if (!all.length) return h('div', { class: 'page' }, h('div', { class: 'empty' }, h('span', { class: 'hand' }, '아직 부른 노래가 없어요'), '오늘 화면의 ‘노래’에 부른 곡을 적으면 곡마다 연습한 날과 녹음이 모여요.'));
+  if (S.lib.status && !all.some(L => L.status === S.lib.status)) S.lib.status = null;
   const used = SONG_STATUS.filter(st => all.some(L => L.status === st));
   const lib = S.lib.status ? all.filter(L => L.status === S.lib.status) : all;
   return h('div', { class: 'page' },
@@ -2738,22 +2782,38 @@ function openSongDetail(key) {
   const saveMeta = debounce(() => { const m = metaOf(); m.artist = aInp.value.trim(); m.memo = memo.value; touchSettings(); }, 500);
   aInp.addEventListener('input', saveMeta);
   memo.addEventListener('input', saveMeta);
-  const recsSorted = L.recs.slice().sort((a, b) => a.d.localeCompare(b.d) || (a.r.at || 0) - (b.r.at || 0));
-  const firstRec = recsSorted[0], lastRec = recsSorted[recsSorted.length - 1];
-  const favs = recsSorted.filter(x => x.r.fav);
-  const story = h('p', { class: 'story' }, h('b', null, fmtMD(L.first)), '에 처음 불렀고, 지금까지 ', h('b', null, `${L.dates.length}일`), ' 연습했어요.', L.recs.length ? [' 녹음은 ', h('b', null, `${L.recs.length}개`), '예요.'] : ' 아직 녹음은 없어요.');
-  const byDate = new Map();
-  L.dates.forEach(d => byDate.set(d, { notes: [], recs: [] }));
-  L.notes.forEach(n => { if (!byDate.has(n.d)) byDate.set(n.d, { notes: [], recs: [] }); byDate.get(n.d).notes.push(n); });
-  L.recs.forEach(x => { if (!byDate.has(x.d)) byDate.set(x.d, { notes: [], recs: [] }); byDate.get(x.d).recs.push(x.r); });
-  const timeline = Array.from(byDate.keys()).sort().reverse().map(d => {
-    const v = byDate.get(d);
-    return h('div', null,
-      h('div', { class: 'tl-d' }, h('button', { onclick: () => { closeSheet(null, true); goDate(d); } }, fmtMD(d)), h('span', { class: 'hint wd' + dowClass(d) }, WD[parseYmd(d).getDay()] + '요일')),
-      v.notes.map(n => h('p', { class: 'tl-n' }, [n.tone ? `[${n.tone}] ` : '', n.note].join(''))),
-      DayJournal(d, { compact: true }),
-      v.recs.length ? h('div', { class: 'recs' }, v.recs.map(r => RecRow(r, d))) : null);
-  });
+  const story = h('p', { class: 'story' });
+  const recPart = h('div');
+  const drawRecs = () => {
+    const LL = songLib().get(key);
+    if (!LL) return false;
+    story.replaceChildren(h('b', null, fmtMD(LL.first)), '에 처음 불렀고, 지금까지 ', h('b', null, `${LL.dates.length}일`), ' 연습했어요.', ...(LL.recs.length ? [' 녹음은 ', h('b', null, `${LL.recs.length}개`), '예요.'] : [' 아직 녹음은 없어요.']));
+    const recsSorted = LL.recs.slice().sort((a, b) => a.d.localeCompare(b.d) || (a.r.at || 0) - (b.r.at || 0));
+    const firstRec = recsSorted[0], lastRec = recsSorted[recsSorted.length - 1];
+    const favs = recsSorted.filter(x => x.r.fav), best = favs[favs.length - 1];
+    const byDate = new Map();
+    LL.dates.forEach(d => byDate.set(d, { notes: [], recs: [] }));
+    LL.notes.forEach(n => { if (!byDate.has(n.d)) byDate.set(n.d, { notes: [], recs: [] }); byDate.get(n.d).notes.push(n); });
+    LL.recs.forEach(x => { if (!byDate.has(x.d)) byDate.set(x.d, { notes: [], recs: [] }); byDate.get(x.d).recs.push(x.r); });
+    const timeline = Array.from(byDate.keys()).sort().reverse().map(d => {
+      const v = byDate.get(d);
+      return h('div', null,
+        h('div', { class: 'tl-d' }, h('button', { onclick: () => { closeSheet(null, true); goDate(d); } }, fmtMD(d)), h('span', { class: 'hint wd' + dowClass(d) }, WD[parseYmd(d).getDay()] + '요일')),
+        v.notes.map(n => h('p', { class: 'tl-n' }, [n.tone ? `[${n.tone}] ` : '', n.note].join(''))),
+        DayJournal(d, { compact: true }),
+        v.recs.length ? h('div', { class: 'recs' }, v.recs.map(r => RecRow(r, d))) : null);
+    });
+    recPart.replaceChildren(...[
+      recsSorted.length >= 2 ? h('div', { class: 'field' }, h('span', { class: 'lbl' }, '처음과 지금 비교해 듣기'),
+        h('div', { class: 'cmp' },
+          h('span', { class: 'cmp-l' }, '처음 녹음'), RecRow(firstRec.r, firstRec.d, { label: fmtMD(firstRec.d) }),
+          best && best !== lastRec && best !== firstRec ? [h('span', { class: 'cmp-l' }, '베스트'), RecRow(best.r, best.d, { label: fmtMD(best.d) })] : null,
+          h('span', { class: 'cmp-l' }, '가장 최근 녹음'), RecRow(lastRec.r, lastRec.d, { label: fmtMD(lastRec.d) }))) : null,
+      h('div', { class: 'lbl', style: 'margin-top:6px' }, '연습 기록'), ...timeline].filter(Boolean));
+    Player.sync();
+    return true;
+  };
+  drawRecs();
   let hero = null;
   const drawHero = () => {
     const LL = songLib().get(key) || L;
@@ -2762,19 +2822,18 @@ function openSongDetail(key) {
     hero = nh;
   };
   drawHero();
-  openSheet({
+  const s = openSheet({
     title: L.title,
     body: h('div', null, hero, story,
       field('지금 이 곡은', stChips), field('가수', aInp), field('곡 메모', memo),
-      recsSorted.length >= 2 ? h('div', { class: 'field' }, h('span', { class: 'lbl' }, '처음과 지금 비교해 듣기'),
-        h('div', { class: 'cmp' },
-          h('span', { class: 'cmp-l' }, '처음 녹음'), RecRow(firstRec.r, firstRec.d, { label: fmtMD(firstRec.d) }),
-          favs.length && favs[favs.length - 1] !== lastRec ? [h('span', { class: 'cmp-l' }, '베스트'), RecRow(favs[favs.length - 1].r, favs[favs.length - 1].d, { label: fmtMD(favs[favs.length - 1].d) })] : null,
-          h('span', { class: 'cmp-l' }, '가장 최근 녹음'), RecRow(lastRec.r, lastRec.d, { label: fmtMD(lastRec.d) }))) : null,
-      h('div', { class: 'lbl', style: 'margin-top:6px' }, '연습 기록'), timeline),
-    onClose: () => { saveMeta.flush(); Preview.stop(); render(); }
+      recPart),
+    onClose: () => { saveMeta.flush(); Preview.stop(); if (songDetailRefresh === refresh) songDetailRefresh = null; render(); }
   });
+  const refresh = () => { if (!drawRecs()) closeSheet(s, true); };
+  songDetailRefresh = refresh;
 }
+/* set while a song's detail sheet is open, so changes made in a sheet above it show up */
+let songDetailRefresh = null;
 function AllRecsPanel() {
   const rows = [];
   for (const d of Object.keys(S.days).sort().reverse()) S.days[d].recs.slice().reverse().forEach(r => { if (!S.lib.best || r.fav) rows.push({ d, r }); });
@@ -2796,7 +2855,7 @@ function RangePanel() {
   const pts = entryDates().filter(d => S.days[d].high != null).map(d => ({ d, m: S.days[d].high }));
   if (!pts.length) return h('div', { class: 'page' }, h('div', { class: 'empty' }, h('span', { class: 'hand' }, '음역 기록이 아직 없어요'), '오늘 화면 ‘노래’ 아래 ‘오늘 낸 최고음’을 골라 두면 여기에 그래프가 그려져요.'));
   const shown = pts.slice(-40);
-  const best = pts.reduce((a, b) => (b.m > a.m ? b : a));
+  const best = pts.reduce((a, b) => (b.m >= a.m ? b : a));
   const latest = pts[pts.length - 1];
   const lo = Math.min(...shown.map(p => p.m)) - 2, hi = Math.max(...shown.map(p => p.m)) + 2;
   const W = 340, H = 200, L = 58, R = 12, T = 12, B = 26;
@@ -2808,16 +2867,16 @@ function RangePanel() {
       svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(m).toFixed(1)}" y2="${y(m).toFixed(1)}"/><text class="axis" x="${L - 6}" y="${(y(m) + 4).toFixed(1)}" text-anchor="end">${noteName(m)}</text>`;
     }
   }
-  svg += `<text class="axis" x="${L}" y="${H - 6}">${fmtMD(shown[0].d)}</text><text class="axis" x="${W - R}" y="${H - 6}" text-anchor="end">${fmtMD(shown[shown.length - 1].d)}</text>`;
+  svg += `<text class="axis" x="${L}" y="${H - 6}">${fmtMD(shown[0].d)}</text>` + (shown.length > 1 ? `<text class="axis" x="${W - R}" y="${H - 6}" text-anchor="end">${fmtMD(shown[shown.length - 1].d)}</text>` : '');
   if (shown.length > 1) svg += `<polyline class="line" points="${shown.map((p, i) => `${x(i).toFixed(1)},${y(p.m).toFixed(1)}`).join(' ')}"/>`;
-  shown.forEach((p, i) => { svg += `<circle class="pt${p.d === best.d && p.m === best.m ? ' best' : ''}" cx="${x(i).toFixed(1)}" cy="${y(p.m).toFixed(1)}" r="4"/>`; });
+  shown.forEach((p, i) => { svg += `<circle class="pt${p.m === best.m ? ' best' : ''}" cx="${x(i).toFixed(1)}" cy="${y(p.m).toFixed(1)}" r="4"/>`; });
   svg += '</svg>';
   return h('div', { class: 'page' },
     h('div', { class: 'range-top' },
       h('div', null, h('b', null, noteName(best.m)), h('span', null, `최고 기록 ${noteSci(best.m)}, ${fmtMD(best.d)}`)),
       h('div', null, h('b', null, noteName(latest.m)), h('span', null, `최근 ${noteSci(latest.m)}, ${fmtMD(latest.d)}`))),
     h('div', { html: svg, style: 'padding:6px 0 4px' }),
-    h('p', { class: 'hint', style: 'padding-bottom:14px' }, `빨간 점이 가장 높이 낸 날이에요. 최근 ${shown.length}번의 기록을 보여 줘요.`));
+    h('p', { class: 'hint', style: 'padding-bottom:14px' }, shown.some(p => p.m === best.m) ? `빨간 점이 가장 높이 낸 날이에요. 최근 ${shown.length}번의 기록을 보여 줘요.` : `최근 ${shown.length}번의 기록이에요. 가장 높이 낸 날(${fmtMD(best.d)})은 그보다 전이에요.`));
 }
 
 /* ================= journal: every day's writing in one place ================= */
@@ -2869,11 +2928,11 @@ function JournalCard(d, q) {
     DayJournal(d, { q }));
 }
 function journalDays() {
-  const J = S.lib, ql = (J.jq || '').trim().toLowerCase();
+  const J = S.lib, rx = searchRx((J.jq || '').trim());
   return entryDates().reverse().filter(d => {
     const e = S.days[d], t = journalText(e);
     if (!J.jall && !t) return false;
-    return !ql || (t + '\n' + e.songs.map(s => s.title).join('\n')).toLowerCase().includes(ql);
+    return !rx || rx.test(t + '\n' + e.songs.map(s => s.title).join('\n'));
   });
 }
 function drawJournal(body) {
