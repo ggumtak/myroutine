@@ -96,7 +96,8 @@ const IC = {
   book: '<path d="M5 5.5a2 2 0 012-2h12v14H7a2 2 0 00-2 2z"/><path d="M5 19.5a2 2 0 002 2h12v-4"/><path d="M9 8h6"/>',
   video: '<rect x="3" y="5.5" width="18" height="13" rx="3.5"/><path d="M10.3 9.3v5.4l4.6-2.7z" fill="currentColor" stroke="none"/>',
   lyrics: '<path d="M4.5 6h15M4.5 10.5h15M4.5 15h7.5"/><path d="M17.5 13.5v6"/><circle cx="16" cy="19.5" r="1.6"/>',
-  link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>'
+  link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
+  piano: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M8 19.5v-5M12 19.5v-5M16 19.5v-5"/><path d="M6.5 4.5v10h3v-10M14.5 4.5v10h3v-10" fill="currentColor" stroke="none"/>'
 };
 function icon(name, size = 22) {
   const s = document.createElement('span');
@@ -144,6 +145,8 @@ const MAX_TAGS = 40;
 const THEMES = [['auto', '폰 설정 따라'], ['light', '밝게'], ['dark', '어둡게']];
 const { Store, makeZip, readZip, Files, App: Native, Net, safeName } = window.SD;
 const SS = window.SongSearch;
+const SK = window.ScaleKit;
+const SCALE_LO = 48, SCALE_HI = 72; /* 1옥 도 … 3옥 도 */
 
 /* ================= state ================= */
 const S = {
@@ -159,7 +162,14 @@ const S = {
 };
 
 function defaultSettings() {
-  return { v: 2, title: '껌딱의 노래일기', drills: DEFAULT_DRILLS.map(d => ({ ...d })), tags: DEFAULT_TAGS.slice(), sound: true, haptic: true, theme: 'auto', reminder: { on: false, h: 20, m: 0 }, autoBackup: true, songSearch: true, songs: [], updatedAt: 0 };
+  return { v: 2, title: '껌딱의 노래일기', drills: DEFAULT_DRILLS.map(d => ({ ...d })), tags: DEFAULT_TAGS.slice(), sound: true, haptic: true, theme: 'auto', reminder: { on: false, h: 20, m: 0 }, autoBackup: true, songSearch: true, scale: normScale(null), songs: [], updatedAt: 0 };
+}
+/* scale practice: chosen exercise, speed, starting chord, last key pressed, your own exercises */
+function normScale(x) {
+  x = x && typeof x === 'object' ? x : {};
+  const custom = Array.isArray(x.custom) ? x.custom.filter(c => c && c.id && Array.isArray(c.steps) && c.steps.length >= 2).slice(0, 30)
+    .map(c => ({ id: String(c.id), name: String(c.name || '내 스케일').slice(0, 20), steps: c.steps.slice(0, 40).map(n => clampInt(n, -12, 24, 0)) })) : [];
+  return { pat: typeof x.pat === 'string' && x.pat ? x.pat : 'five', bpm: clampInt(x.bpm, 40, 220, 100), chord: x.chord !== false, root: clampInt(x.root, SCALE_LO, SCALE_HI, 60), custom };
 }
 /* a link to a real song from the catalog (album art, 30-second preview) */
 function normCat(c) {
@@ -183,6 +193,7 @@ function normSettings(s) {
     reminder: { on: !!rm.on, h: clampInt(rm.h, 0, 23, 20), m: clampInt(rm.m, 0, 59, 0) },
     autoBackup: s.autoBackup !== false,
     songSearch: s.songSearch !== false,
+    scale: normScale(s.scale),
     songs: Array.isArray(s.songs) ? s.songs.filter(x => x && typeof x.k === 'string').map(x => ({ k: x.k, artist: String(x.artist || ''), memo: String(x.memo || ''), status: SONG_STATUS.includes(x.status) ? x.status : '', cat: normCat(x.cat) })) : [],
     updatedAt: +s.updatedAt || 0
   };
@@ -284,7 +295,7 @@ async function loadAll() {
     S.days = {};
     for (const [k, v] of days) if (isDateKey(k)) S.days[k] = normDay(k, v);
     S.mode = 'ready';
-    if (!meta) { queueWrite('@s', 50); S.firstRun = true; const u = lsGet(LS_UI, {}); u.seen11 = 1; lsSet(LS_UI, u); }
+    if (!meta) { queueWrite('@s', 50); S.firstRun = true; const u = lsGet(LS_UI, {}); u.seen11 = 1; u.seen12 = 1; lsSet(LS_UI, u); }
   } catch (err) {
     console.error(err);
     S.mode = 'error'; S.loadErr = err;
@@ -492,7 +503,7 @@ const Player = {
   },
   eng() { return this.wa && this.cur && this.waFor === this.cur.id ? this.wa : this.el; },
   playing() { return !!this.cur && !this.eng().paused; },
-  stopAll() { try { this.el.pause(); } catch (e) { /* ignore */ } if (this.wa) this.wa.pause(); Preview.stop(); },
+  stopAll() { try { this.el.pause(); } catch (e) { /* ignore */ } if (this.wa) this.wa.pause(); Preview.stop(); Synth.stop(); },
   watch() {
     cancelAnimationFrame(this.raf);
     const step = () => {
@@ -953,15 +964,16 @@ function BackupNudge() {
 /* one-time note about what this version added */
 function WhatsNew() {
   const u = lsGet(LS_UI, {});
-  if (u.seen11 || S.firstRun || !entryDates().length) return null;
-  const close = () => { const v = lsGet(LS_UI, {}); v.seen11 = 1; lsSet(LS_UI, v); };
+  if (u.seen12 || S.firstRun || !entryDates().length) return null;
+  const close = () => { const v = lsGet(LS_UI, {}); v.seen11 = 1; v.seen12 = 1; lsSet(LS_UI, v); };
   const box = h('div', { class: 'banner news' },
     h('b', null, '새로워졌어요'),
     h('ul', null,
-      h('li', null, '노래 제목을 몇 글자만 쳐도 실제 노래를 찾아 줘요. 초성(ㅂㅇㄱ)이나 가수 이름으로도 돼요.'),
-      h('li', null, '‘모아보기’ 탭에서 그동안 쓴 일지를 한곳에 모아 읽을 수 있어요.')),
+      h('li', null, '‘기초 연습’의 건반(🎹)으로 스케일 연습을 할 수 있어요. 음을 누르면 그 음부터 5음 스케일, 아르페지오 같은 연습이 나와요.'),
+      !u.seen11 ? h('li', null, '노래 제목을 몇 글자만 쳐도 실제 노래를 찾아 줘요. 초성(ㅂㅇㄱ)이나 가수 이름으로도 돼요.') : null,
+      !u.seen11 ? h('li', null, '‘모아보기’ 탭에서 그동안 쓴 일지를 한곳에 모아 읽을 수 있어요.') : null),
     h('div', { class: 'btn-row', style: 'margin-top:8px' },
-      h('button', { class: 'btn ink sm', onclick: () => { close(); S.lib.seg = 'journal'; go('songs'); } }, icon('book', 16), '일지 보러 가기'),
+      h('button', { class: 'btn ink sm', onclick: () => { close(); box.remove(); openScaleTrainer({ date: todayStr() }); } }, icon('piano', 16), '건반 열어 보기'),
       h('button', { class: 'btn ghost sm', onclick: () => { close(); box.remove(); } }, '닫기')));
   return box;
 }
@@ -1330,6 +1342,254 @@ function openSongLink(key, onDone) {
   sugg.search();
 }
 
+/* ================= scale practice: press a key, hear the exercise start from it ================= */
+/* piano-like tones on the Web Audio clock; everything scheduled can be stopped at once */
+const Synth = {
+  nodes: [], timers: [], master: null,
+  out(ctx) {
+    if (!this.master || this.master.context !== ctx) {
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -14; comp.ratio.value = 4;
+      this.master = ctx.createGain(); this.master.gain.value = 0.9;
+      this.master.connect(comp); comp.connect(ctx.destination);
+    }
+    return this.master;
+  },
+  tone(ctx, midi, t, dur, vol) {
+    const f = 440 * Math.pow(2, (midi - 69) / 12);
+    const g = ctx.createGain();
+    g.connect(this.out(ctx));
+    const parts = [['triangle', 1, 1], ['sine', 2, 0.32], ['sine', 3, 0.08]].map(([type, mul, lv]) => {
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = type; o.frequency.value = f * mul; og.gain.value = lv;
+      o.connect(og); og.connect(g);
+      o.start(t); o.stop(t + dur + 0.2);
+      return o;
+    });
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(vol * 0.45, t + Math.min(0.4, dur * 0.7));
+    g.gain.setValueAtTime(vol * 0.45, t + dur);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.15);
+    this.nodes.push({ g, os: parts, end: t + dur + 0.2 });
+    if (this.nodes.length > 80) this.nodes = this.nodes.filter(n => n.end > ctx.currentTime);
+  },
+  one(midi) { const ctx = Sound.get(); if (ctx) this.tone(ctx, midi, ctx.currentTime + 0.02, 0.5, 0.25); },
+  /* steps: semitones above root. onStep(i) as each note starts, onEnd() after the last one */
+  play(root, steps, { bpm, chord, onStep, onEnd }) {
+    this.stop();
+    const ctx = Sound.get();
+    if (!ctx) return false;
+    const beat = 60 / bpm;
+    let t0 = ctx.currentTime + 0.08;
+    if (chord) { [0, 4, 7].forEach(o => this.tone(ctx, root + o, t0, beat * 1.7, 0.13)); t0 += beat * 2.2; }
+    const at = t => Math.max(0, (t - ctx.currentTime) * 1000);
+    steps.forEach((off, i) => {
+      const t = t0 + i * beat, last = i === steps.length - 1;
+      this.tone(ctx, root + off, t, last ? beat * 1.8 : beat * 0.9, 0.27);
+      this.timers.push(setTimeout(() => onStep && onStep(i), at(t)));
+    });
+    this.timers.push(setTimeout(() => { this.timers = []; if (onEnd) onEnd(); }, at(t0 + (steps.length - 1) * beat + beat * 1.8)));
+    return true;
+  },
+  stop() {
+    this.timers.forEach(clearTimeout); this.timers = [];
+    const ctx = Sound.ctx;
+    if (ctx) {
+      const now = ctx.currentTime;
+      this.nodes.forEach(n => {
+        try { n.g.gain.cancelScheduledValues(now); n.g.gain.setValueAtTime(Math.max(0.0001, n.g.gain.value), now); n.g.gain.exponentialRampToValueAtTime(0.0001, now + 0.06); } catch (e) { /* ignore */ }
+        n.os.forEach(o => { try { o.stop(now + 0.08); } catch (e) { /* already stopped */ } });
+      });
+    }
+    this.nodes = [];
+  }
+};
+/* '내 음 보기': the pitch you sing, from the microphone */
+const Tuner = {
+  stream: null, src: null, an: null, raf: 0, buf: null, hist: [], last: 0,
+  async start(onPitch) {
+    const ctx = Sound.get();
+    if (!ctx || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { const e = new Error('unsupported'); e.name = 'NotSupportedError'; throw e; }
+    /* echo cancellation keeps the piano coming out of the speaker from being taken for your voice */
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } });
+    this.stop();
+    this.stream = stream;
+    this.src = ctx.createMediaStreamSource(stream);
+    this.an = ctx.createAnalyser(); this.an.fftSize = 2048;
+    this.src.connect(this.an);
+    this.buf = new Float32Array(this.an.fftSize);
+    this.hist = [];
+    const loop = ts => {
+      if (!this.an) return;
+      if (ts - this.last > 70) {
+        this.last = ts;
+        this.an.getFloatTimeDomainData(this.buf);
+        const f = SK.detectPitch(this.buf, ctx.sampleRate);
+        this.hist.push(f ? SK.midiOf(f) : null);
+        if (this.hist.length > 5) this.hist.shift();
+        const v = this.hist.filter(x => x != null).sort((a, b) => a - b);
+        onPitch(v.length >= 3 ? v[v.length >> 1] : null); /* median of the last few, once the voice is steady */
+      }
+      this.raf = requestAnimationFrame(loop);
+    };
+    this.raf = requestAnimationFrame(loop);
+  },
+  stop() {
+    cancelAnimationFrame(this.raf);
+    try { if (this.src) this.src.disconnect(); } catch (e) { /* ignore */ }
+    if (this.stream) this.stream.getTracks().forEach(t => t.stop());
+    this.stream = this.src = this.an = null;
+  },
+  on() { return !!this.stream; }
+};
+const TEMPOS = [['아주 느리게', 60], ['느리게', 80], ['보통', 100], ['빠르게', 130]];
+const scalePats = () => SK.PRESETS.concat(S.settings.scale.custom);
+function openScaleTrainer(o = {}) {
+  const T = S.settings.scale;
+  const date = o.date && o.date <= todayStr() ? o.date : todayStr();
+  let root = T.root, step = -1, playing = false, played = false, sung = null;
+  const pat = () => scalePats().find(p => p.id === T.pat) || SK.PRESETS[0];
+  const chips = h('div', { class: 'chips scroll sc-pats', role: 'group', 'aria-label': '스케일 고르기' });
+  const stepsBox = h('div', { class: 'sc-steps' });
+  const nowBox = h('div', { class: 'sc-now' });
+  /* keyboard: 1옥 도 … 3옥 도 */
+  const W = 44, B = 28, keys = new Map();
+  const kb = h('div', { class: 'kb' });
+  let whites = 0;
+  for (let m = SCALE_LO; m <= SCALE_HI; m++) {
+    const pc = m % 12, black = [1, 3, 6, 8, 10].includes(pc);
+    const k = h('button', { type: 'button', class: black ? 'kbk' : 'kw', 'aria-label': `${noteName(m)}부터 스케일`, onclick: () => start(m) },
+      black ? null : h('span', { class: 'kn' }, SK.SOLFA[pc]), !black && pc === 0 ? h('small', null, `${Math.floor(m / 12) - 3}옥`) : null);
+    k.style.left = (black ? whites * W - B / 2 : whites * W) + 'px';
+    if (!black) whites++;
+    keys.set(m, k);
+    kb.append(k);
+  }
+  kb.style.width = whites * W + 'px';
+  const best = bestHigh();
+  if (best && keys.has(best.m)) keys.get(best.m).classList.add('best');
+  const kbWrap = h('div', { class: 'kb-wrap' }, kb);
+  const down = h('button', { class: 'btn soft', 'aria-label': '반음 내려서 다시', onclick: () => start(root - 1) }, icon('dn', 18), '반음');
+  const again = h('button', { class: 'btn ink sc-play', onclick: () => (playing ? stop() : start(root)) });
+  const up = h('button', { class: 'btn soft', 'aria-label': '반음 올려서 다시', onclick: () => start(root + 1) }, icon('up', 18), '반음');
+  const extra = h('div', { class: 'sc-extra' });
+  const tempo = h('div', { class: 'seg', role: 'group', 'aria-label': '빠르기' });
+  const drawTempo = () => tempo.replaceChildren(...TEMPOS.map(([l, v]) => segBtn(l, T.bpm === v, () => { T.bpm = v; touchSettings(); drawTempo(); })));
+  drawTempo();
+  const tuneBox = h('div', { class: 'tuner', hidden: true, role: 'status', 'aria-live': 'off' });
+  const drawTune = () => {
+    if (!Tuner.on()) { tuneBox.hidden = true; return; }
+    tuneBox.hidden = false;
+    const target = step >= 0 ? root + pat().steps[step] : null;
+    if (sung == null) { tuneBox.replaceChildren(h('span', { class: 'tn-note hint' }, target != null ? `지금 음: ${noteName(target)}` : '소리를 내 보세요'), h('span', { class: 'tn-meter' }, h('i', { class: 'tn-mid' }))); return; }
+    const m = Math.round(sung), cents = Math.round((sung - m) * 100);
+    const ok = target != null ? m === target && Math.abs(cents) <= 30 : Math.abs(cents) <= 15;
+    tuneBox.replaceChildren(
+      h('span', { class: 'tn-note' + (ok ? ' ok' : '') }, `내 음 ${noteName(m)}`, h('small', null, ` ${cents > 0 ? '+' : ''}${cents}`), target != null && m !== target ? h('small', null, ` · 목표 ${noteName(target)}`) : null),
+      h('span', { class: 'tn-meter' }, h('i', { class: 'tn-mid' }), h('b', { class: ok ? 'ok' : '', style: `left:${50 + Math.max(-50, Math.min(50, cents))}%` })));
+  };
+  const tuneRow = ToggleRow('내 음 보기 (마이크)', false, async v => {
+    if (!v) { Tuner.stop(); sung = null; paint(); return; }
+    try { await Tuner.start(mm => { sung = mm; paintKeys(); drawTune(); }); paint(); }
+    catch (err) {
+      const sw = tuneRow.querySelector('.switch'); if (sw) sw.setAttribute('aria-checked', 'false');
+      const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+      toast(denied ? '마이크 권한이 꺼져 있어요. 앱 설정에서 마이크를 허용해 주세요.' : '지금은 마이크를 쓸 수 없어요.', denied && Native.isNative ? { action: '설정 열기', onAction: () => Native.openAppSettings() } : {});
+    }
+  }, '부르는 음을 건반에 초록색으로 보여 줘요. 이어폰을 끼면 더 정확해요.', 'mic');
+  const paintKeys = () => {
+    const cur = step >= 0 ? root + pat().steps[step] : null, s = sung != null ? Math.round(sung) : null;
+    keys.forEach((k, m) => { k.classList.toggle('root', m === root); k.classList.toggle('on', m === cur); k.classList.toggle('sing', m === s); });
+  };
+  const drawChips = () => {
+    chips.replaceChildren(...scalePats().map(p => h('button', { class: 'chip sm', 'aria-pressed': String(T.pat === p.id), onclick: () => { if (T.pat === p.id) return; T.pat = p.id; touchSettings(); stop(); drawChips(); paint(); } }, p.name)),
+      h('button', { class: 'chip sm again', onclick: () => openScaleBuilder(null, () => { drawChips(); paint(); }) }, icon('plus', 15), '만들기'));
+  };
+  const paint = () => {
+    const p = pat(), top = root + Math.max(...p.steps), custom = T.custom.some(c => c.id === p.id);
+    stepsBox.replaceChildren(...[h('span', { class: 'sc-seq', 'aria-label': `${p.name}: ${p.steps.map(SK.degName).join(' ')}` }, p.steps.map((s, i) => h('span', { class: i === step ? 'cur' : '', 'aria-hidden': 'true' }, SK.degName(s)))),
+      custom ? h('button', { class: 'link', onclick: () => openScaleBuilder(T.custom.find(c => c.id === p.id), () => { drawChips(); paint(); }) }, '편집') : null].filter(Boolean));
+    nowBox.replaceChildren(h('b', null, noteName(root)), h('span', null, ` (${noteSci(root)})에서 시작`), h('span', { class: 'hint' }, ` · 가장 높은 음 ${noteName(top)}`));
+    again.replaceChildren(...(playing ? [icon('stop', 18), '멈추기'] : [icon('play', 18), played ? '다시' : '듣기']));
+    down.disabled = root <= SCALE_LO; up.disabled = root >= SCALE_HI;
+    const e = S.days[date];
+    const dl = o.drillId ? drillList(date).find(d => d.id === o.drillId) : null;
+    extra.replaceChildren(...[
+      played && !(e && e.high != null && e.high >= top) ? h('button', { class: 'btn soft sm', onclick: () => { const d = ensureDay(date); d.high = top; touch(date); toast(`${fmtMD(date)} 최고음: ${noteName(top)}`); paint(); } }, icon('flag', 16), `최고음으로 적기: ${noteName(top)}`) : null,
+      dl ? h('button', { class: 'btn blue sm', disabled: dl.done >= dl.target, onclick: () => { bump(date, dl.id, 1); paint(); } }, dl.done >= dl.target ? [icon('check', 16), `${dl.name} 다 했어요`] : [icon('plus', 16), `${dl.name} 1회 체크 (${dl.done}/${dl.target})`]) : null].filter(Boolean));
+    paintKeys(); drawTune();
+  };
+  function start(m) {
+    if (m < SCALE_LO || m > SCALE_HI) return;
+    root = m;
+    if (T.root !== m) { T.root = m; touchSettings(); }
+    Player.stopAll();
+    step = -1;
+    playing = Synth.play(root, pat().steps, { bpm: T.bpm, chord: T.chord, onStep: i => { step = i; paint(); }, onEnd: () => { playing = false; step = -1; paint(); } });
+    if (!playing) { toast('이 폰에서는 소리를 낼 수 없어요'); return; }
+    played = true;
+    paint();
+    const k = keys.get(root), r = k.getBoundingClientRect(), wr = kbWrap.getBoundingClientRect();
+    if (r.left < wr.left + 8 || r.right > wr.right - 8) kbWrap.scrollBy({ left: r.left - wr.left - wr.width / 2 + r.width / 2, behavior: smooth() });
+  }
+  function stop() { Synth.stop(); playing = false; step = -1; paint(); }
+  const onVis = () => { if (document.visibilityState === 'hidden') { stop(); Tuner.stop(); const sw = tuneRow.querySelector('.switch'); if (sw) sw.setAttribute('aria-checked', 'false'); sung = null; drawTune(); } };
+  document.addEventListener('visibilitychange', onVis);
+  drawChips(); paint();
+  openSheet({
+    title: '스케일 연습',
+    body: h('div', { class: 'scale' },
+      chips, stepsBox, nowBox, kbWrap,
+      h('div', { class: 'sc-ctrl' }, down, again, up),
+      extra,
+      h('div', { class: 'field', style: 'margin:16px 0 4px' }, h('span', { class: 'lbl' }, '빠르기'), tempo),
+      ToggleRow('시작 전에 기준 화음', T.chord, v => { T.chord = v; touchSettings(); }, '스케일 전에 첫 음의 화음을 들려줘요', 'music'),
+      tuneRow, tuneBox,
+      h('p', { class: 'hint', style: 'margin-top:8px' }, '건반을 누르면 그 음을 ‘도’로 삼아 스케일이 한 번 나와요. 따라 부른 다음 ‘반음’ 버튼으로 반음씩 올리거나 내려 보세요.')),
+    onClose: () => { Synth.stop(); Tuner.stop(); document.removeEventListener('visibilitychange', onVis); }
+  });
+  /* the last key you used, in view */
+  requestAnimationFrame(() => { const k = keys.get(root); if (k) kbWrap.scrollLeft = Math.max(0, k.offsetLeft - kbWrap.clientWidth / 2 + W / 2); });
+}
+/* your own exercise, built from the notes as sung from 도 */
+function openScaleBuilder(existing, onDone) {
+  const T = S.settings.scale;
+  let steps = existing ? existing.steps.slice() : [];
+  const nameInp = h('input', { class: 'input', value: existing ? existing.name : `내 스케일 ${T.custom.length + 1}`, maxlength: 20, 'aria-label': '스케일 이름' });
+  const seq = h('div', { class: 'sc-steps build', 'aria-live': 'polite' });
+  const drawSeq = () => seq.replaceChildren(steps.length ? h('span', { class: 'sc-seq' }, steps.map(x => h('span', null, SK.degName(x)))) : h('span', { class: 'hint' }, '아래 음을 부를 순서대로 눌러 주세요.'));
+  drawSeq();
+  const pad = h('div', { class: 'sc-pad' }, SK.BUILD_KEYS.map(x => h('button', { class: 'btn soft sm' + (x === 0 ? ' do' : ''), onclick: () => { if (steps.length >= 40) { toast('40음까지 넣을 수 있어요'); return; } steps.push(x); Synth.one(60 + x); drawSeq(); } }, SK.degName(x))));
+  let s = null;
+  const save = h('button', { class: 'btn ink', onclick: () => {
+    if (steps.length < 2) { toast('음을 두 개 이상 넣어 주세요'); return; }
+    const name = nameInp.value.trim() || '내 스케일';
+    if (existing) Object.assign(existing, { name, steps: steps.slice() });
+    else { const c = { id: uid('sc'), name, steps: steps.slice() }; T.custom.push(c); T.pat = c.id; }
+    touchSettings(); closeSheet(s, true); toast(`‘${name}’ 스케일을 저장했어요`); onDone();
+  } }, '저장');
+  s = openSheet({
+    title: existing ? '스케일 고치기' : '내 스케일 만들기',
+    body: h('div', null,
+      field('이름', nameInp),
+      h('div', { class: 'field' }, h('span', { class: 'lbl' }, '부를 순서'), seq,
+        h('div', { class: 'btn-row' },
+          h('button', { class: 'btn ghost sm', onclick: () => { steps.pop(); drawSeq(); } }, icon('undo', 16), '하나 지우기'),
+          h('button', { class: 'btn ghost sm', onclick: () => { steps = []; drawSeq(); } }, '모두 지우기'),
+          h('button', { class: 'btn soft sm', onclick: () => { if (steps.length) Synth.play(60, steps, { bpm: T.bpm, chord: false }); } }, icon('play', 16), '들어 보기'))),
+      pad,
+      h('p', { class: 'hint', style: 'margin-top:10px' }, '‘도’는 건반에서 누른 음이에요. ‘높은도’는 한 옥타브 위, ‘낮은시’는 도 바로 아래예요.'),
+      existing ? h('button', { class: 'btn ghost danger wide', style: 'margin-top:12px', onclick: () => confirmSheet({ title: '이 스케일을 지울까요?', text: `‘${existing.name}’을(를) 지워요.`, ok: '지우기', danger: true, onOk: () => {
+        T.custom = T.custom.filter(c => c.id !== existing.id);
+        if (T.pat === existing.id) T.pat = 'five';
+        touchSettings(); closeSheet(s, true); onDone();
+      } }) }, icon('trash', 18), '이 스케일 지우기') : null),
+    foot: [save],
+    onClose: () => Synth.stop()
+  });
+}
+
 /* ================= staff & stamp ================= */
 function staffSVG(target, done, complete, pop) {
   const rows = Math.max(1, Math.ceil(target / 10));
@@ -1494,6 +1754,7 @@ function DrillSec(date) {
   return h('div', { class: 'sec drills' + (all ? ' all' : ''), id: 'sec-drills' },
     h('div', { class: 'sec-h' }, h('h2', null, '기초 연습'), counted.length ? h('span', { class: 'sec-note' }, all ? '모두 완료!' : `${counted.length}개 중 ${doneN}개 완료`) : null, h('span', { class: 'sp' }),
       h('button', { class: 'icon-btn', 'aria-label': S.settings.sound ? '체크 소리 끄기' : '체크 소리 켜기', onclick: () => { S.settings.sound = !S.settings.sound; touchSettings(); render(); toast(S.settings.sound ? '체크할 때 음이 울려요' : '체크 소리를 껐어요'); } }, icon(S.settings.sound ? 'sound' : 'mute', 20)),
+      h('button', { class: 'icon-btn', 'aria-label': '스케일 건반 열기', onclick: () => openScaleTrainer({ date }) }, icon('piano', 21)),
       h('button', { class: 'btn ghost sm', onclick: openDrillEditor }, '편집')),
     list.length ? h('div', { class: 'drill-prog', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': reps, 'aria-label': `기초 연습 ${reps}/${total}회` }, h('i', { style: `width:${total ? (reps / total * 100).toFixed(1) : 0}%` })) : null,
     all ? Stamp(S.justDone === date) : null,
@@ -1523,9 +1784,12 @@ function DrillRow(date, d) {
       h('span', { class: 'drill-rec' }, todayBest != null ? h('span', null, `오늘 최고 ${fmtSec(todayBest)}`) : null, best ? h('span', null, `최고 기록 ${fmtSec(best.sec)}`) : null),
       h('div', { class: 'drill-acts' },
         h('button', { class: 'btn soft sm sq', 'data-fk': `dr-${d.id}-minus`, 'aria-label': `${d.name} 체크 하나 지우기`, disabled: d.done === 0, onclick: () => bump(date, d.id, -1) }, icon('minus', 18)),
+        SCALE_DRILL.test(d.name) ? h('button', { class: 'btn soft sm', 'data-fk': `dr-${d.id}-keys`, 'aria-label': `${d.name} 건반 열기`, onclick: () => openScaleTrainer({ date, drillId: d.id }) }, icon('piano', 18), '건반') : null,
         d.timed ? h('button', { class: 'btn soft sm', 'data-fk': `dr-${d.id}-timer`, 'aria-label': `${d.name} 시간 재기`, onclick: () => openStopwatch(date, d.id) }, icon('timer', 18), '재기') : null,
         h('button', { class: 'btn blue sm btn-check', 'data-fk': `dr-${d.id}-plus`, 'aria-label': complete ? `${d.name} 다 했어요` : `${d.name} 1회 체크`, disabled: complete, onclick: () => bump(date, d.id, 1) }, complete ? [icon('check', 18), '다 했어요'] : [icon('plus', 18), '1회']))));
 }
+/* drills sung on scales get a 건반 button */
+const SCALE_DRILL = /스케일|음계|아르페|립\s*트릴|허밍|사이렌|scale|arpeg/i;
 function bump(date, id, delta, sec) {
   const t = S.settings.drills.find(x => x.id === id);
   const e = ensureDay(date);
@@ -3249,6 +3513,7 @@ function mergeSettings(cur, inc) {
   if (JSON.stringify(out.tags) === JSON.stringify(def.tags) && inc.tags.length) out.tags = inc.tags.slice();
   inc.drills.forEach(d => { if (!out.drills.some(x => x.id === d.id)) out.drills.push(clone(d)); });
   inc.tags.forEach(tg => { if (!out.tags.includes(tg)) out.tags.push(tg); });
+  inc.scale.custom.forEach(c => { if (!out.scale.custom.some(x => x.id === c.id)) out.scale.custom.push(clone(c)); });
   inc.songs.forEach(m => {
     const o = out.songs.find(x => x.k === m.k);
     if (!o) out.songs.push(clone(m));
