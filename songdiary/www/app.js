@@ -138,6 +138,7 @@ const noteSci = m => NOTE_EN[m % 12] + (Math.floor(m / 12) - 1);
 const HIGH_MIN = 48, HIGH_MAX = 91;
 const LS_TIMER = 'songdiary:v1:timer', LS_UI = 'songdiary:v1:ui';
 const SONG_STATUS = ['연습 중', '거의 완성', '완성', '쉬는 중'];
+const MAX_TAGS = 40;
 const THEMES = [['auto', '폰 설정 따라'], ['light', '밝게'], ['dark', '어둡게']];
 const { Store, makeZip, readZip, Files, App: Native, Net, safeName } = window.SD;
 const SS = window.SongSearch;
@@ -173,7 +174,7 @@ function normSettings(s) {
     v: 2,
     title: typeof s.title === 'string' && s.title.trim() ? s.title.trim().slice(0, 30) : d.title,
     drills: Array.isArray(s.drills) ? s.drills.filter(x => x && x.id).map(x => ({ id: String(x.id), name: String(x.name || '연습').slice(0, 20), target: clampInt(x.target, 1, 99, 5), timed: !!x.timed, memo: String(x.memo || '').slice(0, 60) })) : d.drills,
-    tags: Array.isArray(s.tags) ? s.tags.filter(t => typeof t === 'string' && t.trim()).slice(0, 30) : d.tags,
+    tags: Array.isArray(s.tags) ? s.tags.filter(t => typeof t === 'string' && t.trim()).slice(0, MAX_TAGS) : d.tags,
     sound: s.sound !== false,
     haptic: s.haptic !== false,
     theme: ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : 'auto',
@@ -210,7 +211,7 @@ function normDay(date, e) {
 function hasContent(e) {
   if (!e) return false;
   return !!(e.cond || (e.throat && e.throat.length) || e.sleep != null || e.water > 0 || (e.goal && e.goal.trim()) ||
-    Object.values(e.drills || {}).some(d => d.done > 0) || e.songs.length || e.recs.length || e.good.length || e.bad.length || e.fb.length ||
+    Object.values(e.drills || {}).some(d => d.done > 0 || (d.times && d.times.length)) || e.songs.length || e.recs.length || e.good.length || e.bad.length || e.fb.length ||
     (e.memo && e.memo.trim()) || (e.next && e.next.trim()) || e.rating || e.minutes > 0 || e.high != null);
 }
 const ensureDay = date => S.days[date] || (S.days[date] = blankDay(date));
@@ -275,7 +276,8 @@ function updateSave() {
 async function loadAll() {
   try {
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-    const [meta, days] = await Promise.all([Store.get('meta', 'settings'), Store.all('days')]);
+    const [meta, days, auds] = await Promise.all([Store.get('meta', 'settings'), Store.all('days'), Store.keys('audio').catch(() => null)]);
+    if (auds) { AUD.clear(); auds.forEach(k => AUD.add(k)); audKnown = true; }
     S.settings = normSettings(meta);
     S.days = {};
     for (const [k, v] of days) if (isDateKey(k)) S.days[k] = normDay(k, v);
@@ -337,6 +339,10 @@ const Sound = {
 
 /* ================= audio storage (blobs kept in this phone's app storage) ================= */
 const MAX_AUDIO = 300 * 1024 * 1024;
+/* ids of recordings whose audio is on this phone — a text-only backup brings rows without their files */
+const AUD = new Set();
+let audKnown = false;
+const hasAudio = r => !!(r && r.aud) && (!audKnown || AUD.has(r.aud));
 async function sniff(blob) {
   try {
     const b = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
@@ -372,6 +378,7 @@ async function storeAudio(blob, name) {
   const id = uid('a');
   const b = new Blob([blob], { type: mime });
   await Store.put('audio', id, { blob: b, mime, size: b.size, name: String(name || ''), at: Date.now() });
+  AUD.add(id);
   return { aud: id, mime, size: b.size };
 }
 async function audioBlob(r) {
@@ -409,7 +416,15 @@ function probeDuration(file, kind) {
       const a = document.createElement('audio');
       a.preload = 'metadata';
       url = URL.createObjectURL(file);
-      a.onloadedmetadata = () => { const d = a.duration; if (isFinite(d) && d > 0) fin(Math.round(d * 10) / 10); else fallback(); };
+      a.onloadedmetadata = () => {
+        const d = a.duration;
+        if (isFinite(d) && d > 0) { fin(Math.round(d * 10) / 10); return; }
+        if (d === Infinity) { /* recorded webm: the length is known once the end has been seeked */
+          a.ondurationchange = () => { if (isFinite(a.duration) && a.duration > 0) fin(Math.round(a.duration * 10) / 10); };
+          try { a.currentTime = 1e101; return; } catch (e) { /* fall through */ }
+        }
+        fallback();
+      };
       a.onerror = fallback;
       a.src = url;
     } catch (e) { fallback(); }
@@ -448,6 +463,13 @@ const Player = {
     a.preload = 'auto';
     ['play', 'pause', 'loadedmetadata', 'durationchange', 'playing', 'waiting', 'seeked'].forEach(ev => a.addEventListener(ev, () => this.sync()));
     a.addEventListener('play', () => this.watch());
+    a.addEventListener('durationchange', () => {
+      const c = this.cur, d = a.duration;
+      if (!c || c.dur || !isFinite(d) || d <= 0 || this.eng() !== a) return;
+      c.dur = Math.round(d * 10) / 10;
+      const at = recHomeOf(c.id);
+      if (at) { const rr = findRec(at, c.id); if (rr && !rr.dur) { rr.dur = c.dur; touch(at); } }
+    });
     /* backup for when animation frames are paused (screen dimmed etc.) */
     a.addEventListener('timeupdate', () => {
       const L = this.loop;
@@ -503,7 +525,7 @@ const Player = {
     try {
       const src = await this.srcFor(r);
       if (!this.cur || this.cur.id !== r.id) return;
-      if (!src) { this.loading = null; this.cur = null; this.sync(); toast('녹음 파일을 찾지 못했어요. 이전 버전에서 옮겨 온 기록이라면 파일이 없어요.'); return; }
+      if (!src) { this.loading = null; this.cur = null; this.sync(); toast('녹음 파일이 이 폰에 없어요. 글만 백업에서 불러온 기록이면 전체 백업(녹음 포함)을 불러오세요.'); return; }
       this.el.src = src;
       this.el.playbackRate = this.rate;
       try { this.el.preservesPitch = true; } catch (e) { /* ignore */ }
@@ -574,22 +596,32 @@ const Player = {
   dur() { const d = this.eng().duration; return isFinite(d) && d > 0 ? d : (this.cur && this.cur.dur) || 0; },
   time() { return this.cur ? this.eng().currentTime || 0 : 0; },
   isCur(id) { return !!this.cur && this.cur.id === id; },
+  /* jumping out of the A-B section ends the loop */
+  leaveLoop(id, t) { const L = this.loop; if (L && L.id === id && (t < L.a - 0.05 || t > L.b)) this.loop = null; },
   seek(r, ratio) {
     if (!this.cur || this.cur.id !== r.id) {
       this.toggle(r, { at: ratio * (r.dur || 0) });
       return;
     }
     const d = this.dur();
-    if (d) { try { this.eng().currentTime = Math.max(0, Math.min(d - 0.05, ratio * d)); } catch (e) { /* ignore */ } }
+    if (d) { const t = Math.max(0, Math.min(d - 0.05, ratio * d)); this.leaveLoop(r.id, t); try { this.eng().currentTime = t; } catch (e) { /* ignore */ } }
     this.sync();
   },
   seekTo(r, sec, play = true) {
     if (!this.cur || this.cur.id !== r.id) { this.toggle(r, { at: sec, noplay: !play }); return; }
+    this.leaveLoop(r.id, Math.max(0, sec));
     try { this.eng().currentTime = Math.max(0, sec); } catch (e) { /* ignore */ }
     if (play && this.eng().paused) { this.eng().play().catch(() => {}); this.watch(); }
     this.sync();
   },
-  nudge(r, sec) { if (this.cur && this.cur.id === r.id) { const e = this.eng(), d = this.dur(); try { e.currentTime = Math.max(0, Math.min(d || 1e9, e.currentTime + sec)); } catch (x) { /* ignore */ } this.sync(); } },
+  nudge(r, sec) {
+    if (!this.cur || this.cur.id !== r.id) return;
+    const e = this.eng(), d = this.dur();
+    const t = Math.max(0, Math.min(d || 1e9, e.currentTime + sec));
+    this.leaveLoop(r.id, t);
+    try { e.currentTime = t; } catch (x) { /* ignore */ }
+    this.sync();
+  },
   setRate(v) {
     if (this.eng() !== this.el && this.cur) { toast('이 파일은 원래 속도로만 들을 수 있어요'); return; }
     this.rate = v; this.el.playbackRate = v; this.sync();
@@ -624,29 +656,62 @@ const Player = {
     if (track) track.setAttribute('aria-valuenow', String(Math.round(pct)));
     if (time) time.textContent = on ? `${fmtDur(t)} / ${d ? fmtDur(d) : '-:--'}` : (d ? fmtDur(d) : '');
     const sp = row.querySelector('.speed');
-    if (sp) { sp.hidden = !on || e !== this.el; sp.textContent = this.rate + '×'; }
+    /* shown only once the speed was changed (in the detail sheet), so the track doesn't jump when playback starts */
+    if (sp) { sp.hidden = !on || e !== this.el || this.rate === 1; sp.textContent = this.rate + '×'; }
     const lp = row.querySelector('.loop-band');
     if (lp) {
       const L = this.loop;
       const show = L && L.id === id && d && L.b > L.a;
       lp.hidden = !show;
-      if (show) { lp.style.left = (L.a / d * 100) + '%'; lp.style.width = ((L.b - L.a) / d * 100) + '%'; }
+      if (show) { const b = Math.min(L.b, d); lp.style.left = (L.a / d * 100) + '%'; lp.style.width = (Math.max(0, b - L.a) / d * 100) + '%'; }
     }
   },
   syncCur() {
     if (!this.cur) return;
     const e = this.eng();
     $$(`[data-rec="${this.cur.id}"]`).forEach(row => this.paintRow(row, true, e));
-    const ev = new CustomEvent('player-tick');
-    document.dispatchEvent(ev);
+    NowPlaying.paint();
+    document.dispatchEvent(new CustomEvent('player-tick'));
   },
   sync() {
     const cur = this.cur ? this.cur.id : null;
     const e = this.eng();
     $$('[data-rec]').forEach(row => this.paintRow(row, row.dataset.rec === cur, e));
     document.dispatchEvent(new CustomEvent('player-tick'));
-    const mini = $('#now-playing');
-    if (mini) mini.hidden = !(this.cur && !e.paused);
+    NowPlaying.paint();
+  }
+};
+
+/* a small bar above the tabs while a recording plays, so it can be paused from any screen */
+const NowPlaying = {
+  el: null,
+  paint() {
+    const bar = this.el || (this.el = $('#now-playing'));
+    if (!bar) return;
+    const c = Player.cur, on = Player.playing();
+    const show = !!c && (on || (Player.time() > 0.2 && Player.time() < Player.dur() - 0.3));
+    bar.hidden = !show || S.sheetOpen;
+    document.body.classList.toggle('np', !bar.hidden);
+    if (!show) return;
+    const at = recHomeOf(c.id), r = at && findRec(at, c.id);
+    const title = r ? `${r.title || '녹음'}${at ? ` · ${fmtMD(at)}` : ''}` : '녹음';
+    const t = $('.np-t', bar), tm = $('.np-time', bar), btn = $('.np-play', bar);
+    if (t.textContent !== title) t.textContent = title;
+    tm.textContent = `${fmtDur(Player.time())} / ${fmtDur(Player.dur())}`;
+    const st = on ? 'pause' : 'play';
+    if (btn.dataset.state !== st) { btn.dataset.state = st; btn.replaceChildren(icon(st, 20)); btn.setAttribute('aria-label', on ? '일시정지' : '재생'); }
+  },
+  bind() {
+    const bar = $('#now-playing');
+    if (!bar) return;
+    $('.np-play', bar).addEventListener('click', () => {
+      const c = Player.cur; if (!c) return;
+      const e = Player.eng();
+      if (e.paused) { e.play().catch(() => {}); Player.watch(); } else e.pause();
+      Player.sync();
+    });
+    $('.np-t', bar).addEventListener('click', () => { const c = Player.cur; const at = c && recHomeOf(c.id); if (at) goDate(at); });
+    $('.np-x', bar).addEventListener('click', () => { const c = Player.cur; if (c) Player.release(c.id); Player.sync(); });
   }
 };
 
@@ -721,6 +786,7 @@ function openSheet({ title, body, foot, onClose, beforeClose, full }) {
   document.body.append(bd, sheet);
   Sheets.push(obj);
   S.sheetOpen = true;
+  NowPlaying.paint();
   document.body.classList.add('noscroll');
   requestAnimationFrame(() => requestAnimationFrame(() => { bd.classList.add('open'); sheet.classList.add('open'); }));
   setTimeout(() => { const f = sheet.querySelector('[data-autofocus]'); if (f) f.focus({ preventScroll: true }); }, 320);
@@ -735,7 +801,7 @@ function closeSheet(obj, force) {
   if (i >= 0) Sheets.splice(i, 1);
   obj.bd.classList.remove('open'); obj.sheet.classList.remove('open');
   setTimeout(() => { obj.bd.remove(); obj.sheet.remove(); }, 300);
-  if (!Sheets.length) { S.sheetOpen = false; document.body.classList.remove('noscroll'); }
+  if (!Sheets.length) { S.sheetOpen = false; document.body.classList.remove('noscroll'); NowPlaying.paint(); }
   try { if (obj.onClose) obj.onClose(); } catch (e) { console.error(e); }
   if (deferred && !Sheets.length) setTimeout(() => softRender(), 320);
 }
@@ -965,6 +1031,8 @@ function allItems() {
 function findItem(date, kind, id) { const e = S.days[date]; return e ? e[kind].find(x => x.id === id) : null; }
 function mutItem(date, kind, id, fn) { const it = findItem(date, kind, id); if (!it) return; fn(it); touch(date); }
 function findRec(date, id) { const e = S.days[date]; return e ? e.recs.find(x => x.id === id) : null; }
+/* the day a recording belongs to now (it can be moved to another date) */
+function recHomeOf(id) { for (const d in S.days) if (S.days[d].recs.some(x => x.id === id)) return d; return null; }
 function songLib() {
   const map = new Map();
   const get = (k, title, d) => { let L = map.get(k); if (!L) { L = { key: k, title, artist: '', tone: '', memo: '', dates: [], recs: [], notes: [], first: d, last: d }; map.set(k, L); } return L; };
@@ -1626,32 +1694,40 @@ function RecRow(r, date, opts = {}) {
     h('div', { class: 'knob' }));
   bindTrack(track, r);
   const sub = opts.label || (opts.showDate ? fmtMD(date) : (r.songTitle || ''));
-  return h('div', { class: 'rec' + (r.aud ? '' : ' missing'), 'data-rec': r.id, 'data-dur': r.dur || 0 },
+  return h('div', { class: 'rec' + (hasAudio(r) ? '' : ' missing'), 'data-rec': r.id, 'data-dur': r.dur || 0 },
     h('button', { class: 'play', 'aria-label': '재생', 'data-state': 'play', onclick: () => Player.toggle(r) }, icon('play', 22)),
     h('div', { class: 'rec-top' }, h('span', { class: 'rec-title' }, r.title || '녹음'), sub ? h('span', { class: 'rec-song' }, sub) : null,
       marks.length ? h('span', { class: 'rec-marks', 'aria-label': `구간 메모 ${marks.length}개` }, icon('flag', 13), marks.length) : null),
     h('button', { class: 'icon-btn star' + (r.fav ? ' on' : ''), 'aria-label': r.fav ? '베스트 표시 빼기' : '베스트로 표시', 'aria-pressed': String(!!r.fav), onclick: ev => {
-      const cur = findRec(date, r.id); if (!cur) return;
-      cur.fav = !cur.fav; touch(date);
+      const at = recHomeOf(r.id) || date;
+      const cur = findRec(at, r.id); if (!cur) return;
+      cur.fav = !cur.fav; touch(at);
       $$(`[data-rec="${r.id}"] .star`).forEach(b => { b.classList.toggle('on', cur.fav); b.setAttribute('aria-pressed', String(cur.fav)); });
       haptic(8);
       toast(cur.fav ? '베스트 녹음으로 표시했어요' : '베스트 표시를 뺐어요');
       softRender();
     } }, icon('star', 20)),
     h('div', { class: 'rec-bar' }, track, h('span', { class: 'rec-time' }, r.dur ? fmtDur(r.dur) : ''), h('button', { class: 'speed', hidden: true, 'aria-label': '재생 속도 바꾸기', onclick: () => Player.cycleRate() }, '1×')),
-    h('button', { class: 'icon-btn more', 'aria-label': '녹음 자세히 보기', onclick: () => openRecDetail(date, r.id) }, icon('more', 20)));
+    h('button', { class: 'icon-btn more', 'aria-label': '녹음 자세히 보기', onclick: () => openRecDetail(recHomeOf(r.id) || date, r.id) }, icon('more', 20)));
 }
 function bindTrack(track, r) {
-  const ratio = ev => { const b = track.getBoundingClientRect(); return Math.max(0, Math.min(1, (ev.clientX - b.left) / (b.width || 1))); };
   track.addEventListener('pointerdown', ev => {
-    ev.preventDefault();
-    try { track.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
-    Player.seek(r, ratio(ev));
-    const move = e2 => { if (Player.isCur(r.id)) Player.seek(r, ratio(e2)); };
-    const up = () => { track.removeEventListener('pointermove', move); track.removeEventListener('pointerup', up); track.removeEventListener('pointercancel', up); };
+    if (ev.button > 0) return;
+    const box = track.getBoundingClientRect(); /* fixed for the whole drag, even if the row's layout changes */
+    const ratio = e2 => Math.max(0, Math.min(1, (e2.clientX - box.left) / (box.width || 1)));
+    const x0 = ev.clientX, y0 = ev.clientY;
+    let dragging = false;
+    const move = e2 => {
+      if (!dragging && Math.abs(e2.clientX - x0) > 8 && Math.abs(e2.clientX - x0) > Math.abs(e2.clientY - y0)) { dragging = true; try { track.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ } }
+      if (dragging && Player.isCur(r.id)) Player.seek(r, ratio(e2));
+    };
+    const end = e2 => {
+      track.removeEventListener('pointermove', move); track.removeEventListener('pointerup', end); track.removeEventListener('pointercancel', end);
+      if (e2.type === 'pointerup' && !dragging && Math.hypot(e2.clientX - x0, e2.clientY - y0) < 10) Player.seek(r, ratio(e2));
+    };
     track.addEventListener('pointermove', move);
-    track.addEventListener('pointerup', up);
-    track.addEventListener('pointercancel', up);
+    track.addEventListener('pointerup', end);
+    track.addEventListener('pointercancel', end);
   });
   track.addEventListener('keydown', ev => {
     if (ev.key === 'ArrowRight') { ev.preventDefault(); Player.nudge(r, 5); }
@@ -1660,13 +1736,17 @@ function bindTrack(track, r) {
   });
 }
 const fmtT = s => { s = Math.max(0, s || 0); return `${Math.floor(s / 60)}:${pad(Math.floor(s % 60))}`; };
+const loopLabel = L => `${fmtT(L.a)} → ${isFinite(L.b) ? fmtT(L.b) : '끝 (‘여기까지’로 정해요)'}`;
 function openRecDetail(date, id) {
   let r = findRec(date, id);
   if (!r) return;
   let curDate = date;
   const live = () => findRec(curDate, id);
   const titleInp = h('input', { class: 'input', value: r.title || '', maxlength: 60, 'aria-label': '녹음 이름' });
-  titleInp.addEventListener('input', debounce(() => { const c = live(); if (!c) return; c.title = titleInp.value.trim() || '녹음'; touch(curDate); }, 400));
+  const savers = new Set();
+  const saveTitle = debounce(() => { const c = live(); if (!c) return; c.title = titleInp.value.trim() || '녹음'; touch(curDate); }, 400);
+  savers.add(saveTitle);
+  titleInp.addEventListener('input', saveTitle);
   const songSel = songSelect(date, r.song || '');
   songSel.addEventListener('change', () => { const c = live(); if (!c) return; c.song = songSel.value || null; c.songTitle = songTitleFor(curDate, c.song); touch(curDate); });
   const dateInp = h('input', { class: 'input', type: 'date', max: todayStr(), value: date, 'aria-label': '녹음한 날짜' });
@@ -1695,11 +1775,12 @@ function openRecDetail(date, id) {
   const loopBox = h('div', { class: 'loop-box' });
   const drawLoop = () => {
     const L = Player.loop && Player.loop.id === id ? Player.loop : null;
-    const setA = () => { const t = Player.isCur(id) ? Player.time() : 0; Player.loop = { id, a: t, b: L && L.b > t ? L.b : Math.min((live().dur || t + 10), t + 10) }; drawLoop(); Player.sync(); };
+    /* until '여기까지' is pressed the loop runs from A to the end */
+    const setA = () => { const t = Player.isCur(id) ? Player.time() : 0; Player.loop = { id, a: t, b: L && isFinite(L.b) && L.b > t ? L.b : Infinity }; drawLoop(); Player.sync(); };
     const setB = () => { if (!Player.isCur(id)) { toast('먼저 재생하면서 끝낼 지점에서 눌러 주세요'); return; } const t = Player.time(); const a = L ? L.a : 0; if (t <= a + 0.3) { toast('시작 지점보다 뒤에서 눌러 주세요'); return; } Player.loop = { id, a, b: t }; drawLoop(); Player.sync(); Player.seekTo(live(), a); };
     loopBox.replaceChildren(
       h('div', { class: 'loop-top' }, icon('repeat', 18), h('span', { class: 'lbl' }, '구간 반복'), h('span', { class: 'sp' }),
-        L ? h('span', { class: 'loop-val' }, `${fmtT(L.a)} → ${fmtT(L.b)}`) : h('span', { class: 'hint' }, '어려운 부분만 계속 들어요')),
+        L ? h('span', { class: 'loop-val' }, loopLabel(L)) : h('span', { class: 'hint' }, '어려운 부분만 계속 들어요')),
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn soft sm', onclick: setA }, '여기서부터'),
         h('button', { class: 'btn soft sm', onclick: setB }, '여기까지'),
@@ -1724,7 +1805,9 @@ function openRecDetail(date, id) {
         } }, icon('plus', 16), '지금 위치에 메모')),
       list.length ? h('div', { class: 'mark-list' }, list.map((m, i) => {
         const inp = h('input', { class: 'input small', value: m.text, placeholder: `예: 여기 음정 떨어짐, 숨 부족`, maxlength: 80, 'aria-label': `${fmtT(m.t)} 메모` });
-        inp.addEventListener('input', debounce(() => { const cc = live(); const mm = cc && (cc.marks || []).find(x => x.id === m.id); if (mm) { mm.text = inp.value.trim(); touch(curDate); } }, 350));
+        const saveMark = debounce(() => { const cc = live(); const mm = cc && (cc.marks || []).find(x => x.id === m.id); if (mm) { mm.text = inp.value.trim(); touch(curDate); } }, 350);
+        savers.add(saveMark);
+        inp.addEventListener('input', saveMark);
         if (focusId === m.id) setTimeout(() => inp.focus(), 60);
         return h('div', { class: 'mark' },
           h('button', { class: 'mark-t', 'aria-label': `${fmtT(m.t)}부터 듣기`, onclick: () => Player.seekTo(live(), Math.max(0, m.t - 1.5)) }, icon('play', 12), fmtT(m.t)),
@@ -1748,9 +1831,19 @@ function openRecDetail(date, id) {
         r.aud ? h('button', { class: 'btn soft', onclick: () => shareRec(curDate, live()) }, icon('share', 18), '보내기') : null,
         r.aud && Native.isNative ? h('button', { class: 'btn soft', onclick: () => saveRecToPhone(curDate, live()) }, icon('down', 18), '폰에 저장') : null,
         h('button', { class: 'btn ghost danger', onclick: () => { closeSheet(s, true); confirmDeleteRec(curDate, id); } }, icon('trash', 18), '삭제'))),
-    onClose: () => { document.removeEventListener('player-tick', onTick); render(); }
+    onClose: () => {
+      document.removeEventListener('player-tick', onTick);
+      savers.forEach(f => f.flush());
+      if (Player.loop && Player.loop.id === id) Player.loop = null;
+      render();
+    }
   });
-  const onTick = () => { if (!s.closed) { const L = Player.loop; const lv = loopBox.querySelector('.loop-val'); if (lv && L && L.id === id) lv.textContent = `${fmtT(L.a)} → ${fmtT(L.b)}`; } };
+  const onTick = () => {
+    if (s.closed) return;
+    const L = Player.loop, lv = loopBox.querySelector('.loop-val');
+    if (lv && L && L.id === id) lv.textContent = loopLabel(L);
+    else if (lv && !(L && L.id === id)) drawLoop();
+  };
   document.addEventListener('player-tick', onTick);
 }
 function confirmDeleteRec(date, id) {
@@ -1762,27 +1855,37 @@ function confirmDeleteRec(date, id) {
     if (!e) return;
     e.recs = e.recs.filter(x => x.id !== id);
     touch(date); render();
-    try { if (r.aud && !usedAudioIds().has(r.aud)) await Store.del('audio', r.aud); } catch (err) { /* cleaned up later in settings */ }
+    $$(`[data-rec="${id}"]`).forEach(el => el.remove());
+    try { if (r.aud && !usedAudioIds().has(r.aud)) { await Store.del('audio', r.aud); AUD.delete(r.aud); } } catch (err) { /* cleaned up later in settings */ }
     toast('녹음을 지웠어요');
   } });
 }
 function recFileName(date, r, blob) { return `${date} ${r.title || '녹음'}.${extFor(r.mime || (blob && blob.type))}`; }
+let recIO = false;
 async function shareRec(date, r) {
-  if (!r) return;
+  if (!r || recIO) return;
+  recIO = true;
+  const t = toastProgress('보낼 준비를 하는 중…');
   try {
     const blob = await audioBlob(r);
-    if (!blob) { toast('녹음 파일을 찾지 못했어요'); return; }
+    if (!blob) { t.done('녹음 파일을 찾지 못했어요'); return; }
     await Files.share({ title: r.title || '녹음', text: `[노래일기] ${fmtMD(date)} ${r.title || '녹음'}${r.songTitle ? ` (${r.songTitle})` : ''}`, files: [{ name: recFileName(date, r, blob), blob }] });
-  } catch (err) { console.error(err); toast('보내지 못했어요. 다시 시도해 주세요.'); }
+    t.done();
+  } catch (err) { console.error(err); t.done('보내지 못했어요. 다시 시도해 주세요.'); }
+  finally { recIO = false; }
 }
 async function saveRecToPhone(date, r) {
-  if (!r) return;
+  if (!r || recIO) return;
+  recIO = true;
+  const t = toastProgress('폰에 저장하는 중…');
   try {
     const blob = await audioBlob(r);
-    if (!blob) { toast('녹음 파일을 찾지 못했어요'); return; }
-    const where = await Files.saveToDocuments('녹음', recFileName(date, r, blob), blob);
-    toast(where ? `${where}에 저장했어요` : '파일로 저장했어요');
-  } catch (err) { console.error(err); toast('저장하지 못했어요.'); }
+    if (!blob) { t.done('녹음 파일을 찾지 못했어요'); return; }
+    const name = Native.isNative ? await Files.freeName('녹음', recFileName(date, r, blob)) : recFileName(date, r, blob);
+    const where = await Files.saveToDocuments('녹음', name, blob, p => t.set(`폰에 저장하는 중… ${Math.round(p * 100)}%`));
+    t.done(where ? `${where}에 저장했어요` : '파일로 저장했어요');
+  } catch (err) { console.error(err); t.done('저장하지 못했어요. 폰 저장 공간을 확인해 주세요.'); }
+  finally { recIO = false; }
 }
 function pickAudio(date) {
   const inp = $('#file-audio');
@@ -1854,6 +1957,47 @@ async function openImport(date, files, src) {
     body: h('div', null, list, modeBox, field('어떤 노래의 녹음인가요?', songSel, items.length > 1 ? '모든 파일에 똑같이 붙어요. 나중에 하나씩 바꿀 수 있어요.' : null),
       !hasOwnDates ? h('p', { class: 'hint' }, `${fmtMDW(date)} 기록에 넣어요.`) : null),
     foot: [saveBtn]
+  });
+}
+/* next take number for a song on a day: one more than the highest so far ('밤양갱 3' after 1 and 3) */
+function nextTake(date, key) {
+  const e = S.days[date];
+  const nums = e ? e.recs.filter(x => (x.song || '') === (key || '')).map(x => +((/ (\d+)$/.exec(x.title || '') || [])[1] || 0)) : [];
+  return Math.max(0, ...nums, e ? e.recs.filter(x => (x.song || '') === (key || '')).length : 0) + 1;
+}
+/* a finished take is kept until it is saved or thrown away — the app may be closed while you listen back */
+function saveDraft(d) { Store.put('meta', 'recDraft', d).catch(() => {}); }
+function dropDraft() { Store.del('meta', 'recDraft').catch(() => {}); }
+async function offerDraft() {
+  let d = null;
+  try { d = await Store.get('meta', 'recDraft'); } catch (e) { return; }
+  if (!d || !d.blob || !d.blob.size) return;
+  const date = isDateKey(d.date) && d.date <= todayStr() ? d.date : todayStr();
+  let url = null;
+  try { url = URL.createObjectURL(d.blob); } catch (e) { /* ignore */ }
+  const key = defaultSongKey(date);
+  const titleInp = h('input', { class: 'input', value: `${songTitleFor(date, key) || '녹음'} ${nextTake(date, key)}`, maxlength: 60, 'aria-label': '녹음 이름' });
+  const songSel = songSelect(date, key);
+  let s = null, done = false;
+  const save = h('button', { class: 'btn ink', onclick: async () => {
+    save.disabled = true;
+    try {
+      const info = await storeAudio(d.blob, 'recording.' + extFor(d.blob.type));
+      const song = songSel.value || null;
+      ensureDay(date).recs.push({ id: uid('r'), aud: info.aud, mime: info.mime, size: info.size, title: titleInp.value.trim() || '녹음', song, songTitle: songTitleFor(date, song), dur: Math.round((d.durSec || 0) * 10) / 10, fav: false, at: d.at || Date.now(), src: 'mic', marks: Array.isArray(d.marks) ? d.marks : [] });
+      touch(date); done = true; dropDraft();
+      closeSheet(s, true); render(); toast(`${fmtMD(date)} 기록에 녹음을 저장했어요`);
+    } catch (err) { save.disabled = false; toast(assetErrMsg(err)); }
+  } }, '저장하기');
+  const discard = h('button', { class: 'btn soft', onclick: () => confirmSheet({ title: '이 녹음을 버릴까요?', text: '버리면 되돌릴 수 없어요.', ok: '버리기', danger: true, onOk: () => { done = true; dropDraft(); closeSheet(s, true); } }) }, '버리기');
+  s = openSheet({
+    title: '저장하지 않은 녹음이 있어요',
+    body: h('div', { class: 'rc-review' },
+      h('p', { class: 'hint', style: 'margin-bottom:8px' }, `${fmtMD(date)}에 녹음하고 저장하기 전에 앱이 닫혔어요.${d.durSec ? ` (${fmtDur(d.durSec)})` : ''}`),
+      url ? h('audio', { controls: true, src: url, preload: 'metadata' }) : null,
+      field('이름', titleInp), field('어떤 노래의 녹음인가요?', songSel)),
+    foot: [discard, save],
+    onClose: () => { if (url) URL.revokeObjectURL(url); if (!done) toast('나중에 앱을 다시 열면 또 물어볼게요'); }
   });
 }
 function micFallback(date, reason) {
@@ -1940,6 +2084,7 @@ async function openRecorder(date) {
   const sheet = openSheet({ title: '녹음', body: box, onClose: cleanup, beforeClose: () => {
     if (stage === 'recording' || stage === 'paused') { status.textContent = '먼저 ‘끝내기’를 눌러 녹음을 마쳐 주세요.'; status.style.color = 'var(--red)'; return false; }
     if (stage === 'review' && Date.now() - warned > 3000) { warned = Date.now(); status.textContent = '저장하지 않은 녹음이 있어요. 그래도 닫으려면 한 번 더 누르세요.'; status.style.color = 'var(--red)'; return false; }
+    if (stage === 'review') dropDraft();
     return true;
   } });
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
@@ -1984,14 +2129,26 @@ async function openRecorder(date) {
           haptic(10); recActs(); drawMr();
         } }, icon(paused ? 'mic' : 'pause', 20), paused ? '이어서' : '잠깐 멈춤') : null,
         h('button', { class: 'btn soft big', disabled: paused, onclick: () => { const t = Math.round(elapsed() * 10) / 10; marks.push({ id: uid('m'), t, text: '' }); drawMarks(); haptic(14); toast(`${fmtT(t)}에 표시했어요`); } }, icon('flag', 20), '여기 표시')),
-      h('button', { class: 'btn ink big wide', onclick: () => { clearInterval(tick); durSec = elapsed(); stage = 'stopping'; mrStop(); try { rec.stop(); } catch (e) { /* ignore */ } } }, icon('stop', 20), '끝내기'));
+      h('button', { class: 'btn ink big wide', onclick: ev => {
+        if (stage !== 'recording' && stage !== 'paused') return;
+        ev.currentTarget.disabled = true;
+        clearInterval(tick); durSec = elapsed(); stage = 'stopping'; mrStop();
+        status.textContent = '녹음을 마무리하고 있어요…';
+        try { rec.stop(); } catch (e) { /* ignore */ }
+      } }, icon('stop', 20), '끝내기'));
   };
   const begin = () => {
     mime = pickMime(); chunks = [];
     try { rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 160000 } : undefined); }
     catch (e) { try { rec = new MediaRecorder(stream); } catch (e2) { toast('녹음을 시작하지 못했어요.'); return; } }
     rec.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
-    rec.onstop = () => { blob = new Blob(chunks, { type: (rec.mimeType || mime || 'audio/webm').split(';')[0] }); review(); };
+    rec.onstop = () => {
+      if (stage === 'recording' || stage === 'paused') { durSec = elapsed(); clearInterval(tick); mrStop(); } /* stopped by the system (mic taken, error) */
+      blob = new Blob(chunks, { type: (rec.mimeType || mime || 'audio/webm').split(';')[0] });
+      saveDraft({ blob, date, durSec, marks: marks.slice(), at: Date.now() });
+      review();
+    };
+    rec.onerror = () => { try { if (rec.state !== 'inactive') rec.stop(); } catch (e) { /* ignore */ } };
     rec.start(1000);
     segStart = performance.now(); acc = 0;
     stage = 'recording';
@@ -2015,10 +2172,9 @@ async function openRecorder(date) {
     const e = S.days[date];
     const key = defaultSongKey(date);
     const sTitle = songTitleFor(date, key);
-    const sameCount = e ? e.recs.filter(x => (x.song || '') === key).length : 0;
-    const titleInp = h('input', { class: 'input', value: `${sTitle || '녹음'} ${sameCount + 1}`, maxlength: 60, 'aria-label': '녹음 이름' });
+    const titleInp = h('input', { class: 'input', value: `${sTitle || '녹음'} ${nextTake(date, key)}`, maxlength: 60, 'aria-label': '녹음 이름' });
     const songSel = songSelect(date, key);
-    songSel.addEventListener('change', () => { const t = songTitleFor(date, songSel.value); const n = (S.days[date] ? S.days[date].recs.filter(x => (x.song || '') === songSel.value).length : 0) + 1; titleInp.value = `${t || '녹음'} ${n}`; });
+    songSel.addEventListener('change', () => { const t = songTitleFor(date, songSel.value); titleInp.value = `${t || '녹음'} ${nextTake(date, songSel.value)}`; });
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     let preview = null;
     try { previewUrl = URL.createObjectURL(blob); preview = h('audio', { controls: true, src: previewUrl, preload: 'metadata' }); preview.addEventListener('error', () => { preview.hidden = true; }); } catch (e2) { preview = null; }
@@ -2027,6 +2183,7 @@ async function openRecorder(date) {
       saveBtn.disabled = true; saveBtn.textContent = '저장하는 중…';
       try {
         const info = await storeAudio(blob, 'recording.' + extFor(blob.type));
+        dropDraft();
         const song = songSel.value || null;
         const d = ensureDay(date);
         d.recs.push({ id: uid('r'), aud: info.aud, mime: info.mime, size: info.size, title: titleInp.value.trim() || '녹음', song, songTitle: songTitleFor(date, song), dur: Math.round(durSec * 10) / 10, fav: false, at: Date.now(), src: 'mic', marks: marks.slice() });
@@ -2036,7 +2193,7 @@ async function openRecorder(date) {
       } catch (err) { saveBtn.disabled = false; saveBtn.textContent = '저장하기'; toast(assetErrMsg(err)); }
     };
     acts.replaceChildren(h('div', { class: 'rc-review' }, preview, field('이름', titleInp), field('어떤 노래의 녹음인가요?', songSel)), saveBtn,
-      h('button', { class: 'btn soft wide', onclick: () => { if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; } blob = null; idle(); } }, '버리고 다시 녹음'));
+      h('button', { class: 'btn soft wide', onclick: () => { if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; } blob = null; dropDraft(); idle(); } }, '버리고 다시 녹음'));
   };
   idle();
 }
@@ -2090,6 +2247,12 @@ function openSongEntry(date, sid) {
   const kInp = h('input', { class: 'input', value: so.tone || '', maxlength: 20, placeholder: '예: 원키, -2키', 'aria-label': '키' });
   const quickKeys = h('div', { class: 'chips', style: 'margin-top:8px' }, ['원키', '+1키', '-1키', '-2키', '-3키'].map(k => h('button', { class: 'chip sm', onclick: () => { kInp.value = k; } }, k)));
   const nInp = autoTA({ class: 'input lined', value: so.note || '', placeholder: '예: 2절 브릿지 숨 위치 바꿔 봄', 'aria-label': '오늘 이 노래 메모' }, 66);
+  /* a corrected title can be applied to every day this song was sung */
+  const origKey = normKey(so.title);
+  const otherDays = Object.keys(S.days).filter(x => x !== date && S.days[x].songs.some(z => normKey(z.title) === origKey)).length;
+  let everywhere = true;
+  const allRow = h('div', { hidden: true }, otherDays ? ToggleRow('다른 날 기록도 같이 바꾸기', true, v => { everywhere = v; }, `이 노래를 부른 다른 ${otherDays}일의 제목과 녹음도 새 제목으로 바꿔요`, 'edit') : null);
+  tInp.addEventListener('input', () => { allRow.hidden = !otherDays || normKey(tInp.value) === origKey || !tInp.value.trim(); });
   let s = null;
   const save = h('button', { class: 'btn ink', onclick: () => {
     const d = S.days[date]; const cur = d && d.songs.find(x => x.id === sid);
@@ -2097,15 +2260,22 @@ function openSongEntry(date, sid) {
     const t = tInp.value.trim();
     if (!t) { toast('제목을 적어 주세요'); return; }
     const oldKey = normKey(cur.title), newKey = normKey(t);
+    if (oldKey !== newKey && d.songs.some(x => x.id !== sid && normKey(x.title) === newKey)) { toast('이 날 목록에 이미 있는 노래예요'); return; }
     Object.assign(cur, { title: t, artist: aInp.value.trim(), tone: kInp.value.trim(), note: nInp.value.trim() });
+    if (oldKey !== newKey) {
+      if (everywhere && otherDays) renameSongAll(oldKey, t);
+      else {
+        d.recs.forEach(r => { if (r.song === oldKey) { r.song = newKey; r.songTitle = t; } });
+        if (!songLib().has(oldKey)) moveSongMeta(oldKey, newKey);
+      }
+    }
     if (picked && picked.cat && normKey(picked.title) === newKey) linkSong(newKey, picked.cat, cur.artist);
-    if (oldKey !== newKey) d.recs.forEach(r => { if (r.song === oldKey) { r.song = newKey; r.songTitle = t; } });
     touch(date); closeSheet(s, true); render();
   } }, '저장');
   s = openSheet({
     title: so.title,
     body: h('div', null,
-      field('제목', h('div', null, tInp, tSugg)), field('가수', aInp),
+      field('제목', h('div', null, tInp, tSugg)), allRow, field('가수', aInp),
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, '키'), kInp, quickKeys),
       field('오늘 이 노래 메모', nInp),
       h('div', { class: 'btn-row' },
@@ -2113,6 +2283,39 @@ function openSongEntry(date, sid) {
         h('button', { class: 'btn ghost danger', onclick: () => { closeSheet(s, true); deleteItem(date, 'songs', sid); } }, icon('trash', 18), '오늘 목록에서 빼기'))),
     foot: [save]
   });
+}
+/* rename a song on every day (and its recordings and notes) — e.g. fixing a typo */
+function renameSongAll(oldKey, title) {
+  const newKey = normKey(title);
+  for (const d in S.days) {
+    const e = S.days[d];
+    let ch = false;
+    e.songs.forEach(x => { if (normKey(x.title) === oldKey && x.title !== title) { x.title = title; ch = true; } });
+    e.recs.forEach(r => { if (r.song === oldKey) { r.song = newKey; r.songTitle = title; ch = true; } });
+    /* a day that already had the new title keeps one entry, with anything only the other one had */
+    const keep = new Map();
+    e.songs = e.songs.filter(x => {
+      const k = normKey(x.title), o = keep.get(k);
+      if (!o) { keep.set(k, x); return true; }
+      for (const f of ['artist', 'tone', 'note']) if (!o[f] && x[f]) o[f] = x[f];
+      ch = true;
+      return false;
+    });
+    if (ch) touch(d);
+  }
+  moveSongMeta(oldKey, newKey);
+}
+function moveSongMeta(oldKey, newKey) {
+  const m = S.settings.songs.find(x => x.k === oldKey);
+  if (!m || oldKey === newKey) return;
+  const t = S.settings.songs.find(x => x.k === newKey);
+  if (!t) m.k = newKey;
+  else {
+    for (const f of ['artist', 'memo', 'status']) if (!t[f] && m[f]) t[f] = m[f];
+    if (!t.cat && m.cat) t.cat = m.cat;
+    S.settings.songs = S.settings.songs.filter(x => x !== m);
+  }
+  touchSettings();
 }
 function openStopwatch(date, id) {
   const t = S.settings.drills.find(x => x.id === id);
@@ -2714,7 +2917,15 @@ function TagEditor() {
   const box = h('div');
   const draw = () => {
     const inp = h('input', { class: 'input small', placeholder: '새 주제  예: 믹스보이스', maxlength: 12, 'aria-label': '새 주제' });
-    const add = () => { const v = inp.value.trim(); if (!v || !inp.isConnected) return; if (!S.settings.tags.includes(v)) { S.settings.tags.push(v); touchSettings(); } draw(); const n = box.querySelector('input'); if (n) n.focus(); };
+    const add = () => {
+      const v = inp.value.trim();
+      if (!v || !inp.isConnected) return;
+      if (!S.settings.tags.includes(v)) {
+        if (S.settings.tags.length >= MAX_TAGS) { toast(`주제는 ${MAX_TAGS}개까지 만들 수 있어요. 안 쓰는 주제를 지우고 추가해 주세요.`); return; }
+        S.settings.tags.push(v); touchSettings();
+      }
+      draw(); const n = box.querySelector('input'); if (n) n.focus();
+    };
     bindEnter(inp, add);
     box.replaceChildren(
       h('div', { class: 'chips tag-edit' }, S.settings.tags.map((t, i) => h('span', { class: 'chip sm' }, t, h('button', { class: 'x', style: 'border:0;background:none;padding:0', 'aria-label': `${t} 주제 지우기`, onclick: () => { S.settings.tags.splice(i, 1); touchSettings(); draw(); } }, icon('x', 14))))),
@@ -2744,10 +2955,12 @@ function StorageBlock() {
         btn.hidden = false;
         btn.textContent = `기록에서 빠진 녹음 파일 ${orphans.length}개 정리`;
         btn.onclick = async () => {
+          if (S.importing) { toast('백업을 불러오는 중이에요. 다 끝난 뒤에 정리해 주세요.'); return; }
           btn.disabled = true;
           const live = usedAudioIds();
           const gone = (await Store.keys('audio')).filter(k => !live.has(k));
           await Store.write('audio', gone.map(k => [k, undefined]));
+          gone.forEach(k => AUD.delete(k));
           btn.hidden = true; toast(`${gone.length}개를 정리했어요`);
         };
       }
@@ -2785,7 +2998,8 @@ async function exportBackup(withAudio, how) {
     }
     if (how === 'share') {
       t.set('보낼 준비를 하는 중…');
-      await Files.share({ title: name, text: '노래일기 백업', files: [{ name, blob }] });
+      const r = await Files.share({ title: name, text: '노래일기 백업', files: [{ name, blob }] });
+      if (r === 'cancelled') { t.done('보내기를 취소했어요. 백업은 아직 안 됐어요.'); return; }
       t.done();
     } else {
       const where = await Files.saveToDocuments('백업', name, blob, p => t.set(`폰에 저장하는 중… ${Math.round(p * 100)}%`));
@@ -2806,30 +3020,44 @@ async function autoBackup(force) {
     for (const n of files.slice(0, Math.max(0, files.length - 14))) await Files.deleteDocument('자동백업', n);
   } catch (e) { console.warn('auto backup', e); }
 }
-/* Joins two versions of the same day without dropping anything either one has */
+/* Joins two versions of the same day. Recordings and notes from either side are kept (so a backup can bring
+   back something deleted by mistake). When both are copies of one diary page (same createdAt — e.g. restoring
+   your own backup), the newer edit of the texts and numbers wins; pages written separately (two phones) keep both. */
 function mergeDay(cur, inc) {
   if (!cur || !hasContent(cur)) return inc;
   const newer = (inc.updatedAt || 0) > (cur.updatedAt || 0) ? inc : cur;
   const older = newer === inc ? cur : inc;
+  const same = !!cur.createdAt && cur.createdAt === inc.createdAt;
   const out = clone(newer);
-  for (const k of ['recs', 'songs', 'good', 'bad', 'fb']) {
+  for (const k of ['recs', 'good', 'bad', 'fb']) {
     const ids = new Set(out[k].map(x => x.id));
     older[k].forEach(x => { if (!ids.has(x.id)) out[k].push(clone(x)); });
+  }
+  for (const x of older.songs) {
+    const o = out.songs.find(s => s.id === x.id || normKey(s.title) === normKey(x.title));
+    if (!o) { out.songs.push(clone(x)); continue; }
+    for (const f of ['artist', 'tone', 'note']) if (!o[f] && x[f]) o[f] = x[f];
   }
   for (const k of ['memo', 'goal', 'next']) {
     const a = (out[k] || '').trim(), b = (older[k] || '').trim();
     if (b && !a) out[k] = older[k];
-    else if (b && a !== b && !a.includes(b)) out[k] = `${out[k]}
+    else if (!same && b && a !== b && !a.includes(b)) out[k] = `${out[k]}
 ${older[k]}`;
   }
   for (const k of ['cond', 'sleep', 'rating', 'high']) if (out[k] == null && older[k] != null) out[k] = older[k];
-  out.minutes = Math.max(out.minutes || 0, older.minutes || 0);
-  out.water = Math.max(out.water || 0, older.water || 0);
-  older.throat.forEach(x => { if (!out.throat.includes(x)) out.throat.push(x); });
+  if (same) {
+    out.minutes = out.minutes || older.minutes || 0;
+    out.water = out.water || older.water || 0;
+    if (!out.throat.length) out.throat = older.throat.slice();
+  } else {
+    out.minutes = Math.max(out.minutes || 0, older.minutes || 0);
+    out.water = Math.max(out.water || 0, older.water || 0);
+    older.throat.forEach(x => { if (!out.throat.includes(x)) out.throat.push(x); });
+  }
   for (const id in older.drills) {
     const o = older.drills[id], n = out.drills[id];
     if (!n) out.drills[id] = clone(o);
-    else { n.done = Math.max(n.done || 0, o.done || 0); (o.times || []).forEach(x => { if (!(n.times || []).includes(x)) n.times = (n.times || []).concat(x); }); }
+    else if (!same) { n.done = Math.max(n.done || 0, o.done || 0); (o.times || []).forEach(x => { if (!(n.times || []).includes(x)) n.times = (n.times || []).concat(x); }); }
   }
   return out;
 }
@@ -2853,12 +3081,14 @@ function importBackup() {
   inp.onchange = async () => {
     const f = inp.files && inp.files[0];
     if (!f) return;
-    let data = null, zip = null;
+    let data = null, zip = null, zipBase = '';
     try {
       const head = new Uint8Array(await f.slice(0, 4).arrayBuffer());
       if (head[0] === 0x50 && head[1] === 0x4b) {
         zip = await readZip(f);
-        const ent = zip.get('songdiary.json');
+        let ent = zip.get('songdiary.json');
+        /* unzipped and zipped again with its folder: '노래일기-전체백업/songdiary.json' */
+        if (!ent) for (const [nm, v] of zip) if (/(^|\/)songdiary\.json$/.test(nm) && !nm.startsWith('__MACOSX/')) { ent = v; zipBase = nm.slice(0, -'songdiary.json'.length); break; }
         if (ent) data = JSON.parse(await (await ent.read()).text());
       } else data = JSON.parse(await f.text());
     } catch (e) { data = null; }
@@ -2866,25 +3096,12 @@ function importBackup() {
     const dates = Object.keys(data.days).filter(isDateKey);
     const audioMap = data.audio || {};
     const nAudio = zip ? Object.keys(audioMap).length : 0;
-    confirmSheet({ title: '백업을 불러올까요?', text: `${dates.length}일치 기록${nAudio ? `과 녹음 ${nAudio}개` : ''}가 들어 있어요. 지금 기록은 지우지 않고 합쳐요. 같은 날짜는 더 나중에 고친 내용을 기준으로 합쳐요.`, ok: '불러오기', onOk: async () => {
+    confirmSheet({ title: '백업을 불러올까요?', text: `${dates.length}일치 기록${nAudio ? `과 녹음 ${nAudio}개가` : '이'} 들어 있어요. 지금 기록은 지우지 않고 합쳐요. 같은 날짜는 더 나중에 고친 내용을 기준으로 합쳐요.`, ok: '불러오기', onOk: async () => {
       const t = toastProgress('불러오는 중…');
+      S.importing = true;
       try {
-        let n = 0, na = 0;
-        if (zip && nAudio) {
-          const have = new Set(await Store.keys('audio'));
-          const keys = Object.keys(audioMap);
-          for (let i = 0; i < keys.length; i++) {
-            const k = keys[i], meta = audioMap[k];
-            if (have.has(k)) continue;
-            const ent = zip.get(meta.file);
-            if (!ent) continue;
-            const raw = await ent.read();
-            const blob = new Blob([raw], { type: meta.mime || 'audio/mpeg' });
-            await Store.put('audio', k, { blob, mime: meta.mime || blob.type, size: blob.size, name: meta.name || '', at: Date.now() });
-            na++;
-            t.set(`녹음 불러오는 중… ${i + 1}/${keys.length}`);
-          }
-        }
+        let n = 0, na = 0, left = 0, full = false;
+        const fresh = !entryDates().length;
         const recHome = new Map();
         for (const d in S.days) S.days[d].recs.forEach(r => recHome.set(r.id, d));
         for (const d of dates) {
@@ -2897,16 +3114,41 @@ function importBackup() {
           if (merged !== cur && (!cur || JSON.stringify(merged) !== JSON.stringify(cur))) { S.days[d] = normDay(d, merged); S.days[d].updatedAt = Math.max(S.days[d].updatedAt || 0, (cur && cur.updatedAt) || 0); queueWrite(d, 100); n++; }
         }
         if (data.settings && typeof data.settings === 'object') {
-          S.settings = mergeSettings(S.settings, normSettings(data.settings));
+          const incS = normSettings(data.settings);
+          /* a brand-new diary takes the backup's settings as they are (title, drills, tags …) */
+          S.settings = fresh ? normSettings({ ...incS, reminder: S.settings.reminder, updatedAt: Date.now() }) : mergeSettings(S.settings, incS);
           queueWrite('@s', 100); applyTheme();
           const Rm = S.settings.reminder;
           if (Rm.on) Native.setReminder(true, Rm.h, Rm.m, REMIND_TEXT).catch(() => {});
         }
         await flushWrites();
+        /* recordings after the text, so the diary is back even if the phone runs out of space */
+        if (zip && nAudio) {
+          const have = new Set(await Store.keys('audio'));
+          const keys = Object.keys(audioMap).filter(k => !have.has(k));
+          for (let i = 0; i < keys.length; i++) {
+            const k = keys[i], meta = audioMap[k] || {};
+            const ent = zip.get(zipBase + meta.file) || zip.get(meta.file);
+            if (!ent) continue;
+            t.set(`녹음 불러오는 중… ${i + 1}/${keys.length}`);
+            try {
+              const raw = await ent.read();
+              const blob = new Blob([raw], { type: meta.mime || 'audio/mpeg' });
+              await Store.put('audio', k, { blob, mime: meta.mime || blob.type, size: blob.size, name: meta.name || '', at: Date.now() });
+              AUD.add(k);
+              na++;
+            } catch (err) {
+              console.error(err);
+              if (err && err.name === 'QuotaExceededError') { full = true; left = keys.length - i; break; }
+            }
+          }
+        }
         while (Sheets.length) closeSheet(null, true);
         render();
-        t.done(n || na ? `${n}일치 기록${na ? `, 녹음 ${na}개` : ''}를 불러왔어요` : '새로 불러올 기록이 없었어요');
-      } catch (err) { console.error(err); t.done('불러오다가 문제가 생겼어요. 파일을 확인해 주세요.'); }
+        const what = !n && !na ? '새로 불러올 기록이 없었어요' : na ? `${n ? `${n}일치 기록과 ` : ''}녹음 ${na}개를 불러왔어요` : `${n}일치 기록을 불러왔어요`;
+        t.done(full ? `${what}. 폰 공간이 부족해서 녹음 ${left}개는 못 넣었어요. 공간을 비우고 같은 파일을 다시 불러오면 이어서 넣어요.` : what);
+      } catch (err) { console.error(err); t.done(err && err.name === 'QuotaExceededError' ? '폰 저장 공간이 부족해서 다 불러오지 못했어요. 공간을 비운 뒤 다시 불러와 주세요.' : '불러오다가 문제가 생겼어요. 파일을 확인해 주세요.'); }
+      finally { S.importing = false; }
     } });
   };
   inp.click();
@@ -2972,7 +3214,7 @@ function openSettings() {
           h('button', { class: 'btn soft sm', onclick: () => exportBackup(false, 'save') }, '글만 백업'),
           h('button', { class: 'btn soft sm', onclick: importBackup }, icon('upload', 17), '백업 불러오기')),
         Native.isNative ? h('p', { class: 'hint', style: 'margin-top:8px' }, '저장 위치: 내 파일 > 문서 > 노래일기 > 백업. ‘백업 보내기’로 구글 드라이브나 카카오톡 나에게 보내 두면 더 안전해요.') : null,
-        Native.isNative ? ToggleRow('매일 자동 백업 (글만)', S.settings.autoBackup, v => { S.settings.autoBackup = v; touchSettings(); if (v) autoBackup(true); }, '앱을 닫을 때 문서 > 노래일기 > 자동백업에 최근 14일치를 남겨요', 'save') : null),
+        Native.isNative ? ToggleRow('매일 자동 백업 (글만)', S.settings.autoBackup, v => { S.settings.autoBackup = v; touchSettings(); if (v) autoBackup(true); }, '앱을 닫을 때 모든 글 기록을 문서 > 노래일기 > 자동백업에 저장해요. 하루 한 파일씩 최근 14개를 남기고, 녹음은 빠져요.', 'save') : null),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '저장 공간')), StorageBlock()),
       h('div', { class: 'set-block' }, verLine, h('p', { class: 'hint' }, '이전 노래일기(웹)에서 ‘백업 파일 저장’으로 받은 파일도 ‘백업 불러오기’로 옮길 수 있어요. 그때 녹음은 파일이 옮겨지지 않아서 ‘보내기’로 받은 파일을 따로 불러와야 해요.'))),
     onClose: () => render()
@@ -3034,6 +3276,7 @@ function bindGlobal() {
   window.addEventListener('pagehide', () => { flushWrites(); });
   if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme); } catch (e) { /* old webview */ } }
   bindViewport();
+  NowPlaying.bind();
   let ticks = 0;
   setInterval(() => { tickTimer(); if (++ticks % 30 === 0) followToday(); }, 1000);
   /* Android back button: sheet → keyboard → tab → today → leave */
@@ -3063,7 +3306,9 @@ function afterLoad() {
   if (booted || S.mode !== 'ready') return;
   booted = true;
   Native.onShared(takeShared);
-  if (!Native.isNative) window.__sdTest = { openImport, openRecDetail, exportBackup, S };
+  Files.clearShareCache();
+  setTimeout(() => { if (!Sheets.length) offerDraft(); }, 800);
+  if (!Native.isNative) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S };
   const R = S.settings.reminder;
   if (R.on) Native.setReminder(true, R.h, R.m, REMIND_TEXT).catch(() => {});
   setTimeout(() => autoBackup(), 4000);

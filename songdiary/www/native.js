@@ -143,12 +143,21 @@ const safeName = s => String(s || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
 async function writeBlob(path, directory, blob, onProgress) {
   const FS = plug('Filesystem');
   const CH = 3 * 1024 * 1024; /* multiple of 3 so base64 chunks join cleanly */
-  if (!blob.size) { await FS.writeFile({ path, directory, data: '', recursive: true }); }
-  for (let p = 0; p < blob.size; p += CH) {
-    const data = await blobToB64(blob.slice(p, p + CH));
-    if (p === 0) await FS.writeFile({ path, directory, data, recursive: true });
-    else await FS.appendFile({ path, directory, data });
-    if (onProgress) onProgress(Math.min(1, (p + CH) / blob.size));
+  /* written under a temporary name first, so a failed or interrupted write never leaves a broken file behind */
+  const part = path + '.part';
+  try {
+    if (!blob.size) await FS.writeFile({ path: part, directory, data: '', recursive: true });
+    for (let p = 0; p < blob.size; p += CH) {
+      const data = await blobToB64(blob.slice(p, p + CH));
+      if (p === 0) await FS.writeFile({ path: part, directory, data, recursive: true });
+      else await FS.appendFile({ path: part, directory, data });
+      if (onProgress) onProgress(Math.min(1, (p + CH) / blob.size));
+    }
+    try { await FS.deleteFile({ path, directory }); } catch (e) { /* nothing to replace */ }
+    await FS.rename({ from: part, to: path, directory, toDirectory: directory });
+  } catch (e) {
+    try { await FS.deleteFile({ path: part, directory }); } catch (e2) { /* ignore */ }
+    throw e;
   }
   const r = await FS.getUri({ path, directory });
   return r.uri;
@@ -163,14 +172,14 @@ const Files = {
       const uris = [];
       for (const f of files || []) uris.push(await writeBlob(`share/${safeName(f.name)}`, 'CACHE', f.blob));
       try { await SH.share({ title, text, files: uris.length ? uris : undefined, dialogTitle: title || '보내기' }); }
-      catch (e) { if (!/cancel/i.test(String(e && (e.message || e)))) throw e; }
+      catch (e) { if (/cancel/i.test(String(e && (e.message || e)))) return 'cancelled'; throw e; }
       return true;
     }
     if (navigator.share) {
       const fl = (files || []).map(f => new File([f.blob], safeName(f.name), { type: f.blob.type || 'application/octet-stream' }));
       const data = { title, text };
       if (fl.length && navigator.canShare && navigator.canShare({ files: fl })) data.files = fl;
-      try { await navigator.share(data); return true; } catch (e) { if (e && e.name === 'AbortError') return true; }
+      try { await navigator.share(data); return true; } catch (e) { if (e && e.name === 'AbortError') return 'cancelled'; }
     }
     for (const f of files || []) this.download(f.name, f.blob);
     return false;
@@ -181,6 +190,20 @@ const Files = {
     const path = `노래일기/${sub ? sub + '/' : ''}${safeName(name)}`;
     await writeBlob(path, 'DOCUMENTS', blob, onProgress);
     return `내 파일 > 문서 > ${path}`;
+  },
+  /* the copy handed to the share sheet can be gigabytes; once the app starts again it is surely not needed */
+  async clearShareCache() {
+    const FS = plug('Filesystem');
+    if (FS) { try { await FS.rmdir({ path: 'share', directory: 'CACHE', recursive: true }); } catch (e) { /* not there */ } }
+  },
+  /* a file name in 문서/노래일기/<sub> that doesn't replace an earlier export */
+  async freeName(sub, name) {
+    const have = new Set((await this.listDocuments(sub)).map(f => f.name));
+    const safe = safeName(name);
+    if (!have.has(safe)) return safe;
+    const dot = safe.lastIndexOf('.'), base = dot > 0 ? safe.slice(0, dot) : safe, ext = dot > 0 ? safe.slice(dot) : '';
+    for (let i = 2; i < 1000; i++) if (!have.has(`${base} (${i})${ext}`)) return `${base} (${i})${ext}`;
+    return safe;
   },
   async listDocuments(sub) {
     const FS = plug('Filesystem');
