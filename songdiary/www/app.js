@@ -45,6 +45,8 @@ const normKey = t => String(t || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const clone = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 const uid = p => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const clampInt = (v, lo, hi, d) => { v = parseInt(v, 10); return isNaN(v) ? d : Math.max(lo, Math.min(hi, v)); };
+/* 'Remove animations' on the phone turns smooth scrolling off too */
+const smooth = () => (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 function debounce(fn, ms) { let t = 0; const f = () => { clearTimeout(t); t = setTimeout(fn, ms); }; f.flush = () => { if (t) { clearTimeout(t); t = 0; fn(); } }; return f; }
 const vibrate = p => { if (S.settings && S.settings.haptic === false) return; try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* not supported */ } };
 const haptic = vibrate;
@@ -269,7 +271,7 @@ function updateSave() {
   else if (S.saveErr) { text = '저장 안 됨'; err = true; }
   else if (WQ.keys.size || WQ.busy) text = '저장 중…';
   else text = '저장됨';
-  el.textContent = text;
+  if (el.textContent !== text) el.textContent = text;
   el.classList.toggle('err', err);
   el.disabled = !err;
 }
@@ -644,7 +646,7 @@ const Player = {
     const playing = on && !e.paused;
     if (btn) {
       const st = playing ? 'pause' : 'play';
-      if (btn.dataset.state !== st) { btn.dataset.state = st; btn.replaceChildren(icon(st, 22)); btn.setAttribute('aria-label', playing ? '일시정지' : '재생'); }
+      if (btn.dataset.state !== st) { btn.dataset.state = st; btn.replaceChildren(icon(st, 22)); btn.setAttribute('aria-label', `${row.dataset.title || '녹음'} ${playing ? '일시정지' : '재생'}`); }
       btn.classList.toggle('busy', on && this.loading === id);
     }
     const d = on ? this.dur() : (+row.dataset.dur || 0);
@@ -653,7 +655,7 @@ const Player = {
     const prog = row.querySelector('.prog'), knob = row.querySelector('.knob'), time = row.querySelector('.rec-time'), track = row.querySelector('.track');
     if (prog) prog.style.width = pct + '%';
     if (knob) knob.style.left = pct + '%';
-    if (track) track.setAttribute('aria-valuenow', String(Math.round(pct)));
+    if (track) { track.setAttribute('aria-valuenow', String(Math.round(pct))); track.setAttribute('aria-valuetext', `${fmtDur(t)} / ${d ? fmtDur(d) : '-:--'}`); }
     if (time) time.textContent = on ? `${fmtDur(t)} / ${d ? fmtDur(d) : '-:--'}` : (d ? fmtDur(d) : '');
     const sp = row.querySelector('.speed');
     /* shown only once the speed was changed (in the detail sheet), so the track doesn't jump when playback starts */
@@ -754,7 +756,10 @@ function toast(msg, opt = {}) {
   t.replaceChildren(...[h('span', null, msg), opt.action ? h('button', { onclick: () => { t.classList.remove('show'); opt.onAction(); } }, opt.action) : null].filter(Boolean));
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), opt.action ? 5500 : 2600);
+  const hide = () => t.classList.remove('show');
+  toastTimer = setTimeout(hide, opt.action ? 5500 : 2600);
+  t.onfocusin = () => clearTimeout(toastTimer);
+  t.onfocusout = () => { clearTimeout(toastTimer); toastTimer = setTimeout(hide, 2600); };
 }
 const Sheets = [];
 function openSheet({ title, body, foot, onClose, beforeClose, full }) {
@@ -784,6 +789,7 @@ function openSheet({ title, body, foot, onClose, beforeClose, full }) {
     };
     window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
   }));
+  [$('.topbar'), $('#view'), $('.tabbar'), $('#now-playing'), ...Sheets.map(o => o.sheet)].forEach(el => { if (el) el.inert = true; });
   document.body.append(bd, sheet);
   Sheets.push(obj);
   S.sheetOpen = true;
@@ -806,6 +812,9 @@ function closeSheet(obj, force) {
   obj.closed = true;
   const i = Sheets.indexOf(obj);
   if (i >= 0) Sheets.splice(i, 1);
+  const top = Sheets[Sheets.length - 1];
+  if (top) top.sheet.inert = false;
+  else [$('.topbar'), $('#view'), $('.tabbar'), $('#now-playing')].forEach(el => { if (el) el.inert = false; });
   obj.bd.classList.remove('open'); obj.sheet.classList.remove('open');
   setTimeout(() => {
     obj.bd.remove(); obj.sheet.remove();
@@ -826,7 +835,7 @@ function guardUnsaved(isDirty, close) {
 function confirmSheet({ title, text, ok, danger, onOk }) {
   let s = null;
   const yes = h('button', { class: 'btn ' + (danger ? 'redb' : 'ink'), onclick: () => { closeSheet(s, true); onOk(); } }, ok || '확인');
-  const no = h('button', { class: 'btn soft', onclick: () => closeSheet(s, true) }, '취소');
+  const no = h('button', { class: 'btn soft', 'data-autofocus': '', onclick: () => closeSheet(s, true) }, '취소');
   s = openSheet({ title, body: h('p', { class: 'confirm-text' }, text || ''), foot: [no, yes] });
 }
 function field(label, control, hint) {
@@ -872,9 +881,13 @@ function softRender() {
 }
 document.addEventListener('focusout', () => setTimeout(() => { if (deferred && !isTyping() && !S.sheetOpen) { deferred = false; render(); } }, 80));
 
+/* identity of a control across redraws: its data-fk, else its label */
+const ctlKey = el => el && (el.dataset.fk || (el.getAttribute('aria-label') ? 'l:' + el.getAttribute('aria-label') : el.tagName === 'BUTTON' ? 't:' + el.textContent.trim() : ''));
 function render(opts = {}) {
   const main = $('#view');
   const y = window.scrollY;
+  const act = document.activeElement;
+  const keep = !opts.focus && !opts.top && act && act !== document.body && main.contains(act) && !isTyping() ? ctlKey(act) : '';
   const title = S.settings ? S.settings.title : '노래일기';
   $('#tb-title').textContent = title;
   document.title = title;
@@ -892,6 +905,7 @@ function render(opts = {}) {
   main.replaceChildren(node);
   window.scrollTo(0, opts.top ? 0 : y);
   if (opts.focus) { const el = main.querySelector(`[data-fk="${opts.focus}"]`); if (el) el.focus({ preventScroll: true }); }
+  else if (keep) { const el = $$('button,[role="slider"],select', main).find(x => ctlKey(x) === keep); if (el) el.focus({ preventScroll: true }); }
   Player.sync();
   tickTimer();
   updateSave();
@@ -902,7 +916,7 @@ function go(tab) { S.tab = tab; render({ top: true }); }
 function goSection(id) {
   if (S.date !== todayStr()) { S.date = todayStr(); S.follow = true; }
   go('today');
-  requestAnimationFrame(() => { const el = document.getElementById(id); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 64, behavior: 'smooth' }); });
+  requestAnimationFrame(() => { const el = document.getElementById(id); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 64, behavior: smooth() }); });
 }
 function goDate(d) {
   if (d > todayStr()) return;
@@ -1171,8 +1185,8 @@ function SongSuggest(inp, opts) {
     const r = inp.getBoundingClientRect();
     if (r.top < vh * 0.42) return;
     const sb = inp.closest('.sheet-body');
-    if (sb) sb.scrollBy({ top: r.top - sb.getBoundingClientRect().top - 8, behavior: 'smooth' });
-    else window.scrollBy({ top: r.top - 72, behavior: 'smooth' });
+    if (sb) sb.scrollBy({ top: r.top - sb.getBoundingClientRect().top - 8, behavior: smooth() });
+    else window.scrollBy({ top: r.top - 72, behavior: smooth() });
   };
   const draw = () => {
     const q = inp.value.trim();
@@ -1342,7 +1356,7 @@ function TodayView() {
     h('button', { class: 'navbtn', 'aria-label': '하루 뒤', disabled: isToday, onclick: () => goDate(addDays(date, 1)) }, icon('right', 24)));
   swipe(head, () => { if (!isToday) goDate(addDays(date, 1)); }, () => goDate(addDays(date, -1)));
   const jumps = [['sec-cond', '컨디션'], ['sec-drills', '기초 연습'], ['sec-songs', '노래'], ['sec-recs', '녹음'], ['sec-reflect', '돌아보기']];
-  const jump = h('div', { class: 'chips scroll jump' }, jumps.map(([id, l]) => h('button', { class: 'chip sm', onclick: () => { const el = document.getElementById(id); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 64, behavior: 'smooth' }); } }, l)));
+  const jump = h('div', { class: 'chips scroll jump' }, jumps.map(([id, l]) => h('button', { class: 'chip sm', onclick: () => { const el = document.getElementById(id); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 64, behavior: smooth() }); } }, l)));
   const page = h('div', { class: 'page' },
     TimerSec(date, e, isToday),
     isToday && !entryDates().length ? h('div', { class: 'sec welcome' }, h('p', { class: 'hand' }, '첫 장이에요. 노래할 때마다 여기에 적어 두세요.'), h('p', { class: 'hint', style: 'margin-top:6px' }, '기초 연습 항목과 횟수는 ‘기초 연습’ 옆 편집에서 바꿀 수 있어요. 적는 내용은 모두 이 폰에 자동으로 저장돼요.')) : null,
@@ -1464,7 +1478,7 @@ function DrillRow(date, d) {
   const todayBest = d.times.length ? Math.max.apply(null, d.times) : null;
   if (complete && !S.openDrills.has(d.id) && S.popNote !== d.id) {
     return h('div', { class: 'drill done folded' },
-      h('button', { class: 'drill-fold', 'aria-expanded': 'false', 'aria-label': `${d.name} ${d.target}회 완료, 펼치기`, onclick: () => { S.openDrills.add(d.id); render(); } },
+      h('button', { class: 'drill-fold', 'data-fk': `dr-${d.id}-fold`, 'aria-expanded': 'false', 'aria-label': `${d.name} ${d.target}회 완료, 펼치기`, onclick: () => { S.openDrills.add(d.id); render(); } },
         h('span', { class: 'fold-ck' }, icon('check', 16)),
         h('span', { class: 'drill-name' }, d.name),
         h('span', { class: 'fold-n' }, `${d.target}회 완료`),
@@ -1477,13 +1491,13 @@ function DrillRow(date, d) {
       h('span', { class: 'drill-name' }, d.name),
       d.memo ? h('span', { class: 'drill-memo' }, d.memo) : h('span', { class: 'sp' }),
       h('span', { class: 'drill-count' }, complete ? '완료' : [h('b', null, d.done), ` / ${d.target}회`])),
-    h('button', { class: 'staff-btn', disabled: complete, 'aria-label': complete ? `${d.name} 완료` : `${d.name} 1회 체크, 지금 ${d.done}회`, html: staffSVG(d.target, d.done, complete, S.popNote === d.id), onclick: () => bump(date, d.id, 1) }),
+    h('button', { class: 'staff-btn', 'data-fk': `dr-${d.id}-staff`, disabled: complete, 'aria-label': complete ? `${d.name} 완료` : `${d.name} 1회 체크, 지금 ${d.done}회`, html: staffSVG(d.target, d.done, complete, S.popNote === d.id), onclick: () => bump(date, d.id, 1) }),
     h('div', { class: 'drill-bottom' },
       h('span', { class: 'drill-rec' }, todayBest != null ? h('span', null, `오늘 최고 ${fmtSec(todayBest)}`) : null, best ? h('span', null, `최고 기록 ${fmtSec(best.sec)}`) : null),
       h('div', { class: 'drill-acts' },
-        h('button', { class: 'btn soft sm sq', 'aria-label': `${d.name} 체크 하나 지우기`, disabled: d.done === 0, onclick: () => bump(date, d.id, -1) }, icon('minus', 18)),
+        h('button', { class: 'btn soft sm sq', 'data-fk': `dr-${d.id}-minus`, 'aria-label': `${d.name} 체크 하나 지우기`, disabled: d.done === 0, onclick: () => bump(date, d.id, -1) }, icon('minus', 18)),
         d.timed ? h('button', { class: 'btn soft sm', onclick: () => openStopwatch(date, d.id) }, icon('timer', 18), '재기') : null,
-        h('button', { class: 'btn blue sm btn-check', disabled: complete, onclick: () => bump(date, d.id, 1) }, complete ? [icon('check', 18), '다 했어요'] : [icon('plus', 18), '1회']))));
+        h('button', { class: 'btn blue sm btn-check', 'data-fk': `dr-${d.id}-plus`, 'aria-label': complete ? `${d.name} 다 했어요` : `${d.name} 1회 체크`, disabled: complete, onclick: () => bump(date, d.id, 1) }, complete ? [icon('check', 18), '다 했어요'] : [icon('plus', 18), '1회']))));
 }
 function bump(date, id, delta, sec) {
   const t = S.settings.drills.find(x => x.id === id);
@@ -1737,11 +1751,12 @@ function RecRow(r, date, opts = {}) {
   bindTrack(track, r);
   const dup = r.songTitle && String(r.title || '').startsWith(r.songTitle);
   const sub = opts.label || (opts.showDate ? fmtMD(date) : (dup ? '' : r.songTitle || ''));
-  return h('div', { class: 'rec' + (hasAudio(r) ? '' : ' missing'), 'data-rec': r.id, 'data-dur': r.dur || 0 },
-    h('button', { class: 'play', 'aria-label': '재생', 'data-state': 'play', onclick: () => Player.toggle(r) }, icon('play', 22)),
+  const name = r.title || '녹음';
+  return h('div', { class: 'rec' + (hasAudio(r) ? '' : ' missing'), 'data-rec': r.id, 'data-dur': r.dur || 0, 'data-title': name },
+    h('button', { class: 'play', 'aria-label': `${name} 재생`, 'data-state': 'play', onclick: () => Player.toggle(r) }, icon('play', 22)),
     h('div', { class: 'rec-top' }, h('span', { class: 'rec-title' }, r.title || '녹음'), sub ? h('span', { class: 'rec-song' }, sub) : null,
       marks.length ? h('span', { class: 'rec-marks', 'aria-label': `구간 메모 ${marks.length}개` }, icon('flag', 13), marks.length) : null),
-    h('button', { class: 'icon-btn star' + (r.fav ? ' on' : ''), 'aria-label': r.fav ? '베스트 표시 빼기' : '베스트로 표시', 'aria-pressed': String(!!r.fav), onclick: ev => {
+    h('button', { class: 'icon-btn star' + (r.fav ? ' on' : ''), 'aria-label': `${name} 베스트`, 'aria-pressed': String(!!r.fav), onclick: ev => {
       const at = recHomeOf(r.id) || date;
       const cur = findRec(at, r.id); if (!cur) return;
       cur.fav = !cur.fav; touch(at);
@@ -1751,7 +1766,7 @@ function RecRow(r, date, opts = {}) {
       softRender();
     } }, icon('star', 20)),
     h('div', { class: 'rec-bar' }, track, h('span', { class: 'rec-time' }, r.dur ? fmtDur(r.dur) : ''), h('button', { class: 'speed', hidden: true, 'aria-label': '재생 속도 바꾸기', onclick: () => Player.cycleRate() }, '1×')),
-    opts.noMore ? null : h('button', { class: 'icon-btn more', 'aria-label': '녹음 자세히 보기', onclick: () => openRecDetail(recHomeOf(r.id) || date, r.id) }, icon('more', 20)));
+    opts.noMore ? null : h('button', { class: 'icon-btn more', 'aria-label': `${name} 자세히 보기`, onclick: () => openRecDetail(recHomeOf(r.id) || date, r.id) }, icon('more', 20)));
 }
 function bindTrack(track, r) {
   track.addEventListener('pointerdown', ev => {
@@ -2069,7 +2084,7 @@ async function openRecorder(date) {
   let acc = 0, segStart = 0, marks = [];
   const elapsed = () => acc + (stage === 'recording' ? (performance.now() - segStart) / 1000 : 0);
   const barsN = 30;
-  const status = h('p', { class: 'hint' }, '마이크를 준비하고 있어요…');
+  const status = h('p', { class: 'hint', role: 'status', 'aria-live': 'polite' }, '마이크를 준비하고 있어요…');
   const timeEl = h('div', { class: 'rc-time' }, '0:00');
   const meter = h('div', { class: 'rc-meter', 'aria-hidden': 'true' });
   for (let i = 0; i < barsN; i++) meter.append(h('i'));
@@ -2403,7 +2418,11 @@ function openStopwatch(date, id) {
   };
   function go1() { start = performance.now(); state = 'run'; raf = requestAnimationFrame(frame); vibrate(10); Native.keepAwake(true); draw(); }
   function stop1() { cancelAnimationFrame(raf); elapsed = (performance.now() - start) / 1000; setBig(elapsed); state = 'stopped'; vibrate(10); Native.keepAwake(false); draw(); }
-  const onKey = ev => { if (ev.code === 'Space' && !isTyping()) { ev.preventDefault(); if (state === 'idle') go1(); else if (state === 'run') stop1(); } };
+  const onKey = ev => {
+    if (ev.code !== 'Space' || isTyping() || (ev.target && ev.target.closest && ev.target.closest('button'))) return;
+    ev.preventDefault();
+    if (state === 'idle') go1(); else if (state === 'run') stop1();
+  };
   document.addEventListener('keydown', onKey);
   refresh(); draw();
   openSheet({ title: `${t.name} 시간 재기`, body: box, onClose: () => { cancelAnimationFrame(raf); Native.keepAwake(false); document.removeEventListener('keydown', onKey); } });
@@ -2424,13 +2443,13 @@ function DrillEditor() {
       box.append(h('div', { class: 'drow' },
         h('div', { class: 'drow-1' },
           h('input', { class: 'input', value: d.name, maxlength: 20, 'aria-label': '연습 이름', oninput: ev => { d.name = ev.target.value.trim() || '연습'; touchSettings(); } }),
-          h('div', { class: 'stepper' }, h('button', { 'aria-label': '횟수 줄이기', onclick: () => setT(d.target - 1) }, '−'), num, h('button', { 'aria-label': '횟수 늘리기', onclick: () => setT(d.target + 1) }, '+'))),
+          h('div', { class: 'stepper' }, h('button', { 'aria-label': `${d.name} 횟수 줄이기`, onclick: () => setT(d.target - 1) }, '−'), num, h('button', { 'aria-label': `${d.name} 횟수 늘리기`, onclick: () => setT(d.target + 1) }, '+'))),
         h('input', { class: 'input small', value: d.memo || '', maxlength: 60, placeholder: '방법 메모 (선택)  예: ‘스—’ 소리로 20초', 'aria-label': `${d.name} 방법 메모`, oninput: ev => { d.memo = ev.target.value; touchSettings(); } }),
         h('div', { class: 'drow-2' },
           h('button', { class: 'chip sm', 'aria-pressed': String(!!d.timed), onclick: ev => { d.timed = !d.timed; ev.currentTarget.setAttribute('aria-pressed', String(d.timed)); touchSettings(); } }, icon('timer', 15), '시간 재기 버튼'),
           h('span', { class: 'sp' }),
-          h('button', { class: 'icon-btn', 'aria-label': '위로', disabled: i === 0, onclick: () => { const a = S.settings.drills; [a[i - 1], a[i]] = [a[i], a[i - 1]]; touchSettings(); draw(); } }, icon('up', 19)),
-          h('button', { class: 'icon-btn', 'aria-label': '아래로', disabled: i === S.settings.drills.length - 1, onclick: () => { const a = S.settings.drills; [a[i + 1], a[i]] = [a[i], a[i + 1]]; touchSettings(); draw(); } }, icon('dn', 19)),
+          h('button', { class: 'icon-btn', 'aria-label': `${d.name} 위로`, disabled: i === 0, onclick: () => { const a = S.settings.drills; [a[i - 1], a[i]] = [a[i], a[i - 1]]; touchSettings(); draw(); } }, icon('up', 19)),
+          h('button', { class: 'icon-btn', 'aria-label': `${d.name} 아래로`, disabled: i === S.settings.drills.length - 1, onclick: () => { const a = S.settings.drills; [a[i + 1], a[i]] = [a[i], a[i + 1]]; touchSettings(); draw(); } }, icon('dn', 19)),
           h('button', { class: 'icon-btn', 'aria-label': `${d.name} 항목 지우기`, onclick: () => {
             const a = S.settings.drills; const [gone] = a.splice(i, 1);
             const te = S.days[todayStr()];
@@ -2476,7 +2495,7 @@ function revealPreview(start) {
   const pv = $('.cal-body .pv-head');
   if (!pv) return;
   const r = pv.getBoundingClientRect(), vh = window.innerHeight;
-  if (start || r.top < 60 || r.bottom > vh - 150) window.scrollTo({ top: r.top + window.scrollY - 70, behavior: 'smooth' });
+  if (start || r.top < 60 || r.bottom > vh - 150) window.scrollTo({ top: r.top + window.scrollY - 70, behavior: smooth() });
 }
 function moveMonth(delta) {
   let { y, m } = S.cal;
@@ -2513,7 +2532,9 @@ function MonthPanel() {
   for (let d = 1; d <= daysIn; d++) {
     const key = prefix + pad(d), e = S.days[key], has = hasContent(e), dow = (startDow + d - 1) % 7;
     const cls = ['cell', dow === 0 ? 'sun' : '', dow === 6 ? 'sat' : '', has ? 'has' : '', key === today ? 'today' : '', key === S.cal.sel ? 'sel' : ''].filter(Boolean).join(' ');
-    grid.append(h('button', { class: cls, 'data-r': has && e.rating ? e.rating : null, disabled: key > today, 'aria-pressed': String(key === S.cal.sel), 'aria-label': `${m + 1}월 ${d}일${has ? ', 기록 있음' : ''}`, onclick: () => { S.cal.sel = key; drawCalBody($('.cal-body')); revealPreview(); } },
+    const said = [`${m + 1}월 ${d}일 ${WD[dow]}요일`, key === today ? '오늘' : ''];
+    if (has) said.push(e.rating ? `만족도 ${RATE_LABELS[e.rating - 1]}` : '기록 있음', e.bad.concat(e.fb).some(x => !x.resolved) ? '아쉬운 점·피드백 있음' : '', drillsAllDone(key) ? '기초 연습 완료' : '', e.recs.length ? `녹음 ${e.recs.length}개` : '');
+    grid.append(h('button', { class: cls, 'data-fk': 'cal-' + key, 'data-r': has && e.rating ? e.rating : null, disabled: key > today, 'aria-pressed': String(key === S.cal.sel), 'aria-label': said.filter(Boolean).join(', '), onclick: () => { S.cal.sel = key; drawCalBody($('.cal-body')); revealPreview(); } },
       h('span', { class: 'n' }, d),
       h('span', { class: 'ind' },
         has && e.bad.concat(e.fb).some(x => !x.resolved) ? h('i', { class: 'i-tri' }) : null,
@@ -2571,7 +2592,7 @@ function WeeksStrip() {
     const e = S.days[d], has = hasContent(e);
     const lvl = !has ? 0 : e.minutes >= 60 ? 4 : e.minutes >= 30 ? 3 : e.minutes > 0 || drillsAllDone(d) ? 2 : 1;
     const dd = d;
-    grid.append(h('button', { class: 'wk' + (dd === S.cal.sel ? ' sel' : ''), 'data-l': lvl, 'aria-label': `${fmtMD(dd)}${has ? ', 기록 있음' : ''}`, onclick: () => { const p = parseYmd(dd); S.cal.y = p.getFullYear(); S.cal.m = p.getMonth(); S.cal.sel = dd; render(); revealPreview(true); } }));
+    grid.append(h('button', { class: 'wk' + (dd === S.cal.sel ? ' sel' : ''), 'data-l': lvl, 'aria-label': `${fmtMD(dd)}${has ? (e.minutes ? `, 연습 ${fmtMin(e.minutes)}` : ', 기록 있음') : ''}`, onclick: () => { const p = parseYmd(dd); S.cal.y = p.getFullYear(); S.cal.m = p.getMonth(); S.cal.sel = dd; render(); revealPreview(true); } }));
     if (has) n++;
     d = addDays(d, 1);
   }
@@ -2726,8 +2747,8 @@ function FbItem({ date, kind, it }) {
       h('button', { class: 'fbi-text', onclick: () => openItem(date, kind, it.id) }, it.pinned ? h('span', { class: 'hl' }, it.text) : it.text),
       h('div', { class: 'fbi-meta' }, h('span', null, KIND[kind].label), it.tag ? h('span', { class: 'tag' }, it.tag) : null, kind === 'fb' && it.from ? h('span', null, it.from) : null, it.resolved && it.resolvedOn ? h('span', { class: 'ok-mark' }, `${fmtMD(it.resolvedOn)} 해결`) : null),
       h('div', { class: 'fbi-acts' },
-        h('button', { class: 'mini pin', 'aria-pressed': String(!!it.pinned), onclick: () => { mutItem(date, kind, it.id, c => { c.pinned = !c.pinned; }); render(); } }, icon('pin', 15), it.pinned ? '고정됨' : '고정'),
-        kind !== 'good' ? h('button', { class: 'mini ok', 'aria-pressed': String(!!it.resolved), onclick: () => {
+        h('button', { class: 'mini pin', 'data-fk': `fb-pin-${it.id}`, 'aria-pressed': String(!!it.pinned), onclick: () => { mutItem(date, kind, it.id, c => { c.pinned = !c.pinned; }); render(); } }, icon('pin', 15), it.pinned ? '고정됨' : '고정'),
+        kind !== 'good' ? h('button', { class: 'mini ok', 'data-fk': `fb-ok-${it.id}`, 'aria-pressed': String(!!it.resolved), onclick: () => {
           const wasOpen = !it.resolved;
           mutItem(date, kind, it.id, c => { c.resolved = !c.resolved; if (c.resolved) c.resolvedOn = todayStr(); else delete c.resolvedOn; });
           render();
@@ -3363,7 +3384,7 @@ function bindViewport() {
       if (document.activeElement !== el) return;
       const vh = vv ? vv.height : window.innerHeight;
       const r = el.getBoundingClientRect();
-      if (r.bottom > vh - 24 || r.top < 60) el.scrollIntoView({ block: el.tagName === 'TEXTAREA' && r.height > vh * 0.5 ? 'start' : 'center', behavior: 'smooth' });
+      if (r.bottom > vh - 24 || r.top < 60) el.scrollIntoView({ block: el.tagName === 'TEXTAREA' && r.height > vh * 0.5 ? 'start' : 'center', behavior: smooth() });
     }, 320);
   });
 }
@@ -3380,7 +3401,7 @@ function bindGlobal() {
     haptic(5);
     if (S.tab === t) {
       if (t === 'today' && S.date !== todayStr()) { goDate(todayStr()); return; }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: smooth() });
       return;
     }
     if (t === 'today' && S.date !== todayStr() && S.follow) S.date = todayStr();
