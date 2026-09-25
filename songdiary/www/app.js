@@ -1583,7 +1583,7 @@ function SongSec(date, e) {
       const art = L && L.cat && L.cat.art;
       return h('li', { class: 'song' },
         art ? artThumb(art, 40) : null,
-        h('button', { class: 'song-btn', onclick: () => openSongEntry(date, s.id) },
+        h('button', { class: 'song-btn', 'data-fk': 'sentry-' + s.id, onclick: () => openSongEntry(date, s.id) },
           h('span', { class: 'song-t' }, s.title),
           sub ? h('span', { class: 'song-a' }, sub) : null,
           s.note ? h('span', { class: 'song-n' }, s.note) : null),
@@ -1639,7 +1639,7 @@ function ItemList(date, e, kind) {
   return h('div', { class: 'ilist k-' + kind },
     h('div', { class: 'ilist-h' }, mark(kind), h('h3', null, KIND[kind].label), items.length ? h('span', { class: 'cnt' }, items.length) : null),
     items.length ? h('ul', { class: 'items' }, items.map(it => h('li', { class: (it.pinned ? 'pinned' : '') + (it.resolved ? ' resolved' : '') },
-      h('button', { class: 'item-btn', onclick: () => openItem(date, kind, it.id) },
+      h('button', { class: 'item-btn', 'data-fk': 'item-' + it.id, onclick: () => openItem(date, kind, it.id) },
         h('span', { class: 'item-text' }, it.pinned ? h('span', { class: 'hl' }, it.text) : it.text),
         it.tag ? h('span', { class: 'tag' }, it.tag) : null,
         kind === 'fb' && it.from ? h('span', { class: 'from' }, it.from) : null,
@@ -2685,7 +2685,7 @@ function EntryCard(d) {
   const all = e.bad.concat(e.fb), open = all.filter(x => !x.resolved);
   const issues = all.length;
   const first = open[0] || all[0];
-  return h('button', { class: 'ecard', onclick: () => goDate(d) },
+  return h('button', { class: 'ecard', 'data-fk': 'entry-' + d, onclick: () => goDate(d) },
     h('div', { class: 'ec-d' + dowClass(d) }, h('b', null, dt.getDate()), h('span', null, WD[dt.getDay()])),
     h('div', { class: 'ec-b' },
       h('div', { class: 'ec-top' },
@@ -2785,7 +2785,7 @@ function FbItem({ date, kind, it }) {
   return h('div', { class: `fbi k-${kind}` + (it.resolved ? ' resolved' : '') },
     h('span', { class: 'fbi-bar' }),
     h('div', { style: 'min-width:0' },
-      h('button', { class: 'fbi-text', onclick: () => openItem(date, kind, it.id) }, it.pinned ? h('span', { class: 'hl' }, it.text) : it.text),
+      h('button', { class: 'fbi-text', 'data-fk': 'fbi-' + it.id, onclick: () => openItem(date, kind, it.id) }, it.pinned ? h('span', { class: 'hl' }, it.text) : it.text),
       h('div', { class: 'fbi-meta' }, h('span', null, KIND[kind].label), it.tag ? h('span', { class: 'tag' }, it.tag) : null, kind === 'fb' && it.from ? h('span', null, it.from) : null, it.resolved && it.resolvedOn ? h('span', { class: 'ok-mark' }, `${fmtMD(it.resolvedOn)} 해결`) : null),
       h('div', { class: 'fbi-acts' },
         h('button', { class: 'mini pin', 'data-fk': `fb-pin-${it.id}`, 'aria-pressed': String(!!it.pinned), onclick: () => { mutItem(date, kind, it.id, c => { c.pinned = !c.pinned; }); render(); } }, icon('pin', 15), it.pinned ? '고정됨' : '고정'),
@@ -2862,7 +2862,7 @@ function SongListPanel() {
     used.length ? h('div', { class: 'chips scroll', style: 'padding-top:14px;padding-bottom:4px' },
       h('button', { class: 'chip sm', 'aria-pressed': String(!S.lib.status), onclick: () => { S.lib.status = null; render(); } }, `전체 ${all.length}`),
       used.map(st => h('button', { class: 'chip sm', 'aria-pressed': String(S.lib.status === st), onclick: () => { S.lib.status = S.lib.status === st ? null : st; render(); } }, `${st} ${all.filter(L => L.status === st).length}`))) : null,
-    lib.map(L => h('button', { class: 'song-card' + (L.cat && L.cat.art ? ' has-art' : ''), onclick: () => openSongDetail(L.key) },
+    lib.map(L => h('button', { class: 'song-card' + (L.cat && L.cat.art ? ' has-art' : ''), 'data-fk': 'song-' + L.key, onclick: () => openSongDetail(L.key) },
       L.cat && L.cat.art ? artThumb(L.cat.art, 48) : null,
       h('span', { class: 'sc-t' }, L.title, L.status ? h('span', { class: 'st-pill', 'data-st': SONG_STATUS.indexOf(L.status) }, L.status) : null),
       h('span', { class: 'sc-days' }, L.dates.length, h('small', null, '일 연습')),
