@@ -903,17 +903,16 @@ body::before{content:"";position:fixed;top:0;left:0;right:0;height:var(--sat);ba
 
 /* ================= 1.4: 오늘 — the day in four parts (시작 전 · 연습 · 노래와 녹음 · 끝나고) ================= */
 /* focus moves (TalkBack, keyboard) stop below the top bar and the section bar */
-html:has(> body[data-tab="today"]:not(.kb)){scroll-padding-top:calc(var(--sat) + 118px)}
 .v-today .day-head{padding:4px 0 12px}
 /* the practice clock and 멈춤 규칙: the day's own card, above its parts */
 .t-session{margin-top:6px;padding-top:0;padding-bottom:0}
 .t-session .timer-row{padding:14px 0}
 .t-session .stop-card{padding:6px 0 10px}
 /* the section bar: sticks under the top bar, marks the part in view */
-.tnav{position:sticky;top:calc(var(--sat) + 54px);z-index:18;margin:0 -12px;padding:4px 12px 8px;background:var(--bg);background:color-mix(in srgb,var(--bg) 95%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.tnav{position:sticky;top:calc(var(--sat) + var(--tb-h,54px));z-index:18;margin:0 -12px;padding:4px 12px 8px;background:var(--bg);background:color-mix(in srgb,var(--bg) 95%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
 .tnav.stuck{box-shadow:0 1px 0 var(--rule-2)}
 .tnav-in{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;padding:3px;border-radius:14px;background:color-mix(in srgb,var(--ink) 7%,transparent)}
-.tnav button{min-width:0;min-height:38px;border:0;border-radius:11px;background:transparent;color:var(--ink-2);font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 2px;transition:background-color .15s,color .15s}
+.tnav button{min-width:0;min-height:38px;border:0;border-radius:11px;background:transparent;color:var(--ink-2);font-size:14px;font-weight:600;white-space:normal;line-height:1.15;word-break:keep-all;overflow:hidden;padding:2px;transition:background-color .15s,color .15s}
 .tnav button[aria-current="true"]{background:var(--seg-on,var(--sheet));color:var(--ink);font-weight:700;box-shadow:0 1px 2px rgba(0,0,0,.1),0 0 0 1px var(--rule-2)}
 body.kb .tnav{position:relative;top:auto}
 /* a part: its heading on the page, its sections on one card */
@@ -944,8 +943,8 @@ body.kb .tnav{position:relative;top:auto}
 /* grafts: 오늘의 기록 as a two-column checklist; 1년 전 오늘 as its own card at the end */
 .v-today .rec-card{padding:10px 12px 12px}
 .v-today .rec-card .chips{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.v-today .chip.rc{justify-content:flex-start;border-radius:10px;padding:0 10px;min-width:0;white-space:normal;line-height:1.25;text-align:left}
-.v-today .chip.rc:not(.ok)::before{content:'';width:12px;height:12px;margin:0 3px 0 1px;border:1.5px solid var(--ink-4);border-radius:50%;flex:none}
+.v-today .chip.rc{justify-content:flex-start;border-radius:10px;padding:5px 10px;min-width:0;white-space:normal;line-height:1.25;text-align:left}
+.v-today .chip.rc:not(.ok)::before{content:'';width:12px;height:12px;margin:0 1px;border:1.5px solid var(--ink-4);border-radius:50%;flex:none}
 .t-memory{margin-top:16px}
 .t-memory > .sec{padding:0;border:0}
 .t-memory .memory{background:var(--sheet);box-shadow:var(--shadow);border-radius:22px;padding:14px 18px}

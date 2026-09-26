@@ -46,6 +46,13 @@ Capacitor(Android) 앱 `com.songdiary.app`의 웹 소스와 APK 재빌드 도구
   한 옥타브 차이는 같은 음으로 봄.
 - 스케일 꼭대기 음을 그날 ‘최고음’으로 바로 기록하고, 기초 연습 항목에서 열면 1회 체크도 돼요.
 
+## 오늘 화면
+
+하루의 흐름대로 네 부분으로 나눴어요. 맨 위 카드는 연습 시간과 ⛔ 멈춤 규칙(하루 전체에 해당)이고,
+그 아래 **시작 전**(지난번의 나, 컨디션, 오늘의 목표) · **연습**(기초 연습 / 노래 전 루틴) ·
+**노래와 녹음** · **끝나고**(끝난 후 목 상태, 돌아보기, 메모, 요약)가 각각 제목과 카드로 이어져요.
+날짜 아래 막대(시작 전 | 연습 | 노래·녹음 | 끝나고)는 스크롤해도 위에 붙어 있고, 지금 보는 부분을 표시하며 누르면 그 부분으로 가요.
+
 ## 노래 전 루틴 (강의 연습법)
 
 강의에서 정리한 연습법을 따로 문서로 두지 않고 앱의 자리마다 넣었어요. 내용과 숫자는 그대로이고,
@@ -77,7 +84,7 @@ keytool -genkeypair -alias songdiary -keyalg RSA -keysize 2048 -validity 36500 \
 # 기존 APK의 안드로이드 부분 + www/ → 새 APK (정렬 + v2 서명)
 SONGDIARY_STOREPASS=... python3 songdiary/tools/build_apk.py \
   --base 노래일기-1.0.0.apk --www songdiary/www --keystore songdiary-release.p12 \
-  --version-name 1.3.0 --version-code 4 --out 노래일기-1.3.0.apk
+  --version-name 1.3.1 --version-code 5 --out 노래일기-1.3.1.apk
 ```
 
 - 필요한 것: Python 3.8+, `cryptography` 패키지

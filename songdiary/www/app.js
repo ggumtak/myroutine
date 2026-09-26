@@ -995,7 +995,7 @@ window.addEventListener('scroll', () => { if (!spyQ) spyQ = requestAnimationFram
 window.addEventListener('scrollend', () => { if (navLock) { navLock = null; spyNav(); } });
 function TodayNav() {
   return h('nav', { class: 'tnav jump', 'aria-label': '오늘 기록 바로가기' },
-    h('div', { class: 'tnav-in' }, TGROUPS.map(g => h('button', { 'data-g': g.k, 'data-fk': `nav-${g.k}`, onclick: () => jumpPart(g.k) }, g.l))));
+    h('div', { class: 'tnav-in' }, TGROUPS.map(g => h('button', { 'data-g': g.k, 'data-fk': `nav-${g.k}`, onclick: () => jumpPart(g.k) }, g.l.split('·').flatMap((w, i) => (i ? ['·', h('wbr'), w] : [w]))))));
 }
 /* to one part of 오늘: its heading just under the bars, focus on it (TalkBack goes on from there) */
 function jumpPart(k) {
@@ -1434,7 +1434,7 @@ function SongSuggest(inp, opts) {
     if (r.top < vh * 0.42) return;
     const sb = inp.closest('.sheet-body');
     if (sb) sb.scrollBy({ top: r.top - sb.getBoundingClientRect().top - 8, behavior: smooth() });
-    else window.scrollBy({ top: r.top - 72, behavior: smooth() });
+    else window.scrollBy({ top: r.top - stickyBottom() - 8, behavior: smooth() });
   };
   const draw = () => {
     const q = inp.value.trim();
@@ -2237,6 +2237,7 @@ const cueText = c => `${c[0]}: ${c[1]}`;
 const isCue = l => PR.CUES.some(c => cueText(c) === l.trim());
 /* 오늘의 목표 = 오늘 집중할 것: one tap on a '노래할 때 기억할 것' line makes it the goal */
 function GoalSec(date, e) {
+  const past = date !== todayStr();
   const lines = e ? e.goal.split('\n').map(l => l.trim()) : [];
   const open = !!lsGet(LS_UI, {}).cueOpen;
   const chosen = i => lines.includes(cueText(PR.CUES[i]));
@@ -2255,16 +2256,16 @@ function GoalSec(date, e) {
         h('span', { class: 'cue-t' }, h('b', null, c[0]), ' ', c[1]), chosen(i) ? h('span', { class: 'pill blue' }, '오늘 집중') : null)),
       h('button', { class: 'link', 'data-fk': 'cue-list', 'aria-expanded': 'true', onclick: () => toggle(false) }, '접기'))
     : h('div', { class: 'chips scroll cue-chips' },
-      PR.CUES.map((c, i) => h('button', { class: 'chip sm', 'data-fk': `cue-${i}`, 'aria-pressed': String(chosen(i)), 'aria-label': `${cueText(c)}, 오늘 집중할 것으로 정하기`, onclick: () => pick(i, `cue-${i}`) }, c[0])),
+      PR.CUES.map((c, i) => h('button', { class: 'chip sm', 'data-fk': `cue-${i}`, 'aria-pressed': String(chosen(i)), 'aria-label': `${cueText(c)}, ${past ? '이 날' : '오늘'} 집중할 것으로 정하기`, onclick: () => pick(i, `cue-${i}`) }, c[0])),
       h('button', { class: 'chip sm', 'data-fk': 'cue-list', 'aria-expanded': 'false', 'aria-label': '노래할 때 기억할 것 모두 펼치기', onclick: () => toggle(true) }, '모두 보기', icon('chevd', 14)));
   return h('div', { class: 'sec', id: 'sec-goal' },
-    h('div', { class: 'sec-h' }, h('h3', null, '오늘의 목표'), h('span', { class: 'sec-note' }, '오늘 집중할 것 하나')),
-    autoTA({ class: 'input', rows: 1, placeholder: '예: 히싱 20초 넘기기, 후렴 음정 정확하게', value: e ? e.goal : '', 'data-fk': 'goal', 'aria-label': '오늘의 목표', oninput: ev => { ensureDay(date).goal = ev.target.value; touch(date); } }, 46),
+    h('div', { class: 'sec-h' }, h('h3', null, past ? '이 날의 목표' : '오늘의 목표'), h('span', { class: 'sec-note' }, past ? '이 날 집중한 것' : '오늘 집중할 것 하나')),
+    autoTA({ class: 'input', rows: 1, placeholder: '예: 히싱 20초 넘기기, 후렴 음정 정확하게', value: e ? e.goal : '', 'data-fk': 'goal', 'aria-label': past ? '이 날의 목표' : '오늘의 목표', oninput: ev => { ensureDay(date).goal = ev.target.value; touch(date); } }, 46),
     h('div', { class: 'cue-box' },
       h('div', { class: 'cue-h' }, h('span', { class: 'lbl' }, '노래할 때 기억할 것'), h('span', { class: 'sp' }),
         open ? null : h('button', { class: 'link', 'data-fk': 'cue-all', 'aria-label': '노래할 때 기억할 것 모두 펼치기', onclick: () => toggle(true) }, '모두 보기')),
       cues,
-      h('p', { class: 'hint cue-one' }, '한 번에 하나만: 눌러서 오늘 집중할 것으로 정해요')));
+      past ? null : h('p', { class: 'hint cue-one' }, '한 번에 하나만: 눌러서 오늘 집중할 것으로 정해요')));
 }
 function DrillSec(date) {
   const list = drillList(date);
@@ -2486,7 +2487,7 @@ function RecordCard(date, e) {
   ];
   const n = rows.filter(r => r[2]).length;
   return h('div', { class: 'rec-card' },
-    h('div', { class: 'lbl-row' }, h('span', { class: 'lbl' }, '오늘의 기록'), h('span', { class: 'sp' }), h('span', { class: 'hint' }, `${n}/${rows.length}`)),
+    h('div', { class: 'lbl-row' }, h('span', { class: 'lbl' }, date === todayStr() ? '오늘의 기록' : '이 날의 기록'), h('span', { class: 'sp' }), h('span', { class: 'hint' }, `${n}/${rows.length}`)),
     h('div', { class: 'chips' }, rows.map(([k, l, ok, fn]) => h('button', { class: 'chip sm rc' + (ok ? ' ok' : ''), 'data-fk': `rec-${k}`, 'aria-label': `${l}, ${ok ? '적었어요' : '아직 안 적었어요'}`, onclick: fn }, ok ? icon('check', 14) : null, l))),
     h('p', { class: 'hint' }, '빈칸을 누르면 바로 적는 곳으로 가요. 적은 내용은 아래 목록과 요약에 들어가요.'));
 }
@@ -2596,9 +2597,9 @@ function openWriter(date, key, label) {
 }
 function RatingRow(date, e) {
   const r = e ? e.rating : null;
-  const notes = h('div', { class: 'rating', role: 'radiogroup', 'aria-label': '오늘 연습 만족도' });
+  const notes = h('div', { class: 'rating', role: 'radiogroup', 'aria-label': date === todayStr() ? '오늘 연습 만족도' : '이 날 연습 만족도' });
   for (let i = 1; i <= 5; i++) notes.append(h('button', { class: 'rnote' + (r && i <= r ? ' on' : ''), role: 'radio', 'aria-checked': String(r === i), 'aria-label': `${i}점, ${RATE_LABELS[i - 1]}`, html: NOTE_SVG, onclick: () => { const d = ensureDay(date); d.rating = d.rating === i ? null : i; touch(date); if (d.rating) Sound.rate(i); render(); } }));
-  return h('div', { class: 'rating-wrap' }, h('span', { class: 'lbl' }, '오늘 연습은 어땠나요?'), h('div', { class: 'rating-line' }, notes, h('span', { class: 'rating-val' }, r ? RATE_LABELS[r - 1] : '')));
+  return h('div', { class: 'rating-wrap' }, h('span', { class: 'lbl' }, date === todayStr() ? '오늘 연습은 어땠나요?' : '이 날 연습은 어땠나요?'), h('div', { class: 'rating-line' }, notes, h('span', { class: 'rating-val' }, r ? RATE_LABELS[r - 1] : '')));
 }
 function deleteItem(date, kind, id) {
   const e = S.days[date];
@@ -4631,6 +4632,24 @@ function bindViewport() {
   window.addEventListener('resize', upd);
   document.addEventListener('focusout', () => setTimeout(upd, 60));
   upd();
+  const tb = $('.topbar');
+  const tbh = () => { if (tb) document.documentElement.style.setProperty('--tb-h', tb.offsetHeight + 'px'); };
+  if (tb && window.ResizeObserver) new ResizeObserver(tbh).observe(tb);
+  tbh();
+  /* 오늘: a control reached by keyboard / TalkBack / switch focus is not left under the sticky bars
+     (not the part headings — the bar's jump already places them — and not the bars themselves) */
+  document.addEventListener('focusin', ev => {
+    const el = ev.target;
+    if (S.tab !== 'today' || document.body.classList.contains('kb') || !el || !el.closest || !el.closest('#view') || el.closest('.tnav') || el.classList.contains('tg-t')) return;
+    let fv = false;
+    try { fv = el.matches(':focus-visible'); } catch (e) { fv = false; }
+    if (!fv) return;
+    requestAnimationFrame(() => {
+      if (document.activeElement !== el) return;
+      const t = el.getBoundingClientRect().top, sb = stickyBottom();
+      if (t < sb) window.scrollBy(0, t - sb - 8);
+    });
+  });
   /* keep what you're typing above the keyboard */
   document.addEventListener('focusin', ev => {
     const el = ev.target;
@@ -4639,7 +4658,7 @@ function bindViewport() {
       if (document.activeElement !== el) return;
       const vh = vv ? vv.height : window.innerHeight;
       const r = el.getBoundingClientRect();
-      if (r.bottom > vh - 24 || r.top < 60) el.scrollIntoView({ block: el.tagName === 'TEXTAREA' && r.height > vh * 0.5 ? 'start' : 'center', behavior: smooth() });
+      if (r.bottom > vh - 24 || r.top < stickyBottom() + 6) el.scrollIntoView({ block: el.tagName === 'TEXTAREA' && r.height > vh * 0.5 ? 'start' : 'center', behavior: smooth() });
     }, 320);
   });
 }
