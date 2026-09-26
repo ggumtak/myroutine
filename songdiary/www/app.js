@@ -897,6 +897,7 @@ function autoTA(attrs, minH) {
   ta.addEventListener('input', fit);
   ta.addEventListener('focus', fit);
   requestAnimationFrame(fit);
+  if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(() => { if (ta.isConnected) fit(); });
   return ta;
 }
 /* Enter adds an item — safe with Korean IME composition (Chrome / Safari differ) */
@@ -950,7 +951,7 @@ function render(opts = {}) {
   window.scrollTo(0, opts.top ? 0 : y);
   if (opts.focus) { const el = main.querySelector(`[data-fk="${opts.focus}"]`); if (el) el.focus({ preventScroll: true }); }
   else if (keep) {
-    const find = k => $$('button,[role="slider"],select', main).find(x => ctlKey(x) === k && !x.disabled);
+    const find = k => $$('button,[role="slider"],select,.tg-t', main).find(x => ctlKey(x) === k && !x.disabled);
     const dm = /^dr-(.+)-(plus|staff|minus|fold|unfold|timer|keys|pron|rec)$/.exec(keep);
     const el = find(keep) || (dm && (find(`dr-${dm[1]}-fold`) || find(`dr-${dm[1]}-unfold`) || find(`dr-${dm[1]}-plus`) || find(`dr-${dm[1]}-minus`) || find(`grp-${grpOf(dm[1]) || 'rx'}`)));
     if (el) el.focus({ preventScroll: true });
@@ -958,6 +959,7 @@ function render(opts = {}) {
   Player.sync();
   tickTimer();
   updateSave();
+  spyNav();
   S.popNote = null; S.justDone = null;
 }
 function go(tab) { S.tab = tab; render({ top: true }); }
@@ -965,7 +967,45 @@ function go(tab) { S.tab = tab; render({ top: true }); }
 function goSection(id) {
   if (S.date !== todayStr()) { S.date = todayStr(); S.follow = true; }
   go('today');
-  requestAnimationFrame(() => { const el = document.getElementById(id); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 64, behavior: smooth() }); });
+  requestAnimationFrame(() => { const el = document.getElementById(id); if (el) scrollToEl(el); });
+}
+/* where the sticky bars end: the top bar, and on 오늘 the bar of its four parts */
+function stickyBottom() {
+  const tb = $('.topbar'), nav = S.tab === 'today' && !document.body.classList.contains('kb') ? $('.tnav') : null;
+  return (tb ? tb.getBoundingClientRect().bottom : 54) + (nav ? nav.offsetHeight : 0);
+}
+function scrollToEl(el, gap = 10) { window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - stickyBottom() - gap), behavior: smooth() }); }
+/* 오늘's section bar: the part in view is marked (aria-current) */
+let navLock = null, spyQ = 0;
+function spyNav() {
+  const nav = $('.tnav');
+  if (!nav) return;
+  const gs = $$('.tgrp');
+  if (!gs.length) return;
+  const line = stickyBottom() + Math.min(140, window.innerHeight * 0.22);
+  let cur = gs[0].dataset.g;
+  for (const g of gs) if (g.getBoundingClientRect().top <= line) cur = g.dataset.g;
+  if (window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 6) cur = gs[gs.length - 1].dataset.g;
+  if (navLock && Date.now() < navLock.until) cur = navLock.g;
+  $$('button', nav).forEach(b => { if (b.dataset.g === cur) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); });
+  const tb = $('.topbar');
+  nav.classList.toggle('stuck', window.scrollY > 0 && !!tb && nav.getBoundingClientRect().top <= tb.getBoundingClientRect().bottom + 0.5);
+}
+window.addEventListener('scroll', () => { if (!spyQ) spyQ = requestAnimationFrame(() => { spyQ = 0; spyNav(); }); }, { passive: true });
+window.addEventListener('scrollend', () => { if (navLock) { navLock = null; spyNav(); } });
+function TodayNav() {
+  return h('nav', { class: 'tnav jump', 'aria-label': '오늘 기록 바로가기' },
+    h('div', { class: 'tnav-in' }, TGROUPS.map(g => h('button', { 'data-g': g.k, 'data-fk': `nav-${g.k}`, onclick: () => jumpPart(g.k) }, g.l))));
+}
+/* to one part of 오늘: its heading just under the bars, focus on it (TalkBack goes on from there) */
+function jumpPart(k) {
+  const el = document.getElementById(`g-${k}`);
+  if (!el) return;
+  navLock = { g: k, until: Date.now() + 1200 };
+  spyNav();
+  scrollToEl(el, 8);
+  const t = $('.tg-t', el);
+  if (t) t.focus({ preventScroll: true });
 }
 function goDate(d) {
   if (d > todayStr()) return;
@@ -1954,23 +1994,37 @@ function TodayView() {
         !isToday ? h('button', { class: 'pill blue', onclick: () => goDate(today) }, '오늘로') : null)),
     h('button', { class: 'navbtn', 'aria-label': '하루 뒤', disabled: isToday, onclick: () => goDate(addDays(date, 1)) }, icon('right', 24)));
   swipe(head, () => { if (!isToday) goDate(addDays(date, 1)); }, () => goDate(addDays(date, -1)));
-  const jumps = [['sec-cond', '컨디션'], ['sec-drills', '기초 연습'], ['sec-songs', '노래'], ['sec-recs', '녹음'], ['sec-reflect', '돌아보기']];
-  const jump = h('div', { class: 'chips scroll jump' }, jumps.map(([id, l]) => h('button', { class: 'chip sm', onclick: () => { const el = document.getElementById(id); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 64, behavior: smooth() }); } }, l)));
-  const page = h('div', { class: 'page' },
-    isToday ? StopCard(date) : null,
-    TimerSec(date, e, isToday),
-    isToday && !entryDates().length ? h('div', { class: 'sec welcome' }, h('p', { class: 'hand' }, '첫 장이에요. 노래할 때마다 여기에 적어 두세요.'), h('p', { class: 'hint', style: 'margin-top:6px' }, '기초 연습 항목과 횟수는 ‘기초 연습’ 옆 편집에서 바꿀 수 있어요. 적는 내용은 모두 이 폰에 자동으로 저장돼요.'),
-      routineOn() ? null : h('button', { class: 'btn soft sm', style: 'margin-top:10px', onclick: openRoutineInsert }, '강의 노래 전 루틴 넣기')) : null,
-    isToday ? PinsSec() : null,
-    isToday ? LastSec(date) : null,
-    isToday ? MemorySec(date) : null,
-    CondSec(date, e), GoalSec(date, e), DrillSec(date), SongSec(date, e), RecSec(date, e), ReflectSec(date, e));
-  return h('div', { class: 'v-today' }, isToday ? (WhatsNew() || BackupNudge()) : null, head, jump, page,
-    h('div', { class: 'today-foot' },
-      h('button', { class: 'btn soft sm', onclick: () => copySummary(date) }, icon('copy', 18), '요약 복사'),
-      h('button', { class: 'btn soft sm', onclick: () => shareSummary(date) }, icon('send', 18), '요약 보내기'),
-      h('span', { class: 'hint' }, '선생님께 카톡으로 보내거나 메모장에 붙여 넣을 수 있어요')));
+  const welcome = isToday && !entryDates().length ? h('div', { class: 'sec welcome' }, h('p', { class: 'hand' }, '첫 장이에요. 노래할 때마다 여기에 적어 두세요.'), h('p', { class: 'hint', style: 'margin-top:6px' }, '기초 연습 항목과 횟수는 ‘기초 연습’ 옆 편집에서 바꿀 수 있어요. 적는 내용은 모두 이 폰에 자동으로 저장돼요.'),
+    routineOn() ? null : h('button', { class: 'btn soft sm', style: 'margin-top:10px', onclick: openRoutineInsert }, '강의 노래 전 루틴 넣기')) : null;
+  const memo = isToday ? MemorySec(date) : null;
+  /* one part of the day: a heading on the page, its sections on one card */
+  const part = (k, sub, ...secs) => h('section', { class: 'tgrp', id: `g-${k}`, 'data-g': k, 'aria-labelledby': `gh-${k}` },
+    h('div', { class: 'tg-head' }, h('h2', { class: 'tg-t', id: `gh-${k}`, 'data-fk': `gh-${k}`, tabindex: '-1' }, TGROUPS.find(g => g.k === k).name), h('p', { class: 'tg-sub' }, sub)),
+    h('div', { class: 'page tg-card' }, secs));
+  return h('div', { class: 'v-today' }, isToday ? (WhatsNew() || BackupNudge()) : null, head,
+    TodayNav(),
+    /* the practice clock and the stop rules belong to the whole day, so they come before its parts */
+    h('div', { class: 'page t-session' }, TimerSec(date, e, isToday), isToday ? StopCard(date) : null),
+    part('before', isToday ? '목 상태를 살피고 집중할 것 하나' : '그날의 목 상태와 목표',
+      welcome, isToday ? PinsSec() : null, isToday ? LastSec(date) : null, CondSec(date, e), GoalSec(date, e)),
+    part('practice', '몸을 풀고 소리를 만들어요', DrillSec(date)),
+    part('sing', '부르고, 녹음해서 들어 봐요', SongSec(date, e), RecSec(date, e)),
+    part('after', isToday ? '목 상태를 적고 오늘을 돌아봐요' : '그날을 돌아봐요',
+      AfterSec(date, e), ReflectSec(date, e), NotesSec(date, e),
+      h('div', { class: 'sec today-foot' },
+        h('div', { class: 'foot-btns' },
+          h('button', { class: 'btn soft', onclick: () => copySummary(date) }, icon('copy', 18), '요약 복사'),
+          h('button', { class: 'btn soft', onclick: () => shareSummary(date) }, icon('send', 18), '요약 보내기')),
+        h('p', { class: 'hint' }, '선생님께 카톡으로 보내거나 메모장에 붙여 넣을 수 있어요'))),
+    memo ? h('div', { class: 't-memory' }, memo) : null);
 }
+/* 오늘, in the order a practice day goes (the bar's labels are short; headings say it in full) */
+const TGROUPS = [
+  { k: 'before', l: '시작 전', name: '시작 전' },
+  { k: 'practice', l: '연습', name: '연습' },
+  { k: 'sing', l: '노래·녹음', name: '노래와 녹음' },
+  { k: 'after', l: '끝나고', name: '끝나고' }
+];
 /* "한 달 전 오늘" — a look back at the same day a week / month / year ago */
 function MemorySec(date) {
   const cands = [[365, '1년 전 오늘'], [180, '반년 전 오늘'], [90, '3달 전 오늘'], [30, '한 달 전 오늘'], [7, '일주일 전 오늘']];
@@ -2119,14 +2173,14 @@ function openAfterSheet(date) {
   s = openSheet({ title: `${fmtMD(date)} 끝난 후 목 상태`, body, foot: [later, ok], onClose: () => {
     const e = S.days[date];
     render();
-    if (e && e.after != null) toast(e.after <= 5 && date === todayStr() ? '적었어요 · 내일은 ①~③단계만 해요' : '적었어요');
+    if (e && e.after != null) toast(e.after <= 5 && date === todayStr() ? '적었어요 · 내일은 ①~③단계만 해요' : '적었어요', date === todayStr() && S.tab === 'today' && S.date === date ? { action: '돌아보기', onAction: () => jumpPart('after') } : {});
   } });
 }
 function PinsSec() {
   const pins = allItems().filter(x => x.it.pinned && !x.it.resolved);
   if (!pins.length) return null;
   return h('div', { class: 'sec' },
-    h('div', { class: 'sec-h' }, h('h2', null, '잊지 말 것'), h('span', { class: 'sec-note' }, `${pins.length}개`)),
+    h('div', { class: 'sec-h' }, h('h3', null, '잊지 말 것'), h('span', { class: 'sec-note' }, `${pins.length}개`)),
     h('ul', { class: 'pin-list' },
       pins.slice(0, 5).map(x => h('li', null, h('button', { class: 'pin-item', onclick: () => openItem(x.date, x.kind, x.it.id) }, icon('pin', 16), h('span', { style: 'flex:1;min-width:0' }, h('span', { class: 'hl' }, x.it.text)), x.it.tag ? h('span', { class: 'tag' }, x.it.tag) : null))),
       pins.length > 5 ? h('li', null, h('button', { class: 'link', onclick: () => { Object.assign(S.fb, { pinned: true, status: 'open', kinds: ['bad', 'fb', 'good'], tag: null }); go('feedback'); } }, `${pins.length - 5}개 더 보기`)) : null));
@@ -2139,7 +2193,7 @@ function LastSec(date) {
   const gap = daysBetween(prev, date);
   if (!pe.next.trim() && !items.length && gap < 3) return null;
   return h('div', { class: 'sec' },
-    h('div', { class: 'sec-h' }, h('h2', null, `${fmtMD(prev)}의 나에게서`), h('span', { class: 'sp' }), gap >= 2 ? h('span', { class: 'sec-note' }, `${gap}일 전`) : null),
+    h('div', { class: 'sec-h' }, h('h3', null, `${fmtMD(prev)}의 나에게서`), h('span', { class: 'sp' }), gap >= 2 ? h('span', { class: 'sec-note' }, `${gap}일 전`) : null),
     pe.next.trim() ? h('div', { class: 'slip' }, h('p', { class: 'hand' }, pe.next.trim())) : (gap >= 3 ? h('p', { class: 'hint' }, `마지막 기록이 ${gap}일 전이에요. 오늘은 가볍게 풀어 봐요.`) : null),
     items.length ? h('div', { style: 'margin-top:14px' },
       h('div', { class: 'lbl' }, '지난번에 아쉬웠던 것, 오늘은 어땠나요?'),
@@ -2160,7 +2214,7 @@ function CondSec(date, e) {
   const cups = h('div', { class: 'cups' });
   for (let i = 1; i <= 8; i++) cups.append(h('button', { class: 'cup' + (i <= w ? ' on' : ''), 'aria-label': `물 ${i}잔`, 'aria-pressed': String(i <= w), html: CUP_SVG, onclick: () => setDay(d => { d.water = d.water === i ? i - 1 : i; }) }));
   return h('div', { class: 'sec', id: 'sec-cond' },
-    h('div', { class: 'sec-h' }, h('h2', null, '컨디션')),
+    h('div', { class: 'sec-h' }, h('h3', null, '컨디션')),
     h('div', { class: 'cond-line' }, h('span', { class: 'lbl' }, '목 상태'), bars, h('span', { class: 'val' }, c ? COND_LABELS[c - 1] : '')),
     h('div', { class: 'cond-chips chips' }, THROAT.map(t => {
       const on = !!(e && e.throat.includes(t));
@@ -2204,13 +2258,13 @@ function GoalSec(date, e) {
       PR.CUES.map((c, i) => h('button', { class: 'chip sm', 'data-fk': `cue-${i}`, 'aria-pressed': String(chosen(i)), 'aria-label': `${cueText(c)}, 오늘 집중할 것으로 정하기`, onclick: () => pick(i, `cue-${i}`) }, c[0])),
       h('button', { class: 'chip sm', 'data-fk': 'cue-list', 'aria-expanded': 'false', 'aria-label': '노래할 때 기억할 것 모두 펼치기', onclick: () => toggle(true) }, '모두 보기', icon('chevd', 14)));
   return h('div', { class: 'sec', id: 'sec-goal' },
-    h('div', { class: 'sec-h' }, h('h2', null, '오늘의 목표'), h('span', { class: 'sec-note' }, '오늘 집중할 것 하나')),
+    h('div', { class: 'sec-h' }, h('h3', null, '오늘의 목표'), h('span', { class: 'sec-note' }, '오늘 집중할 것 하나')),
     autoTA({ class: 'input', rows: 1, placeholder: '예: 히싱 20초 넘기기, 후렴 음정 정확하게', value: e ? e.goal : '', 'data-fk': 'goal', 'aria-label': '오늘의 목표', oninput: ev => { ensureDay(date).goal = ev.target.value; touch(date); } }, 46),
     h('div', { class: 'cue-box' },
-      h('div', { class: 'cue-h' }, h('span', { class: 'lbl' }, '노래할 때 기억할 것'), h('span', { class: 'hint' }, '눌러서 오늘 집중할 것으로'), h('span', { class: 'sp' }),
+      h('div', { class: 'cue-h' }, h('span', { class: 'lbl' }, '노래할 때 기억할 것'), h('span', { class: 'sp' }),
         open ? null : h('button', { class: 'link', 'data-fk': 'cue-all', 'aria-label': '노래할 때 기억할 것 모두 펼치기', onclick: () => toggle(true) }, '모두 보기')),
       cues,
-      h('p', { class: 'hint cue-one' }, PR.CUE_ONE)));
+      h('p', { class: 'hint cue-one' }, '한 번에 하나만: 눌러서 오늘 집중할 것으로 정해요')));
 }
 function DrillSec(date) {
   const list = drillList(date);
@@ -2225,7 +2279,7 @@ function DrillSec(date) {
   const hints = [];
   if (rOn) {
     if (rest != null) hints.push(h('p', { class: 'drill-hint warn' }, isToday ? `오늘은 ①~③단계만 해요 (어제 끝난 후 목 상태 ${rest}점)` : `이 날은 ①~③단계만 한 날 (전날 끝난 후 목 상태 ${rest}점)`));
-    else hints.push(h('p', { class: 'drill-hint' }, '노래 전 루틴 약 28분 · 발음 찾기 5분 (루틴 4단계 뒤에) ', h('button', { class: 'link', 'data-fk': 'drills-guide', onclick: openGuide }, '전체 보기')));
+    else hints.push(h('p', { class: 'drill-hint' }, '노래 전 루틴 약 28분 · 발음 찾기 5분 ', h('button', { class: 'link', 'data-fk': 'drills-guide', onclick: openGuide }, '전체 보기')));
   }
   if (e && e.stop) hints.push(h('p', { class: 'drill-hint warn' }, '목이 긁히거나 따끔해서 끝낸 날이에요'));
   let body;
@@ -2253,7 +2307,7 @@ function DrillSec(date) {
     });
   }
   return h('div', { class: 'sec drills' + (all ? ' all' : '') + (rOn ? ' routine' : ''), id: 'sec-drills' },
-    h('div', { class: 'sec-h' }, h('h2', null, '기초 연습'), counted.length ? h('span', { class: 'sec-note' }, all ? '모두 완료!' : `${doneN}/${counted.length} 완료`) : null, h('span', { class: 'sp' }),
+    h('div', { class: 'sec-h' }, h('h3', null, '기초 연습'), counted.length ? h('span', { class: 'sec-note' }, all ? '모두 완료!' : `${doneN}/${counted.length} 완료`) : null, h('span', { class: 'sp' }),
       h('button', { class: 'icon-btn', 'aria-label': S.settings.sound ? '체크 소리 끄기' : '체크 소리 켜기', onclick: () => { S.settings.sound = !S.settings.sound; touchSettings(); render(); toast(S.settings.sound ? '체크할 때 음이 울려요' : '체크 소리를 껐어요'); } }, icon(S.settings.sound ? 'sound' : 'mute', 20)),
       h('button', { class: 'icon-btn', 'data-fk': 'drills-keys', 'aria-label': '스케일 연습 건반 열기', onclick: () => openScaleTrainer({ date }) }, icon('piano', 21)),
       h('button', { class: 'btn ghost sm', onclick: openDrillEditor }, '편집')),
@@ -2366,7 +2420,7 @@ function SongSec(date, e) {
     : routineOn() && restDay(date) ? '오늘은 루틴 ①~③단계만 하는 날이에요 (멈춤 규칙)' : null;
   const gl = e && e.goal.trim() ? e.goal.trim().split('\n')[0] : '';
   return h('div', { class: 'sec', id: 'sec-songs' },
-    h('div', { class: 'sec-h' }, h('h2', null, '노래'), songs.length ? h('span', { class: 'sec-note' }, `${songs.length}곡`) : null),
+    h('div', { class: 'sec-h' }, h('h3', null, '노래'), songs.length ? h('span', { class: 'sec-note' }, `${songs.length}곡`) : null),
     sh ? h('p', { class: 'hint warn song-hint' }, sh) : gl ? h('p', { class: 'hint song-hint clip' }, h('b', null, '집중 '), gl) : null,
     songs.length ? h('ul', { class: 'songs' }, songs.map(s => {
       const L = lib.get(normKey(s.title));
@@ -2406,7 +2460,7 @@ function RecSec(date, e) {
   const recs = e ? e.recs : [];
   const note = recs.length ? null : '바로 녹음하거나, 폰에 있는 녹음 파일(삼성 음성 녹음 m4a, mp3 등)을 불러오세요. 여러 개를 한 번에 골라도 돼요. 녹음 앱에서 ‘공유 > 노래일기’로 보내도 들어와요.';
   return h('div', { class: 'sec', id: 'sec-recs' },
-    h('div', { class: 'sec-h' }, h('h2', null, '녹음'), recs.length ? h('span', { class: 'sec-note' }, `${recs.length}개`) : null),
+    h('div', { class: 'sec-h' }, h('h3', null, '녹음'), recs.length ? h('span', { class: 'sec-note' }, `${recs.length}개`) : null),
     h('div', { class: 'rec-actions' },
       h('button', { class: 'btn redb', onclick: () => openRecorder(date) }, h('span', { class: 'dot white' }), '녹음하기'),
       h('button', { class: 'btn', onclick: () => pickAudio(date) }, icon('upload', 18), '파일 불러오기')),
@@ -2438,30 +2492,32 @@ function RecordCard(date, e) {
 }
 function AfterSec(date, e) {
   const a = e ? e.after : null;
-  return h('div', { class: 'field after-sec', id: 'sec-after' },
-    h('div', { class: 'lbl-row' }, h('span', { class: 'lbl' }, '끝난 후 목 상태 (1~10)'), h('span', { class: 'sp' }), a != null ? h('span', { class: 'after-val' + (a <= 5 ? ' low' : '') }, `${a}점`) : null),
+  return h('div', { class: 'sec after-sec', id: 'sec-after' },
+    h('div', { class: 'sec-h' }, h('h3', null, '끝난 후 목 상태'), h('span', { class: 'sec-note' }, '1~10'), h('span', { class: 'sp' }), a != null ? h('span', { class: 'after-val' + (a <= 5 ? ' low' : '') }, `${a}점`) : null),
     AfterGrid(date, (v, n) => render({ focus: `after-${n}` })),
-    a != null && a <= 5 ? h('p', { class: 'hint warn' }, afterLow(date)) : h('p', { class: 'hint' }, '1 나쁨 · 10 아주 좋음. 노래를 끝낸 뒤의 목 상태예요.'));
+    a != null && a <= 5 ? h('p', { class: 'hint warn' }, afterLow(date)) : h('p', { class: 'hint' }, '1 나쁨 · 10 아주 좋음. 노래를 끝낸 뒤의 목 상태예요.'),
+    RatingRow(date, e));
 }
 function ReflectSec(date, e) {
   return h('div', { class: 'sec', id: 'sec-reflect' },
-    h('div', { class: 'sec-h' }, h('h2', null, '돌아보기')),
+    h('div', { class: 'sec-h' }, h('h3', null, '돌아보기')),
     RecordCard(date, e),
-    ['good', 'bad', 'fb'].map(k => ItemList(date, e, k)),
-    h('div', { class: 'field memo-block' },
-      h('div', { class: 'lbl-row' }, h('label', { class: 'lbl', for: 'ta-memo' }, '메모'), h('span', { class: 'sp' }),
-        h('button', { class: 'btn ghost sm', onclick: () => openWriter(date, 'memo', '메모') }, icon('expand', 16), '크게 쓰기')),
-      autoTA({ id: 'ta-memo', class: 'input lined', placeholder: '오늘 연습하며 느낀 것을 자유롭게 적어 보세요. 레슨에서 들은 말, 몸 상태, 떠오른 생각 무엇이든요.', value: e ? e.memo : '', 'data-fk': 'memo', oninput: ev => { ensureDay(date).memo = ev.target.value; touch(date); } }, 122)),
-    h('div', { class: 'field' }, h('label', { class: 'lbl', for: 'ta-next' }, '다음 연습 때 할 것'),
+    ['good', 'bad', 'fb'].map(k => ItemList(date, e, k)));
+}
+/* 메모 and 다음 연습 때 할 것 */
+function NotesSec(date, e) {
+  return h('div', { class: 'sec notes-sec', id: 'sec-notes' },
+    h('div', { class: 'sec-h' }, h('h3', null, h('label', { for: 'ta-memo' }, '메모')), h('span', { class: 'sp' }),
+      h('button', { class: 'btn ghost sm', onclick: () => openWriter(date, 'memo', '메모') }, icon('expand', 16), '크게 쓰기')),
+    autoTA({ id: 'ta-memo', class: 'input lined', placeholder: '오늘 연습하며 느낀 것을 자유롭게 적어 보세요. 레슨에서 들은 말, 몸 상태, 떠오른 생각 무엇이든요.', value: e ? e.memo : '', 'data-fk': 'memo', oninput: ev => { ensureDay(date).memo = ev.target.value; touch(date); } }, 122),
+    h('div', { class: 'field next-field' }, h('label', { class: 'lbl', for: 'ta-next' }, '다음 연습 때 할 것'),
       autoTA({ id: 'ta-next', class: 'input lined', placeholder: '예: 히싱 20초 넘기기, 2절 브릿지 숨 위치 바꾸기', value: e ? e.next : '', 'data-fk': 'next', oninput: ev => { ensureDay(date).next = ev.target.value; touch(date); } }, 66),
-      h('span', { class: 'hint' }, '다음에 일기를 열면 맨 위에 보여 줘요.')),
-    AfterSec(date, e),
-    RatingRow(date, e));
+      h('span', { class: 'hint' }, '다음에 일기를 열면 ‘시작 전’ 맨 위에 보여 줘요.')));
 }
 function ItemList(date, e, kind) {
   const items = e ? e[kind] : [];
   return h('div', { class: 'ilist k-' + kind },
-    h('div', { class: 'ilist-h' }, mark(kind), h('h3', null, KIND[kind].label), items.length ? h('span', { class: 'cnt' }, items.length) : null),
+    h('div', { class: 'ilist-h' }, mark(kind), h('h4', null, KIND[kind].label), items.length ? h('span', { class: 'cnt' }, items.length) : null),
     items.length ? h('ul', { class: 'items' }, items.map(it => h('li', { class: (it.pinned ? 'pinned' : '') + (it.resolved ? ' resolved' : '') },
       h('button', { class: 'item-btn', 'data-fk': 'item-' + it.id, onclick: () => openItem(date, kind, it.id) },
         h('span', { class: 'item-text' }, it.pinned ? h('span', { class: 'hl' }, it.text) : it.text),
