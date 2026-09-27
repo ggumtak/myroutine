@@ -2289,7 +2289,7 @@ function GoalSec(date, e) {
       h('button', { class: 'chip sm', 'data-fk': 'cue-list', 'aria-expanded': 'false', 'aria-label': '노래할 때 기억할 것 모두 펼치기', onclick: () => toggle(true) }, '모두 보기', icon('chevd', 14)));
   return h('div', { class: 'sec', id: 'sec-goal' },
     h('div', { class: 'sec-h' }, h('h3', null, past ? '이 날의 목표' : '오늘의 목표'), h('span', { class: 'sec-note' }, past ? '이 날 집중한 것' : '오늘 집중할 것 하나')),
-    autoTA({ class: 'input', rows: 1, placeholder: '예: 히싱 20초 넘기기, 후렴 음정 정확하게', value: e ? e.goal : '', 'data-fk': 'goal', 'aria-label': past ? '이 날의 목표' : '오늘의 목표', oninput: ev => { ensureDay(date).goal = ev.target.value; touch(date); } }, 46),
+    autoTA({ class: 'input', rows: 1, placeholder: '예: 히싱 20초 넘기기, 후렴 음정 정확하게', value: e ? e.goal : '', 'data-fk': 'goal', 'data-day': date, 'aria-label': past ? '이 날의 목표' : '오늘의 목표', oninput: ev => { ensureDay(date).goal = ev.target.value; touch(date); } }, 46),
     h('div', { class: 'cue-box' },
       h('div', { class: 'cue-h' }, h('span', { class: 'lbl' }, '노래할 때 기억할 것'), h('span', { class: 'sp' }),
         open ? null : h('button', { class: 'link', 'data-fk': 'cue-all', 'aria-label': '노래할 때 기억할 것 모두 펼치기', onclick: () => toggle(true) }, '모두 보기')),
@@ -2539,9 +2539,9 @@ function NotesSec(date, e) {
   return h('div', { class: 'sec notes-sec', id: 'sec-notes' },
     h('div', { class: 'sec-h' }, h('h3', null, h('label', { for: 'ta-memo' }, '메모')), h('span', { class: 'sp' }),
       h('button', { class: 'btn ghost sm', onclick: () => openWriter(date, 'memo', '메모') }, icon('expand', 16), '크게 쓰기')),
-    autoTA({ id: 'ta-memo', class: 'input lined', placeholder: '오늘 연습하며 느낀 것을 자유롭게 적어 보세요. 레슨에서 들은 말, 몸 상태, 떠오른 생각 무엇이든요.', value: e ? e.memo : '', 'data-fk': 'memo', oninput: ev => { ensureDay(date).memo = ev.target.value; touch(date); } }, 122),
+    autoTA({ id: 'ta-memo', class: 'input lined', placeholder: '오늘 연습하며 느낀 것을 자유롭게 적어 보세요. 레슨에서 들은 말, 몸 상태, 떠오른 생각 무엇이든요.', value: e ? e.memo : '', 'data-fk': 'memo', 'data-day': date, oninput: ev => { ensureDay(date).memo = ev.target.value; touch(date); } }, 122),
     h('div', { class: 'field next-field' }, h('label', { class: 'lbl', for: 'ta-next' }, '다음 연습 때 할 것'),
-      autoTA({ id: 'ta-next', class: 'input lined', placeholder: '예: 히싱 20초 넘기기, 2절 브릿지 숨 위치 바꾸기', value: e ? e.next : '', 'data-fk': 'next', oninput: ev => { ensureDay(date).next = ev.target.value; touch(date); } }, 66),
+      autoTA({ id: 'ta-next', class: 'input lined', placeholder: '예: 히싱 20초 넘기기, 2절 브릿지 숨 위치 바꾸기', value: e ? e.next : '', 'data-fk': 'next', 'data-day': date, oninput: ev => { ensureDay(date).next = ev.target.value; touch(date); } }, 66),
       h('span', { class: 'hint' }, '다음에 일기를 열면 ‘시작 전’ 맨 위에 보여 줘요.')));
 }
 function ItemList(date, e, kind) {
@@ -4812,11 +4812,15 @@ const Sync = {
     if (S.tab !== 'today' || S.date !== date || !isTyping()) return;
     const e = S.days[date] || {};
     for (const k of ['goal', 'memo', 'next']) {
-      const el = $(`#view [data-fk="${k}"]`), v = e[k] || '';
+      const el = $(`#view [data-fk="${k}"][data-day="${date}"]`), v = e[k] || '';
       if (!el || el.value === v) continue;
-      const focused = el === document.activeElement;
+      const focused = el === document.activeElement, old = el.value, a = el.selectionStart, b = el.selectionEnd;
       el.value = v;
-      if (focused) try { el.setSelectionRange(v.length, v.length); } catch (err) { /* not a text box */ }
+      if (focused) try {
+        /* where it was if everything before it is the same (e.g. lines added at the end), else at the end */
+        const keep = a != null && v.startsWith(old.slice(0, a));
+        el.setSelectionRange(keep ? a : v.length, keep ? Math.min(b, v.length) : v.length);
+      } catch (err) { /* not a text box */ }
       el.dispatchEvent(new Event('focus')); /* the box fits its height to the text (autoTA) */
     }
   },
@@ -4829,13 +4833,15 @@ const Sync = {
     const local = this.live(date), dirty = this.dayDirty(date);
     const remote = row.data ? normDay(date, row.data) : null, rOk = !!(remote && hasContent(remote));
     if (this.typingOn(date)) {
-      /* the day's text boxes still show the old text and would write it back when typed into: kept aside if this
-         changes any of them (other parts are applied now) */
-      const TEXTS = ['goal', 'memo', 'next'], f = (document.activeElement.dataset || {}).fk;
+      /* The other text boxes of the day are given the new text right away (syncBoxes). The box being typed into is
+         left alone while the user types (rewriting it would break the keyboard's syllable being composed): if this
+         changes its text, the change waits until typing stops, or until the app goes to the background.
+         Boxes for adding a note keep their own draft and are safe; other editors hold the day's items, so it waits. */
+      const TEXTS = ['goal', 'memo', 'next'], f = (document.activeElement.dataset || {}).fk || '';
       const next = !dirty || (!local && rOk) ? (rOk ? remote : null) : local && rOk ? merge3(date, local, remote, st.h[date]) : local;
-      const same = TEXTS.includes(f) && !!next && !!local && TEXTS.every(k => next[k] === local[k]);
-      /* (when the app is going to the background, the boxes are simply given the new text) */
-      if (!same && !(this.boxesOk && TEXTS.includes(f))) { const h = this.held.get(date); if (!h || h.rev < row.rev) this.held.set(date, row); return false; }
+      const val = (o, k) => (o && o[k]) || '';
+      const safe = /^c-/.test(f) || (TEXTS.includes(f) && (this.boxesOk || val(next, f) === val(local, f)));
+      if (!safe) { const h = this.held.get(date); if (!h || h.rev < row.rev) this.held.set(date, row); return false; }
     }
     this.held.delete(date);
     this.applying = true;
