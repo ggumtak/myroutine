@@ -156,15 +156,16 @@ const OTA = {
         /* the new copy started fine: keep it from now on */
         try { await native('WebView', 'persistServerBasePath'); } catch (e) { return; }
         s.active = cur.code; s.activePath = sv.path;
-        delete s.pending; delete s.pendingPath; delete s.prev; delete s.started;
+        delete s.pending; delete s.pendingPath; delete s.prev; delete s.started; delete s.tries;
         s.updatedTo = cur.version;
         save(s);
         this.cleanup();
         return;
       }
-      /* started but never got this far (it hung or crashed and the app was closed): not offered again.
-         Not started at all (the app was closed before the switch): offered again. */
-      if (s.pending !== cur.code && s.started === s.pending) s.bad = s.pending;
+      /* started but never got this far, twice (it hangs or crashes): not offered again. Once may just be the app
+         being closed during its first seconds, and not started at all means the app was closed before the switch:
+         offered again. */
+      if (s.pending !== cur.code && s.started === s.pending && ((s.tries || {})[s.pending] || 0) >= 2) s.bad = s.pending;
       delete s.pending; delete s.pendingPath; delete s.prev; delete s.started;
       save(s);
     }
@@ -192,6 +193,8 @@ const OTA = {
     } catch (e) { /* nothing downloaded yet */ }
   },
   state: load,
+  /* offer a version again that was set aside as not starting (asked for by the user) */
+  forgive(code) { const s = load(); if (s.bad === code) delete s.bad; if (s.tries) delete s.tries[code]; save(s); },
   /* the version just switched to, once (for a 'updated' note) */
   takeUpdated() { const s = load(); const v = s.updatedTo; if (v) { delete s.updatedTo; save(s); } return v || null; }
 };

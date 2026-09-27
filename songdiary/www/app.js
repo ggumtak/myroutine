@@ -429,24 +429,25 @@ async function storeAudio(blob, name) {
 /* why the last audioBlob() found nothing: null = not on this phone (nothing tried), '' = said already or cancelled,
    text = what to say instead of the backup hint */
 let audioWhy = null;
-async function audioBlob(r) {
+async function audioBlob(r, progress) {
   audioWhy = null;
   if (!r || !r.aud) return null;
   const a = await Store.get('audio', r.aud);
   if (a && a.blob) return a.blob;
-  if (Sync.on() && !Sync.st.audio) { audioWhy = '녹음 맞추기가 꺼져 있어서 다른 기기의 녹음을 받지 않았어요. 설정 > 계정·동기화에서 켜면 들을 수 있어요.'; return null; }
+  if (Sync.on() && !Sync.st.audio) { audioWhy = '이 폰에 녹음 파일이 없어요. 다른 기기에서 만든 녹음이면 설정 > 계정·동기화에서 ‘녹음도 맞추기’를 켜면 받아 와요. 글만 백업에서 불러온 기록이면 전체 백업(녹음 포함)을 불러와 주세요.'; return null; }
   /* made on another phone: brought from the server the first time it is played */
   if (Sync.canFetch(r.aud)) {
     if (Sync.st.wifiOnly && cellular()) {
       const go = await askSheet({ title: '모바일 데이터로 받을까요?', text: `다른 기기에서 만든 녹음이에요${r.size > 1 ? ` (${fmtMB(r.size)})` : ''}. 녹음은 Wi-Fi에서만 주고받도록 해 두었어요.`, ok: '받기', no: '취소' });
       if (!go) { audioWhy = ''; return null; }
     }
-    const t = toastProgress('다른 기기의 녹음을 받아 오는 중이에요…');
-    try { const b = await Sync.fetchAudio(r.aud, r); t.done(); return b; }
+    const own = !progress, t = progress || toastProgress('다른 기기의 녹음을 받아 오는 중이에요…');
+    if (!own) t.set('다른 기기의 녹음을 받아 오는 중이에요…');
+    try { const b = await Sync.fetchAudio(r.aud, r); if (own) t.done(); return b; }
     catch (e) {
       if (e && e.kind === 'not-found') { Sync.st.miss[r.aud] = Date.now(); Sync.save(); }
-      audioWhy = e && e.kind === 'not-found' ? '이 녹음은 아직 서버에 없어요. 녹음한 기기에서 동기화되면 들을 수 있어요.' : '녹음을 받아 오지 못했어요. 인터넷을 확인해 주세요.';
-      t.done();
+      audioWhy = e && e.kind === 'not-found' ? '이 녹음은 서버에 없어요. 녹음한 기기에서 아직 보내지 않았거나, 글만 백업에서 불러온 기록일 수 있어요.' : '녹음을 받아 오지 못했어요. 인터넷을 확인해 주세요.';
+      if (own) t.done();
     }
   }
   return null;
@@ -2873,8 +2874,9 @@ async function shareRec(date, r) {
   recIO = true;
   const t = toastProgress('보낼 준비를 하는 중…');
   try {
-    const blob = await audioBlob(r);
+    const blob = await audioBlob(r, t);
     if (!blob) { t.done(audioWhy === '' ? undefined : audioWhy || '녹음 파일을 찾지 못했어요'); return; }
+    t.set('보낼 준비를 하는 중…');
     await Files.share({ title: r.title || '녹음', text: `[노래일기] ${fmtMD(date)} ${r.title || '녹음'}${r.songTitle ? ` (${r.songTitle})` : ''}`, files: [{ name: recFileName(date, r, blob), blob }] });
     t.done();
   } catch (err) { console.error(err); t.done('보내지 못했어요. 다시 시도해 주세요.'); }
@@ -2885,8 +2887,9 @@ async function saveRecToPhone(date, r) {
   recIO = true;
   const t = toastProgress('폰에 저장하는 중…');
   try {
-    const blob = await audioBlob(r);
+    const blob = await audioBlob(r, t);
     if (!blob) { t.done(audioWhy === '' ? undefined : audioWhy || '녹음 파일을 찾지 못했어요'); return; }
+    t.set('폰에 저장하는 중…');
     const name = Native.isNative ? await Files.freeName('녹음', recFileName(date, r, blob)) : recFileName(date, r, blob);
     const where = await Files.saveToDocuments('녹음', name, blob, p => t.set(`폰에 저장하는 중… ${Math.round(p * 100)}%`));
     t.done(where ? `${where}에 저장했어요` : '파일로 저장했어요');
@@ -4553,6 +4556,8 @@ function importBackup() {
               const blob = new Blob([raw], { type: meta.mime || 'audio/mpeg' });
               await Store.put('audio', k, { blob, mime: meta.mime || blob.type, size: blob.size, name: meta.name || '', at: Date.now() });
               AUD.add(k);
+              /* brought back from a backup: sent to the server again (another phone may have removed it there) */
+              if (Sync.st) { delete Sync.st.up[k]; delete Sync.st.gone[k]; Sync.save(); }
               na++;
             } catch (err) {
               console.error(err);
@@ -4577,7 +4582,8 @@ function toastProgress(msg) {
   tt.classList.add('show');
   clearTimeout(toastTimer);
   return {
-    set(m) { tt.firstChild.textContent = m; },
+    /* shows it again too, in case something else used the toast meanwhile */
+    set(m) { if (!tt.firstChild || tt.firstChild.tagName !== 'SPAN' || tt.childNodes.length > 1) tt.replaceChildren(h('span', null, m)); else tt.firstChild.textContent = m; tt.classList.add('show'); clearTimeout(toastTimer); },
     done(m) { if (m) toast(m); else tt.classList.remove('show'); }
   };
 }
@@ -4781,16 +4787,36 @@ const Sync = {
     for (const d of new Set(Object.keys(S.days).concat(Object.keys(this.st.base)))) if (this.dayDirty(d)) return true;
     return this.setDirty();
   },
+  /* recordings this phone keeps although the server's version of the day dropped them: another phone may already
+     have removed their files from the server, so they are sent again (sending replaces, nothing is lost) */
+  resend(kept, remote) {
+    const there = new Set(((remote && remote.recs) || []).map(r => r.aud));
+    for (const r of (kept && kept.recs) || []) if (r.aud && !there.has(r.aud) && AUD.has(r.aud)) { delete this.st.up[r.aud]; delete this.st.gone[r.aud]; }
+  },
+  /* recordings on this phone not on the server yet (while recordings are synced) */
+  unsentAudio() {
+    const st = this.st;
+    if (!st || !st.audio) return 0;
+    let n = 0;
+    for (const a of usedAudioIds()) if (AUD.has(a) && !st.up[a] && !st.big[a]) n++;
+    return n;
+  },
+  async audioIdle(ms = 120000) { const t0 = Date.now(); while (this.audioBusy && Date.now() - t0 < ms) await new Promise(r => setTimeout(r, 150)); },
   /* the day shown on 오늘 while one of its fields is being typed into: its text box would write the old text back */
   typingOn(date) { const a = document.activeElement; return isTyping() && !!a && !a.closest('.sheet') && S.tab === 'today' && S.date === date; },
   /* a day from the server: taken as is when this phone didn't change it, merged when both did */
   applyDay(row) {
     const st = this.st, date = row.date;
     if (!isDateKey(date) || row.rev <= (st.base[date] || 0)) return false;
-    if (this.typingOn(date)) { const h = this.held.get(date); if (!h || h.rev < row.rev) this.held.set(date, row); return false; }
-    this.held.delete(date);
     const local = this.live(date), dirty = this.dayDirty(date);
     const remote = row.data ? normDay(date, row.data) : null, rOk = !!(remote && hasContent(remote));
+    if (this.typingOn(date)) {
+      /* the text box being typed into would write its old text back: kept aside only if this changes that text */
+      const f = (document.activeElement.dataset || {}).fk, next = !dirty || (!local && rOk) ? (rOk ? remote : null) : local && rOk ? merge3(date, local, remote, st.h[date]) : local;
+      const same = ['goal', 'memo', 'next'].includes(f) && next && local && next[f] === local[f];
+      if (!same) { const h = this.held.get(date); if (!h || h.rev < row.rev) this.held.set(date, row); return false; }
+    }
+    this.held.delete(date);
     this.applying = true;
     try {
       if (!dirty || (!local && rOk)) {
@@ -4801,7 +4827,8 @@ const Sync = {
         /* changed on both: put together part by part; sent next if it differs from the server's */
         S.days[date] = merge3(date, local, remote, st.h[date]);
         queueWrite(date, 100);
-      } /* deleted elsewhere but changed here: this phone's version is kept and sent */
+        this.resend(S.days[date], remote);
+      } else this.resend(local, null); /* deleted elsewhere but changed here: this phone's version is kept and sent */
     } finally { this.applying = false; }
     /* from now on the server's version is what both sides changed from */
     st.h[date] = rOk ? dayBase(remote) : null;
@@ -4855,8 +4882,9 @@ const Sync = {
   async run(force) {
     if (!this.on() || S.mode !== 'ready') return;
     if (this.busy) { this.again = true; return; }
-    /* a sheet or a text box may be holding one of the days: bring in other phones' changes once it is done */
-    if (!force && (Sheets.length || isTyping())) { this.schedule(8000); return; }
+    /* a sheet may be holding one of the days: bring in other phones' changes once it is closed
+       (a day being typed into on 오늘 is kept aside by applyDay instead) */
+    if (!force && Sheets.length) { this.schedule(8000); return; }
     this.busy = true; this.status = 'busy'; this.paint();
     let changed = false;
     try {
@@ -4893,7 +4921,8 @@ const Sync = {
       if (this.settingsChanged) {
         this.settingsChanged = false;
         const blk = $('#cloud-block'), i = blk ? Sheets.findIndex(x => x.sheet.contains(blk)) : -1;
-        if (i >= 0) { for (let j = Sheets.length - 1; j >= i; j--) closeSheet(Sheets[j], true); setTimeout(openSettings, 320); }
+        const guarded = i >= 0 && Sheets.slice(i + 1).some(x => x.beforeClose);
+        if (i >= 0 && !this.quiet && !guarded) { for (let j = Sheets.length - 1; j >= i; j--) closeSheet(Sheets[j], true); setTimeout(openSettings, 320); }
       }
       this.paint();
       if (this.again) { this.again = false; this.schedule(500); }
@@ -5033,10 +5062,18 @@ function CloudBlock() {
 /* sends what is left first; if something can't be sent, asks before going on */
 async function logOut() {
   const t = toastProgress('남은 기록을 보내는 중…');
-  await Sync.idle(); await Sync.run(true); await Sync.idle();
+  Sync.quiet = true; /* this flow owns the sheets until it is done */
+  try {
+    await Sync.idle(); await Sync.run(true); await Sync.idle();
+    /* recordings too: the upload that the sync started, or one more pass */
+    await Sync.audioIdle();
+    if (Sync.status === 'idle' && Sync.unsentAudio() && !(Sync.st.wifiOnly && cellular())) { t.set('녹음을 올리는 중…'); await Sync.syncAudio(); await Sync.audioIdle(); }
+  } finally { Sync.quiet = false; Sync.settingsChanged = false; }
   t.done();
-  if (Sync.status === 'error' || Sync.anyDirty()) {
-    const go = await askSheet({ title: '아직 보내지 못한 기록이 있어요', text: '지금 로그아웃하면 이 폰에서 고친 내용 일부가 다른 기기에 가지 않아요. 기록은 이 폰에 그대로 남고, 다시 로그인하면 그때 보내요.', ok: '그래도 로그아웃', no: '취소', danger: true });
+  const dirty = Sync.anyDirty(), audio = Sync.unsentAudio();
+  if (dirty || audio) {
+    const what = [dirty ? '이 폰에서 고친 기록 일부' : '', audio ? `녹음 ${audio}개` : ''].filter(Boolean).join('와 ');
+    const go = await askSheet({ title: '아직 보내지 못한 기록이 있어요', text: `지금 로그아웃하면 ${what}가 다른 기기에 가지 않아요. 이 폰에는 그대로 남고, 다시 로그인하면 그때 보내요. 이 폰을 지우거나 넘길 거라면 먼저 인터넷(Wi-Fi)에 연결해서 보내 주세요.`, ok: '그래도 로그아웃', no: '취소', danger: true });
     if (!go) { Sync.paint(); return; }
   }
   clearTimeout(Sync.timer);
@@ -5140,10 +5177,18 @@ async function afterLogin(ready) {
 }
 
 /* ================= 앱 업데이트 (in the app, no reinstall) ================= */
-let checking = false;
+let checking = null, checkingManual = false;
 async function checkUpdate(manual) {
   if (!OTA.isNative && !manual) return;
-  if (checking) return;
+  if (checking) {
+    /* a check is on its way: a manual one reports itself; an automatic one is waited for and then reported */
+    if (!manual || checkingManual) return;
+    const t = toastProgress('업데이트를 확인하는 중…');
+    await checking.catch(() => {});
+    t.done();
+    if (S.update && !S.updateApk) openUpdate(S.update); else return checkUpdate(true);
+    return;
+  }
   const u = lsGet(LS_UI, {});
   if (!manual && u.otaAt && Date.now() - u.otaAt < 6 * 3600e3) {
     /* checked a little while ago: show what was found then (the app may have been closed since) */
@@ -5153,7 +5198,9 @@ async function checkUpdate(manual) {
     }
     return;
   }
-  checking = true;
+  let done = null;
+  checking = new Promise(res => { done = res; });
+  checkingManual = !!manual;
   const t = manual ? toastProgress('업데이트를 확인하는 중…') : null;
   try {
     const r = await OTA.check();
@@ -5163,10 +5210,14 @@ async function checkUpdate(manual) {
     await noteApk();
     if (t) t.done();
     if (r.latest) { if (manual) openUpdate(r.latest); else softRender(); }
+    else if (manual && r.cur && r.published && r.published.code > r.cur.code) {
+      /* published, but it didn't start on this phone before: offered again only when asked */
+      toast(`새 버전 ${r.published.version}이(가) 이 폰에서 제대로 열리지 않아서 쉬고 있어요.`, { action: '다시 해 보기', onAction: () => { OTA.forgive(r.published.code); S.update = r.published; openUpdate(r.published); } });
+    }
     else if (manual) toast(r.cur ? `최신 버전이에요 (${r.cur.version})` : '버전 정보를 읽지 못했어요');
   } catch (e) {
     if (t) t.done(e && /signature|bad-/.test(e.message) ? '업데이트 정보를 믿을 수 없어서 받지 않았어요' : '업데이트를 확인하지 못했어요. 인터넷을 확인해 주세요.');
-  } finally { checking = false; }
+  } finally { checking = null; done(); }
 }
 /* a version that needs a newer APK can't be installed from here: no banner on 오늘 for it */
 async function noteApk() {

@@ -50,14 +50,31 @@ def git_ignored(www: Path, rels):
     """Files git ignores never reach main, so they can't be part of a version."""
     if not rels:
         return set()
-    try:
-        r = subprocess.run(['git', '-C', str(www), 'check-ignore', '--stdin'], input='\n'.join(rels),
-                           capture_output=True, text=True)
+    try:  # NUL-separated: names with Korean letters come back as they are, not quoted
+        r = subprocess.run(['git', '-C', str(www), 'check-ignore', '-z', '--stdin'], input='\0'.join(rels).encode(),
+                           capture_output=True)
     except FileNotFoundError:
         return set()
     if r.returncode not in (0, 1):  # not inside a git repository
         return set()
-    return {line.strip() for line in r.stdout.splitlines() if line.strip()}
+    return {p for p in r.stdout.decode('utf-8', 'surrogateescape').split('\0') if p}
+
+
+def main_needs(out: Path):
+    """The files the version on main (what phones see now) needs, read from git: kept even when this code is
+    published again before merging."""
+    for ref in ('origin/main', 'main'):
+        try:
+            r = subprocess.run(['git', '-C', str(out.parent), 'show', f'{ref}:./{out.name}'], capture_output=True)
+        except FileNotFoundError:
+            return set()
+        if r.returncode == 0:
+            try:
+                body = json.loads(json.loads(r.stdout.decode())['body'])
+                return set(body.get('files', {}).values()) | {body.get('releaseJson')}
+            except (ValueError, KeyError, TypeError):
+                return set()
+    return set()
 
 
 def main():
@@ -118,7 +135,7 @@ def main():
             tmp = p.with_suffix('.part')
             tmp.write_bytes(b)
             tmp.replace(p)
-    keep = set(blobs) | prev_need
+    keep = set(blobs) | prev_need | main_needs(out)
     removed = 0
     for p in fdir.iterdir():
         if p.is_file() and p.name not in keep:

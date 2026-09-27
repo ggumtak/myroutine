@@ -52,12 +52,13 @@
     if (!m || +m[1] !== s0.pending) return; /* the copy running is not the one being tried */
     var s = get();
     if (!s || s.pending !== s0.pending) return;
-    s.started = s.pending; localStorage.setItem(K, JSON.stringify(s));
+    s.started = s.pending; s.tries = s.tries || {}; s.tries[s.pending] = (s.tries[s.pending] || 0) + 1;
+    localStorage.setItem(K, JSON.stringify(s));
     setTimeout(function () {
       var t = get();
       if (window.__sdBooted || !t || t.pending !== s0.pending) return;
       var p = t.prev || { type: 'asset' };
-      t.bad = t.pending; delete t.pending; delete t.pendingPath; delete t.prev; delete t.started;
+      t.bad = t.pending; delete t.pending; delete t.pendingPath; delete t.prev; delete t.started; if (t.tries) delete t.tries[s0.pending];
       localStorage.setItem(K, JSON.stringify(t));
       if (p.type === 'file') C.nativePromise('WebView', 'setServerBasePath', { path: p.path });
       else C.nativePromise('WebView', 'setServerAssetPath', { path: 'public' });
