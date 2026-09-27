@@ -3,3 +3,5 @@
 *.jks
 *.keystore
 *.apk
+*.pem
+*.key

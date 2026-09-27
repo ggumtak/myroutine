@@ -39,10 +39,27 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="file-audio" hidden multiple accept="audio/*,video/mp4,.m4a,.amr,.3gp,.aac,.opus,.flac">
 <input type="file" id="file-json" hidden accept=".zip,.json,application/zip,application/json,application/x-zip-compressed">
+<script>
+/* in-app update: if a just-installed version does not start, go back to the one before it */
+(function () { try {
+  var K = 'songdiary:v1:ota', s = JSON.parse(localStorage.getItem(K) || 'null'), C = window.Capacitor;
+  if (!s || !s.pending || !C || !C.nativePromise) return;
+  setTimeout(function () {
+    if (window.__sdBooted) return;
+    var p = s.prev || { type: 'asset' };
+    s.bad = s.pending; delete s.pending; delete s.pendingPath; delete s.prev;
+    localStorage.setItem(K, JSON.stringify(s));
+    if (p.type === 'file') C.nativePromise('WebView', 'setServerBasePath', { path: p.path });
+    else C.nativePromise('WebView', 'setServerAssetPath', { path: 'public' });
+  }, 15000);
+} catch (e) { /* nothing to undo */ } })();
+</script>
 <script src="native.js"></script>
 <script src="songsearch.js"></script>
 <script src="scales.js"></script>
 <script src="practice.js"></script>
+<script src="update.js"></script>
+<script src="cloud.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

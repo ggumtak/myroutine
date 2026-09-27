@@ -163,7 +163,7 @@ const S = {
   fb: { status: 'open', kinds: ['bad', 'fb'], tag: null, pinned: false },
   lib: { seg: 'songs', best: false, status: null, jq: '', jall: false, jn: 20 },
   compose: { good: { tag: null }, bad: { tag: null }, fb: { tag: null, from: '선생님' } },
-  saveErr: null, openDrills: new Set(), openGroups: new Map(), recording: false,
+  saveErr: null, openDrills: new Set(), openGroups: new Map(), recording: false, update: null,
   popNote: null, justDone: null, sheetOpen: false
 };
 
@@ -261,6 +261,7 @@ function entryDates() { return Object.keys(S.days).filter(d => hasContent(S.days
 const WQ = { keys: new Set(), timer: 0, busy: false, again: false, warned: 0 };
 function queueWrite(key, delay = 400) {
   WQ.keys.add(key);
+  Sync.changed();
   clearTimeout(WQ.timer);
   WQ.timer = setTimeout(runWrites, delay);
   updateSave();
@@ -319,6 +320,7 @@ async function loadAll() {
     S.settings = normSettings(meta);
     S.days = {};
     for (const [k, v] of days) if (isDateKey(k)) S.days[k] = normDay(k, v);
+    await Sync.load();
     S.mode = 'ready';
     if (!meta) { queueWrite('@s', 50); S.firstRun = true; const u = lsGet(LS_UI, {}); u.seen11 = 1; u.seen12 = 1; u.seen13 = 1; lsSet(LS_UI, u); }
   } catch (err) {
@@ -380,7 +382,7 @@ const MAX_AUDIO = 300 * 1024 * 1024;
 /* ids of recordings whose audio is on this phone — a text-only backup brings rows without their files */
 const AUD = new Set();
 let audKnown = false;
-const hasAudio = r => !!(r && r.aud) && (!audKnown || AUD.has(r.aud));
+const hasAudio = r => !!(r && r.aud) && (!audKnown || AUD.has(r.aud) || Sync.on());
 async function sniff(blob) {
   try {
     const b = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
@@ -422,7 +424,13 @@ async function storeAudio(blob, name) {
 async function audioBlob(r) {
   if (!r || !r.aud) return null;
   const a = await Store.get('audio', r.aud);
-  return a && a.blob ? a.blob : null;
+  if (a && a.blob) return a.blob;
+  /* made on another phone: brought from the server the first time it is played */
+  if (Sync.on()) {
+    try { toast('다른 기기의 녹음을 받아 오는 중이에요…'); return await Sync.fetchAudio(r.aud, r); }
+    catch (e) { toast(e && e.kind === 'not-found' ? '이 녹음은 아직 서버에 없어요. 녹음한 기기에서 동기화되면 들을 수 있어요.' : '녹음을 받아 오지 못했어요. 인터넷을 확인해 주세요.'); }
+  }
+  return null;
 }
 function assetErrMsg(err) {
   const c = err && (err.code || err.name);
@@ -2001,7 +2009,7 @@ function TodayView() {
   const part = (k, sub, ...secs) => h('section', { class: 'tgrp', id: `g-${k}`, 'data-g': k, 'aria-labelledby': `gh-${k}` },
     h('div', { class: 'tg-head' }, h('h2', { class: 'tg-t', id: `gh-${k}`, 'data-fk': `gh-${k}`, tabindex: '-1' }, TGROUPS.find(g => g.k === k).name), h('p', { class: 'tg-sub' }, sub)),
     h('div', { class: 'page tg-card' }, secs));
-  return h('div', { class: 'v-today' }, isToday ? (WhatsNew() || BackupNudge()) : null, head,
+  return h('div', { class: 'v-today' }, isToday ? (UpdateBanner() || WhatsNew() || BackupNudge()) : null, head,
     TodayNav(),
     /* the practice clock and the stop rules belong to the whole day, so they come before its parts */
     h('div', { class: 'page t-session' }, TimerSec(date, e, isToday), isToday ? StopCard(date) : null),
@@ -4389,11 +4397,12 @@ async function autoBackup(force) {
 /* Joins two versions of the same day. Recordings and notes from either side are kept (so a backup can bring
    back something deleted by mistake). When both are copies of one diary page (same createdAt — e.g. restoring
    your own backup), the newer edit of the texts and numbers wins; pages written separately (two phones) keep both. */
-function mergeDay(cur, inc) {
+function mergeDay(cur, inc, union) {
   if (!cur || !hasContent(cur)) return inc;
   const newer = (inc.updatedAt || 0) > (cur.updatedAt || 0) ? inc : cur;
   const older = newer === inc ? cur : inc;
-  const same = !!cur.createdAt && cur.createdAt === inc.createdAt;
+  /* union: two phones changed the same part of a synced day, so both sides' texts are kept */
+  const same = !union && !!cur.createdAt && cur.createdAt === inc.createdAt;
   const out = clone(newer);
   for (const k of ['recs', 'good', 'bad', 'fb']) {
     const ids = new Set(out[k].map(x => x.id));
@@ -4582,8 +4591,6 @@ function openSettings() {
   const drawTheme = () => themeSeg.replaceChildren(...THEMES.map(([k, l]) => segBtn(l, S.settings.theme === k, () => { S.settings.theme = k; touchSettings(); applyTheme(); drawTheme(); })));
   drawTheme();
   const backupNote = h('p', { class: 'hint', style: 'margin-bottom:10px' }, lastBackupInfo());
-  const verLine = h('p', { class: 'hint' }, '노래일기');
-  Native.version().then(v => { if (v) verLine.textContent = `노래일기 ${v.version} (${v.build})`; });
   openSheet({
     title: '설정',
     body: h('div', null,
@@ -4596,6 +4603,7 @@ function openSettings() {
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '노래 찾기')),
         ToggleRow('실제 노래 검색', S.settings.songSearch, v => { S.settings.songSearch = v; touchSettings(); }, '노래 제목을 몇 글자 치면 Apple Music 곡 목록에서 찾아 줘요. 입력한 검색어만 보내고 일기 내용은 보내지 않아요. 끄면 내가 부른 노래에서만 찾아요.', 'search')),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '알림')), ReminderBlock()),
+      h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '계정·동기화'), h('span', { class: 'hint' }, '여러 기기에서 같은 기록 쓰기')), CloudBlock()),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '백업')),
         h('p', { class: 'hint', style: 'margin-bottom:6px' }, '모든 기록과 녹음은 이 폰 안에만 저장돼요. 폰을 바꾸거나 앱을 지우기 전에 꼭 전체 백업을 해 두세요.'),
         backupNote,
@@ -4607,9 +4615,425 @@ function openSettings() {
         Native.isNative ? h('p', { class: 'hint', style: 'margin-top:8px' }, '저장 위치: 내 파일 > 내장 저장공간 > Documents > 노래일기 > 백업. ‘백업 보내기’로 구글 드라이브나 카카오톡 나에게 보내 두면 더 안전해요.') : null,
         Native.isNative ? ToggleRow('매일 자동 백업 (글만)', S.settings.autoBackup, v => { S.settings.autoBackup = v; touchSettings(); if (v) autoBackup(true); }, '앱을 닫을 때 모든 글 기록을 Documents > 노래일기 > 자동백업에 저장해요. 하루 한 파일씩 최근 14개를 남기고, 녹음은 빠져요.', 'save') : null),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '저장 공간')), StorageBlock()),
-      h('div', { class: 'set-block' }, verLine, h('p', { class: 'hint' }, '이전 노래일기(웹)에서 ‘백업 파일 저장’으로 받은 파일도 ‘백업 불러오기’로 옮길 수 있어요. 그때 녹음은 파일이 옮겨지지 않아서 ‘보내기’로 받은 파일을 따로 불러와야 해요.'))),
+      h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '앱 정보')), UpdateRow(), h('p', { class: 'hint', style: 'margin-top:8px' }, '이전 노래일기(웹)에서 ‘백업 파일 저장’으로 받은 파일도 ‘백업 불러오기’로 옮길 수 있어요. 그때 녹음은 파일이 옮겨지지 않아서 ‘보내기’로 받은 파일을 따로 불러와야 해요.'))),
     onClose: () => render()
   });
+}
+
+/* ================= 계정·동기화: the same diary on every phone, through the owner's Supabase project ================= */
+const Cloud = window.Cloud, OTA = window.OTA;
+const AUDIO_MAX_CLOUD = 50 * 1024 * 1024; /* the free Supabase plan's limit per file */
+/* a short fingerprint of a record, to notice any change (also ones made by importing a backup). Keys are sorted
+   first: the server's database hands objects back with their keys in another order. */
+const canon = o => JSON.stringify(o === undefined ? null : o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => { a[x] = v[x]; return a; }, {}) : v));
+function fp(o) {
+  const s = canon(o);
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+/* the notification time belongs to each phone; everything else in the settings is shared */
+const cloudSettings = s => { const o = clone(s); delete o.reminder; return o; };
+/* a day's fingerprint part by part ('cond.memo.recs…' as short codes), so that a day changed on two phones
+   can be put together part by part: what only one phone changed is taken from it (deleting included) */
+const DAY_KEYS = Object.keys(blankDay('2000-01-01')).filter(k => k !== 'date' && k !== 'updatedAt');
+const dayRest = e => { const o = {}; for (const k in e) if (!DAY_KEYS.includes(k) && k !== 'date' && k !== 'updatedAt') o[k] = e[k]; return o; };
+const dayPrint = e => DAY_KEYS.map(k => fp(e[k]).slice(-6)).concat(fp(dayRest(e)).slice(-6)).join('.');
+function merge3(date, local, remote, base) {
+  const b = base ? base.split('.') : [], lp = dayPrint(local).split('.'), rp = dayPrint(remote).split('.');
+  const out = clone(remote), both = [];
+  DAY_KEYS.forEach((k, i) => {
+    if (lp[i] === rp[i] || lp[i] === b[i]) return;  /* the same on both, or changed only elsewhere: the server's */
+    if (rp[i] === b[i]) out[k] = clone(local[k]);    /* changed only here */
+    else both.push(k);                               /* changed on both: nothing written on either is dropped */
+  });
+  if (both.length) { const u = mergeDay(local, remote, true); for (const k of both) out[k] = u[k]; }
+  const ri = DAY_KEYS.length; /* parts a newer version of the app may add */
+  if (lp[ri] !== rp[ri] && lp[ri] !== b[ri]) { const lr = dayRest(local); for (const k in lr) if (rp[ri] === b[ri] || !(k in out)) out[k] = clone(lr[k]); }
+  out.updatedAt = Math.max(Date.now(), local.updatedAt || 0, remote.updatedAt || 0);
+  return normDay(date, out);
+}
+/* the same for the settings, one part per setting */
+const setPrint = s => { const o = cloudSettings(s), p = {}; delete o.updatedAt; for (const k of Object.keys(o).sort()) p[k] = fp(o[k]).slice(-6); return JSON.stringify(p); };
+function mergeSet3(local, remote, base) {
+  let b = {};
+  try { b = JSON.parse(base || '{}') || {}; } catch (e) { b = {}; }
+  const lp = JSON.parse(setPrint(local)), rp = JSON.parse(setPrint(remote));
+  const out = clone(remote), both = [];
+  for (const k of new Set(Object.keys(lp).concat(Object.keys(rp)))) {
+    if (lp[k] === rp[k] || lp[k] === b[k]) continue;
+    if (rp[k] === b[k]) { if (k in local) out[k] = clone(local[k]); else delete out[k]; }
+    else both.push(k);
+  }
+  if (both.length) { const u = mergeSettings(clone(local), clone(remote)); for (const k of both) out[k] = u[k]; }
+  out.reminder = local.reminder;
+  out.updatedAt = Math.max(Date.now(), local.updatedAt || 0, remote.updatedAt || 0);
+  return normSettings(out);
+}
+const Sync = {
+  st: null, busy: false, again: false, timer: 0, applying: false, audioBusy: false,
+  status: 'idle', err: null, audioNote: '',
+  /* st: uid/email, base[date] = server rev this phone last saw, h[date] = the day's dayPrint at that moment
+     (null = absent), setRev/setH the same for settings, lastSeq = newest change seen, up/big/miss = recordings */
+  blank(u) { return { uid: u.id, email: u.email, base: {}, h: {}, setRev: 0, setH: null, lastSeq: 0, up: {}, big: {}, miss: {}, audio: true, wifiOnly: true, lastAt: 0 }; },
+  async load() { try { this.st = (await Store.get('meta', 'sync')) || null; } catch (e) { this.st = null; } },
+  save() { clearTimeout(this.saveT); this.saveT = setTimeout(() => this.saveNow(), 400); },
+  saveNow() { clearTimeout(this.saveT); return this.st ? Store.put('meta', 'sync', this.st).catch(() => {}) : Promise.resolve(); },
+  on() { const u = Cloud.user(); return !!(u && this.st && this.st.uid === u.id && Cloud.config()); },
+  /* a local change: send it a little later (several quick edits go together) */
+  changed() { if (!this.applying && this.on()) this.schedule(6000); },
+  schedule(ms) { clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), ms); },
+  live(date) { const e = S.days[date]; return e && hasContent(e) ? e : null; },
+  dayDirty(date) {
+    const e = this.live(date), cur = e ? dayPrint(e) : null, prev = this.st.h[date] === undefined ? null : this.st.h[date];
+    if (cur === prev) return false;
+    return !!e || !!this.st.base[date]; /* a day deleted here counts only if the server has it */
+  },
+  setDirty() { return setPrint(S.settings) !== this.st.setH; },
+  /* a day from the server: taken as is when this phone didn't change it, merged when both did */
+  applyDay(row) {
+    const st = this.st, date = row.date;
+    if (!isDateKey(date) || row.rev <= (st.base[date] || 0)) return false;
+    const local = this.live(date), dirty = this.dayDirty(date);
+    const remote = row.data ? normDay(date, row.data) : null, rOk = !!(remote && hasContent(remote));
+    this.applying = true;
+    try {
+      if (!dirty || (!local && rOk)) {
+        /* nothing changed here since the last sync (or deleted here but changed elsewhere: the change wins) */
+        if (rOk) S.days[date] = remote; else delete S.days[date];
+        queueWrite(date, 100);
+      } else if (local && rOk) {
+        /* changed on both: put together part by part; sent next if it differs from the server's */
+        S.days[date] = merge3(date, local, remote, st.h[date]);
+        queueWrite(date, 100);
+      } /* deleted elsewhere but changed here: this phone's version is kept and sent */
+    } finally { this.applying = false; }
+    /* from now on the server's version is what both sides changed from */
+    st.h[date] = rOk ? dayPrint(remote) : null;
+    st.base[date] = row.rev;
+    return true;
+  },
+  applySettings(row) {
+    const st = this.st;
+    if (!row || row.rev <= st.setRev) return false;
+    const remote = normSettings(Object.assign({}, row.data, { reminder: S.settings.reminder }));
+    const before = setPrint(S.settings);
+    this.applying = true;
+    try {
+      S.settings = this.setDirty() ? mergeSet3(S.settings, remote, st.setH) : remote;
+      queueWrite('@s', 100);
+      applyTheme();
+    } finally { this.applying = false; }
+    st.setH = setPrint(remote);
+    st.setRev = row.rev;
+    if (setPrint(S.settings) !== before) this.settingsChanged = true;
+    return true;
+  },
+  async pushDay(date) {
+    const st = this.st;
+    for (let tries = 0; tries < 4; tries++) {
+      const e = this.live(date), sent = e ? clone(e) : null, h = sent ? dayPrint(sent) : null;
+      const r = await Cloud.rpc('sd_push_day', { p_date: date, p_data: sent, p_base: st.base[date] || 0 });
+      if (!r) throw Object.assign(new Error('server'), { kind: 'server' });
+      if (r.ok) { st.base[date] = r.rev; st.h[date] = h; return; }
+      if (!r.rev) { st.base[date] = 0; continue; } /* the server lost it (e.g. its database was reset): add it again */
+      /* changed elsewhere in the meantime: merge with the server's version and try again */
+      this.applyDay({ date, data: r.data, rev: r.rev });
+      if (!this.dayDirty(date)) return;
+    }
+  },
+  async pushSettings() {
+    const st = this.st;
+    for (let tries = 0; tries < 4; tries++) {
+      const data = cloudSettings(S.settings), h = setPrint(S.settings);
+      const r = await Cloud.rpc('sd_push_settings', { p_data: data, p_base: st.setRev || 0 });
+      if (!r) throw Object.assign(new Error('server'), { kind: 'server' });
+      if (r.ok) { st.setRev = r.rev; st.setH = h; return; }
+      if (!r.rev) { st.setRev = 0; continue; }
+      this.applySettings({ data: r.data, rev: r.rev });
+      if (!this.setDirty()) return;
+    }
+  },
+  /* pull what changed on other phones, then send what changed here */
+  async run(force) {
+    if (!this.on() || S.mode !== 'ready') return;
+    if (this.busy) { this.again = true; return; }
+    /* a sheet may be holding one of the days being edited: bring in other phones' changes once it is closed */
+    if (!force && Sheets.length) { this.schedule(8000); return; }
+    this.busy = true; this.status = 'busy'; this.paint();
+    let changed = false;
+    try {
+      const st = this.st;
+      /* a little overlap: two changes saved at the same moment can become visible out of order */
+      let from = Math.max(0, st.lastSeq - 50);
+      for (;;) {
+        const rows = await Cloud.select('sd_days', `select=date,data,rev,seq&seq=gt.${from}&order=seq.asc&limit=500`);
+        for (const row of rows) { if (this.applyDay(row)) changed = true; if (row.seq > st.lastSeq) st.lastSeq = row.seq; }
+        if (rows.length < 500) break;
+        from = rows[rows.length - 1].seq;
+      }
+      const srows = await Cloud.select('sd_settings', 'select=data,rev,seq');
+      if (srows[0] && this.applySettings(srows[0])) changed = true;
+      const dates = new Set(Object.keys(S.days).concat(Object.keys(st.base)));
+      for (const d of dates) if (this.dayDirty(d)) await this.pushDay(d);
+      if (this.setDirty()) await this.pushSettings();
+      st.lastAt = Date.now();
+      this.status = 'idle'; this.err = null;
+    } catch (e) {
+      this.status = 'error'; this.err = e && e.kind ? e.kind : 'network';
+      if (this.err === 'network' || this.err === 'offline' || this.err === 'server') this.schedule(60000);
+      /* found while syncing by itself: say it once, the records stay on this phone meanwhile */
+      if (this.err === 'signed-out' && !force && !this.toldOut) { this.toldOut = true; toast('로그인이 풀렸어요. 기록은 이 폰에 그대로 있어요.', { action: '로그인', onAction: openLogin }); }
+    } finally {
+      this.busy = false;
+      this.saveNow();
+      if (changed) softRender();
+      /* the settings sheet holds the old practice items: open it again with the new ones */
+      if (this.settingsChanged) { this.settingsChanged = false; if ($('#cloud-block')) { closeSheet(Sheets[Sheets.length - 1], true); setTimeout(openSettings, 320); } }
+      this.paint();
+      if (this.again) { this.again = false; this.schedule(500); }
+      else if (this.status === 'idle') this.syncAudio();
+    }
+  },
+  /* recordings: send new ones, bring the ones this phone doesn't have */
+  async syncAudio() {
+    const st = this.st;
+    if (!this.on() || !st.audio || this.audioBusy) return;
+    const conn = navigator.connection;
+    if (st.wifiOnly && conn && conn.type === 'cellular') { this.audioNote = 'wifi'; this.paint(); return; }
+    this.audioBusy = true; this.audioNote = '';
+    try {
+      const refs = new Map();
+      for (const d in S.days) for (const r of S.days[d].recs || []) if (r.aud) refs.set(r.aud, r);
+      const up = Array.from(refs.keys()).filter(a => !st.up[a] && !st.big[a] && AUD.has(a));
+      let n = 0;
+      for (const aud of up) {
+        if (!this.on() || !st.audio) break;
+        this.audioNote = `올리는 중 ${++n}/${up.length}`; this.paint();
+        const a = await Store.get('audio', aud);
+        if (!a || !a.blob) continue;
+        if (a.blob.size > AUDIO_MAX_CLOUD) { st.big[aud] = 1; continue; }
+        try { await Cloud.upload(aud, a.blob, a.mime); st.up[aud] = 1; }
+        catch (e) { if (e.kind === 'too-big') st.big[aud] = 1; else throw e; }
+        this.save();
+      }
+      const down = Array.from(refs.keys()).filter(a => !AUD.has(a) && !(st.miss[a] && Date.now() - st.miss[a] < 3 * 3600e3));
+      n = 0;
+      for (const aud of down) {
+        if (!this.on() || !st.audio) break;
+        this.audioNote = `받는 중 ${++n}/${down.length}`; this.paint();
+        try { await this.fetchAudio(aud, refs.get(aud)); } catch (e) { if (e.kind === 'not-found') st.miss[aud] = Date.now(); else throw e; }
+      }
+      this.audioNote = '';
+    } catch (e) {
+      this.audioNote = 'error';
+    } finally {
+      this.audioBusy = false; this.saveNow(); this.paint();
+    }
+  },
+  async fetchAudio(aud, r) {
+    const blob = await Cloud.download(aud);
+    const mime = (r && r.mime) || blob.type || 'audio/mp4';
+    const b = new Blob([blob], { type: mime });
+    await Store.put('audio', aud, { blob: b, mime, size: b.size, name: (r && r.title) || '', at: Date.now() });
+    AUD.add(aud);
+    this.st.up[aud] = 1; delete this.st.miss[aud];
+    this.save();
+    return b;
+  },
+  /* the settings block redraws itself while it is open */
+  paint() { const el = $('#cloud-block'); if (el) el.replaceWith(CloudBlock()); },
+  errText() {
+    return ({ 'signed-out': '로그인이 풀렸어요. 다시 로그인해 주세요.', 'no-tables': '서버에 아직 표가 없어요. Supabase에서 setup.sql을 실행해 주세요.', offline: '인터넷이 연결되지 않았어요. 연결되면 다시 맞춰요.', network: '서버에 닿지 않았어요. 잠시 뒤 다시 맞춰요.', server: '서버에서 오류가 났어요. 잠시 뒤 다시 맞춰요.' })[this.err] || '동기화하지 못했어요.';
+  }
+};
+const cloudErrText = e => ({ 'no-config': '먼저 서버를 연결해 주세요.', 'bad-url': '주소가 올바르지 않아요. https://로 시작하는 Project URL을 넣어 주세요.', 'bad-key': '키가 맞지 않아요. anon(public) 키를 넣어 주세요.', unreachable: '서버에 닿지 않았어요. 주소를 확인해 주세요.', offline: '인터넷이 연결되지 않았어요.', network: '서버에 닿지 않았어요.', 'rate-limit': '너무 자주 보냈어요. 잠시 뒤에 다시 해 주세요.', 'bad-email': '이메일 주소를 확인해 주세요.', 'bad-code': '번호가 맞지 않거나 시간이 지났어요. 다시 받아 주세요.', 'send-failed': '메일을 보내지 못했어요. 서버의 이메일 설정을 확인해 주세요.' })[e && e.kind] || '잠시 뒤에 다시 해 주세요.';
+function CloudBlock() {
+  const cfg = Cloud.config(), u = Cloud.user(), st = Sync.st;
+  const box = h('div', { id: 'cloud-block' });
+  const add = (...kids) => box.append(...kids.filter(Boolean));
+  if (!cfg) {
+    add(h('p', { class: 'hint', style: 'margin-bottom:8px' }, '로그인하면 여러 기기에서 같은 기록과 녹음을 써요. 먼저 내 Supabase 프로젝트를 연결해 주세요 (한 번만).'),
+      h('button', { class: 'btn soft sm', 'data-fk': 'cloud-config', onclick: openCloudConfig }, icon('link', 16), '서버 연결하기'));
+    return box;
+  }
+  if (!u || !st || st.uid !== u.id) {
+    const out = !u && st && Sync.err === 'signed-out';
+    add(out ? h('p', { class: 'hint warn', role: 'status' }, `로그인이 풀렸어요 (${st.email}). 다시 로그인하면 이어서 맞춰요. 이 폰의 기록은 그대로예요.`) : null,
+      h('p', { class: 'hint', style: 'margin-bottom:8px' }, '이메일로 받은 6자리 번호로 로그인해요. 같은 이메일로 로그인한 기기끼리 기록과 녹음이 맞춰져요.'),
+      h('div', { class: 'btn-row' },
+        h('button', { class: 'btn ink sm', 'data-fk': 'cloud-login', onclick: openLogin }, '이메일로 로그인'),
+        cfg.custom ? h('button', { class: 'btn ghost sm', onclick: openCloudConfig }, '서버 바꾸기') : null));
+    return box;
+  }
+  const when = st.lastAt ? `마지막으로 맞춘 때: ${fmtMD(ymd(new Date(st.lastAt)))} ${fmtHM(st.lastAt)}` : '아직 맞추지 않았어요';
+  const state = Sync.status === 'busy' ? '맞추는 중…' : Sync.status === 'error' ? Sync.errText() : when;
+  const upN = Object.keys(st.up).length, bigN = Object.keys(st.big).length;
+  const audioLine = !st.audio ? '녹음은 이 폰에만 둬요' : Sync.audioNote === 'wifi' ? '녹음은 Wi-Fi에 연결되면 주고받아요' : Sync.audioNote === 'error' ? '녹음을 주고받다가 멈췄어요. 다음에 이어서 해요.' : Sync.audioNote || `녹음 ${upN}개가 서버에 있어요${bigN ? ` · 50MB가 넘어서 못 올린 녹음 ${bigN}개` : ''}`;
+  add(
+    h('div', { class: 'cloud-me' }, icon('check', 16), h('span', { class: 'clip' }, u.email || st.email)),
+    h('p', { class: 'hint' + (Sync.status === 'error' ? ' warn' : ''), role: 'status' }, state),
+    h('p', { class: 'hint' }, audioLine),
+    h('div', { class: 'btn-row', style: 'margin-top:8px' },
+      h('button', { class: 'btn soft sm', 'data-fk': 'cloud-now', disabled: Sync.status === 'busy', onclick: () => { if (Sync.err === 'signed-out' || !Cloud.user()) { openLogin(); return; } Sync.run(true); } }, icon('repeat', 16), '지금 맞추기'),
+      h('button', { class: 'btn ghost sm', 'data-fk': 'cloud-out', onclick: () => confirmSheet({ title: '로그아웃할까요?', text: '이 폰의 기록과 녹음은 그대로 남아요. 다시 로그인하면 이어서 맞춰요.', ok: '로그아웃', onOk: async () => { await Sync.run(true); await Cloud.signOut(); Sync.err = null; Sync.status = 'idle'; Sync.paint(); toast('로그아웃했어요'); } }) }, '로그아웃')),
+    ToggleRow('녹음도 맞추기', st.audio, v => { st.audio = v; Sync.saveNow(); if (v) Sync.syncAudio(); Sync.paint(); }, '녹음 파일도 서버에 올리고 다른 기기에서 받아요. 무료 서버는 모두 합쳐 1GB까지예요.', 'mic'),
+    navigator.connection ? ToggleRow('Wi-Fi에서만 녹음 주고받기', st.wifiOnly, v => { st.wifiOnly = v; Sync.saveNow(); Sync.syncAudio(); }, '데이터 요금이 나가지 않게 해요. 글 기록은 언제나 맞춰요.', 'down') : null);
+  return box;
+}
+function openCloudConfig() {
+  const cur = Cloud.config();
+  const url = h('input', { class: 'input', type: 'url', inputmode: 'url', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', placeholder: 'https://xxxx.supabase.co', value: cur ? cur.url : '', 'aria-label': 'Project URL' });
+  const key = h('textarea', { class: 'input', rows: 3, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', placeholder: 'eyJhbGciOi… 또는 sb_publishable_…', 'aria-label': 'anon public 키' });
+  key.value = cur ? cur.key : '';
+  const msg = h('p', { class: 'hint', role: 'status' });
+  let s = null;
+  const ok = h('button', { class: 'btn ink', onclick: async () => {
+    ok.disabled = true; msg.textContent = '연결을 확인하는 중…';
+    try { await Cloud.setConfig(url.value, key.value); closeSheet(s, true); toast('서버를 연결했어요'); Sync.paint(); openLogin(); }
+    catch (e) { msg.textContent = cloudErrText(e); ok.disabled = false; }
+  } }, '연결하기');
+  s = openSheet({ title: '서버 연결', body: h('div', null,
+    h('p', { class: 'hint', style: 'margin-bottom:10px' }, 'Supabase > Project Settings > API(또는 Data API)에서 두 값을 복사해 넣어요. 이 폰에만 저장돼요.'),
+    field('Project URL', url), field('anon public 키 (publishable)', key), msg,
+    Cloud.config() && Cloud.config().custom ? h('button', { class: 'btn ghost danger sm', style: 'margin-top:8px', onclick: () => { Cloud.clearConfig(); closeSheet(s, true); Sync.paint(); toast('서버 연결을 지웠어요'); } }, '연결 지우기') : null),
+  foot: [ok] });
+}
+function openLogin() {
+  if (!Cloud.config()) { openCloudConfig(); return; }
+  let step = 'email', email = '', s = null, busy = false;
+  const body = h('div', { class: 'login' });
+  const msg = h('p', { class: 'hint', role: 'status', 'aria-live': 'polite' });
+  const draw = () => {
+    if (step === 'email') {
+      const inp = h('input', { class: 'input', type: 'email', inputmode: 'email', autocomplete: 'email', autocapitalize: 'off', spellcheck: 'false', placeholder: 'me@example.com', value: email, 'aria-label': '이메일', 'data-autofocus': '' });
+      const send = async () => {
+        if (busy) return;
+        email = inp.value.trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { msg.textContent = '이메일 주소를 확인해 주세요.'; return; }
+        busy = true; msg.textContent = '메일을 보내는 중…';
+        try { await Cloud.sendCode(email); step = 'code'; msg.textContent = ''; draw(); }
+        catch (e) { msg.textContent = cloudErrText(e); }
+        busy = false;
+      };
+      bindEnter(inp, send);
+      body.replaceChildren(h('p', { class: 'lead' }, '이메일로 6자리 번호를 보내 드려요. 같은 이메일로 로그인한 기기끼리 기록이 맞춰져요.'), field('이메일', inp), msg,
+        h('button', { class: 'btn ink wide', style: 'margin-top:10px', onclick: send }, '번호 받기'));
+      setTimeout(() => inp.focus(), 320);
+    } else {
+      const inp = h('input', { class: 'input code', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 10, placeholder: '123456', 'aria-label': '받은 번호' });
+      const verify = async () => {
+        if (busy) return;
+        const code = inp.value.replace(/\D/g, '');
+        if (code.length < 6) { msg.textContent = '메일로 받은 6자리 번호를 넣어 주세요.'; return; }
+        busy = true; msg.textContent = '확인하는 중…';
+        try { await Cloud.verifyCode(email, code); await afterLogin(); closeSheet(s, true); }
+        catch (e) { msg.textContent = cloudErrText(e); }
+        busy = false;
+      };
+      bindEnter(inp, verify);
+      body.replaceChildren(h('p', { class: 'lead' }, `${email}로 보낸 메일의 6자리 번호를 넣어 주세요. 안 보이면 스팸함도 확인해 주세요.`), field('번호', inp), msg,
+        h('button', { class: 'btn ink wide', style: 'margin-top:10px', onclick: verify }, '로그인'),
+        h('div', { class: 'btn-row', style: 'margin-top:6px' },
+          h('button', { class: 'btn ghost sm', onclick: async () => { msg.textContent = '다시 보내는 중…'; try { await Cloud.sendCode(email); msg.textContent = '다시 보냈어요.'; } catch (e) { msg.textContent = cloudErrText(e); } } }, '번호 다시 받기'),
+          h('button', { class: 'btn ghost sm', onclick: () => { step = 'email'; msg.textContent = ''; draw(); } }, '이메일 바꾸기')));
+      setTimeout(() => inp.focus(), 50);
+    }
+  };
+  draw();
+  s = openSheet({ title: '로그인', body });
+}
+/* a yes/no question that resolves false when the sheet is closed any other way */
+function askSheet({ title, text, ok, no, danger }) {
+  return new Promise(res => {
+    let s = null, answered = false;
+    const yes = h('button', { class: 'btn ' + (danger ? 'redb' : 'ink'), onclick: () => { answered = true; closeSheet(s, true); res(true); } }, ok || '확인');
+    const nope = h('button', { class: 'btn soft', 'data-autofocus': '', onclick: () => closeSheet(s, true) }, no || '취소');
+    s = openSheet({ title, body: h('p', { class: 'confirm-text' }, text || ''), foot: [nope, yes], onClose: () => { if (!answered) res(false); } });
+  });
+}
+/* the first time on this phone: what is here and what is on the server are put together */
+async function afterLogin() {
+  const u = Cloud.user();
+  if (!u) return;
+  const old = Sync.st;
+  if (old && old.uid !== u.id && entryDates().length) {
+    const go = await askSheet({ title: '다른 계정의 기록이 있어요', text: `이 폰의 기록은 ${old.email || '다른 계정'}과 맞추던 기록이에요. ${u.email} 계정에 합칠까요?`, ok: '합치기', no: '로그인 취소' });
+    if (!go) { await Cloud.signOut(); Sync.paint(); return; }
+  }
+  if (!old || old.uid !== u.id) Sync.st = Sync.blank(u);
+  else Sync.st.email = u.email;
+  Sync.err = null; Sync.toldOut = false;
+  await Sync.saveNow();
+  toast(entryDates().length ? '로그인했어요. 이 폰의 기록과 서버의 기록을 맞추는 중이에요' : '로그인했어요. 기록을 받아 오는 중이에요');
+  Sync.paint();
+  await Sync.run(true);
+  if (Sync.status === 'idle') toast('기록을 맞췄어요');
+  else toast(Sync.errText());
+}
+
+/* ================= 앱 업데이트 (in the app, no reinstall) ================= */
+async function checkUpdate(manual) {
+  if (!OTA.isNative && !manual) return;
+  const u = lsGet(LS_UI, {});
+  if (!manual && u.otaAt && Date.now() - u.otaAt < 6 * 3600e3) return;
+  try {
+    const r = await OTA.check();
+    uiSet('otaAt', Date.now());
+    S.update = r.latest;
+    if (r.latest) { if (manual) openUpdate(r.latest); else softRender(); }
+    else if (manual) toast(r.cur ? `최신 버전이에요 (${r.cur.version})` : '버전 정보를 읽지 못했어요');
+  } catch (e) {
+    if (manual) toast(e && /signature|bad-/.test(e.message) ? '업데이트 정보를 믿을 수 없어서 받지 않았어요' : '업데이트를 확인하지 못했어요. 인터넷을 확인해 주세요.');
+  }
+}
+function UpdateBanner() {
+  const L = S.update;
+  if (!L || !OTA.isNative) return null;
+  const u = lsGet(LS_UI, {});
+  if (u.otaLater && u.otaLater.code === L.code && Date.now() < u.otaLater.until) return null;
+  const box = h('div', { class: 'banner news update' },
+    h('b', null, `새 버전 ${L.version}이 나왔어요`),
+    L.notes && L.notes.length ? h('ul', null, L.notes.slice(0, 3).map(n => h('li', null, n))) : null,
+    h('div', { class: 'btn-row', style: 'margin-top:8px' },
+      h('button', { class: 'btn ink sm', 'data-fk': 'ota-open', onclick: () => openUpdate(L) }, icon('down', 16), '업데이트'),
+      h('button', { class: 'btn ghost sm', onclick: () => { uiSet('otaLater', { code: L.code, until: Date.now() + 3 * 86400e3 }); box.remove(); toast('설정 > 앱 정보에서 언제든 업데이트할 수 있어요'); } }, '나중에')));
+  return box;
+}
+async function openUpdate(L) {
+  const info = await Native.version();
+  const apk = info && +info.build ? +info.build : 0;
+  const needApk = L.minApk && apk && apk < L.minApk;
+  const prog = h('div', { class: 'ota-prog', hidden: true }, h('i'));
+  const msg = h('p', { class: 'hint', role: 'status', 'aria-live': 'polite' });
+  let s = null, running = false;
+  const go = h('button', { class: 'btn ink', disabled: !!needApk || !OTA.isNative, onclick: async () => {
+    if (running) return;
+    running = true; go.disabled = true; prog.hidden = false;
+    msg.textContent = '새 버전을 받는 중…';
+    try {
+      await flushWrites();
+      await OTA.apply(L, (done, total, fetched) => { prog.firstChild.style.width = `${Math.round(done / total * 100)}%`; msg.textContent = `받는 중 ${done}/${total}${fetched ? ` · 새 파일 ${fetched}개` : ''}`; });
+      msg.textContent = '새 버전으로 다시 열어요…';
+    } catch (e) {
+      running = false; go.disabled = false; prog.hidden = true;
+      msg.textContent = e && /bad-hash/.test(e.message) ? '받은 파일이 올바르지 않아서 멈췄어요. 잠시 뒤에 다시 해 주세요.' : '업데이트하지 못했어요. 인터넷을 확인하고 다시 해 주세요.';
+    }
+  } }, '지금 업데이트');
+  s = openSheet({ title: `업데이트 ${L.version}`, body: h('div', { class: 'ota' },
+    L.notes && L.notes.length ? h('ul', { class: 'ota-notes' }, L.notes.map(n => h('li', null, n))) : h('p', { class: 'hint' }, '새 버전이 나왔어요.'),
+    needApk ? h('p', { class: 'banner warn' }, '이 버전은 새 설치 파일(APK)이 필요해요. 새 APK를 받아 설치해 주세요.') : h('p', { class: 'hint' }, '기록과 녹음은 그대로예요. 바뀐 파일만 받아서 앱 안에서 바꾸고, 잠깐 다시 열려요.'),
+    !OTA.isNative ? h('p', { class: 'hint' }, '안드로이드 앱에서만 업데이트할 수 있어요.') : null,
+    prog, msg),
+  foot: [go], beforeClose: () => !running || (toast('받는 중이에요. 잠시만 기다려 주세요'), false) });
+}
+function UpdateRow() {
+  const line = h('p', { class: 'hint' }, '노래일기');
+  Promise.all([OTA.current(), Native.version()]).then(([cur, v]) => { line.textContent = `노래일기 ${cur ? cur.version : (v ? v.version : '')}${v ? ` · 설치 파일 ${v.version} (${v.build})` : ''}`; });
+  return h('div', null, line,
+    OTA.isNative ? h('button', { class: 'btn soft sm', style: 'margin-top:6px', 'data-fk': 'ota-check', onclick: () => checkUpdate(true) }, icon('repeat', 16), '업데이트 확인') : null);
 }
 
 /* ================= boot ================= */
@@ -4707,8 +5131,10 @@ function bindGlobal() {
     lastBack = Date.now();
     toast('한 번 더 누르면 앱을 닫아요');
   });
-  Native.onPause(() => { flushWrites(); autoBackup(); });
-  Native.onResume(() => followToday(true));
+  Native.onPause(() => { flushWrites(); autoBackup(); Sync.run(); });
+  Native.onResume(() => { followToday(true); Sync.run(); checkUpdate(false); });
+  window.addEventListener('online', () => Sync.run());
+  setInterval(() => { if (document.visibilityState === 'visible') Sync.run(); }, 5 * 60000);
 }
 async function takeShared(list) {
   const files = [];
@@ -4730,7 +5156,10 @@ function afterLoad() {
   Native.onShared(takeShared);
   Files.clearShareCache();
   setTimeout(() => { if (!Sheets.length) offerDraft(); }, 800);
-  if (!Native.isNative) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer };
+  OTA.confirmBoot().then(() => { const v = OTA.takeUpdated(); if (v) toast(`${v}로 업데이트했어요`); }).catch(() => {});
+  setTimeout(() => checkUpdate(false), 5000);
+  if (Sync.on()) setTimeout(() => Sync.run(), 1500);
+  if (!Native.isNative || window.SD_TEST) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer, Sync, Cloud, OTA, openLogin, openUpdate, checkUpdate, fp, queueWrite, flushWrites, storeAudio, audioBlob, AUD, afterLogin };
   const R = S.settings.reminder;
   /* the switch stays on: once notifications are allowed again, the reminder comes back by itself */
   if (R.on) Native.ensureReminder(R.h, R.m, REMIND_TEXT).catch(() => {});

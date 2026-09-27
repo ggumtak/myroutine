@@ -10,6 +10,11 @@ Capacitor(Android) 앱 `com.songdiary.app`의 웹 소스와 APK 재빌드 도구
   - `songsearch.js` 노래 찾기 (초성·부분 입력 매칭, Apple Music 곡 검색)
   - `scales.js` 스케일 연습 (스케일 목록, 계이름, 마이크 음정 인식)
   - `practice.js` 강의 연습법 (노래 전 루틴, 발음 찾기, 노래할 때 기억할 것, 멈춤 규칙)
+  - `update.js` 앱 안 업데이트 (서명된 새 버전 확인·받기·바꾸기)
+  - `cloud.js` 계정·동기화 (Supabase: 이메일 번호 로그인, 기록·녹음 저장)
+  - `release.json` 이 버전의 번호와 파일 목록 (`tools/publish_update.py`가 만듦)
+- `release/latest.json` — 앱이 확인하는 최신 버전 목록 (서명됨, main 브랜치에서 읽음)
+- `cloud/` — Supabase 준비 안내(`README.md`)와 표·규칙(`setup.sql`)
   - `native.js` 저장소(IndexedDB)·백업·네트워크·안드로이드 연결
   - `fonts/`, `fonts.css` Gaegu · IBM Plex Sans KR (앱 안에 포함, 오프라인 동작)
 - `tools/build_apk.py` — 안드로이드 SDK 없이 APK를 다시 만드는 스크립트
@@ -74,6 +79,38 @@ Capacitor(Android) 앱 `com.songdiary.app`의 웹 소스와 APK 재빌드 도구
 | ③ 노래할 때 기억할 것 | 오늘의 목표 아래. 하나를 누르면 그게 오늘 집중할 것이 되고, 타이머·노래·녹음 화면에 보여 줌 |
 | ④ 오늘의 기록 | 돌아보기 맨 위 ‘오늘의 기록’ 칩. 이미 있는 자리(연습 시간, 목표, 아쉬웠던 점 ‘뒤집힘’·‘조임’, 잘 된 점, ‘녹음 듣고’ 피드백)로 바로 이동. 요약 보내기에도 들어감 |
 
+## 앱 안 업데이트
+
+앱은 열 때(6시간에 한 번)와 돌아올 때 `main` 브랜치의 `songdiary/release/latest.json`을 확인해요.
+새 버전이면 오늘 화면 위에 알려 주고, **업데이트**를 누르면 바뀐 파일만 받아서 앱 안에서 바꿔요 (다시 설치 X).
+
+- 목록은 ECDSA P-256 키로 서명돼요. 앱에 든 공개 키와 맞지 않으면 받지 않아요. 파일마다 sha256도 확인해요.
+- 받은 버전은 안드로이드 앱 폴더(`files/ota/v<번호>`)에 두고 Capacitor의 `WebView.setServerBasePath`로 바꿔요.
+  새 버전이 정상으로 뜬 뒤에만 그 자리를 저장하므로, 뜨지 않으면 15초 뒤 이전 버전으로 돌아가요.
+- 새 APK를 설치하면 안드로이드가 APK 안의 화면을 다시 써요 (Capacitor 기본 동작).
+- 안드로이드 쪽(플러그인 등)이 바뀌어야 하는 버전은 `--min-apk`로 표시하고, 이때는 새 APK를 설치해야 해요.
+
+새 버전 내보내기:
+
+```bash
+SONGDIARY_OTA_KEY=ota-key.pem python3 songdiary/tools/publish_update.py \
+  --version 1.4.1 --code 7 --note "바뀐 점 한 줄" --note "또 한 줄"
+git add songdiary && git commit -m "노래일기 1.4.1" && (PR을 main에 합치면 배포돼요)
+```
+
+- `--code`는 버전마다 1씩 올려요 (APK의 versionCode와 같은 번호를 씀).
+- 서명 키(`ota-key.pem`)는 저장소에 올리지 말 것. 잃어버리면 새 키를 넣은 APK를 한 번 새로 설치해야 해요.
+
+## 계정·동기화
+
+설정 → **계정·동기화**. 같은 이메일로 로그인한 기기끼리 기록·설정·녹음이 맞춰져요.
+서버는 본인 Supabase 프로젝트이고, 준비 방법은 [`cloud/README.md`](cloud/README.md)에 있어요.
+
+- 날마다 한 줄(`sd_days`)과 설정 한 줄(`sd_settings`)을 저장해요. 각 줄의 `rev`로 "내가 본 뒤로 바뀌었나"를 확인하고
+  (`sd_push_day`가 비교 후 저장), 둘 다 바뀌었으면 백업 합치기와 같은 방식으로 합쳐요.
+- 폰마다 마지막으로 맞춘 상태의 지문을 기억해서, 무엇이 바뀌었는지(백업 불러오기로 바뀐 것까지) 찾아 보내요.
+- 알림 시각은 폰마다 따로예요. 녹음은 비공개 버킷 `sd-audio/<계정>/<녹음 id>`에 올리고, 기본은 Wi-Fi에서만 주고받아요.
+
 ## APK 다시 만들기
 
 ```bash
@@ -84,11 +121,12 @@ keytool -genkeypair -alias songdiary -keyalg RSA -keysize 2048 -validity 36500 \
 # 기존 APK의 안드로이드 부분 + www/ → 새 APK (정렬 + v2 서명)
 SONGDIARY_STOREPASS=... python3 songdiary/tools/build_apk.py \
   --base 노래일기-1.0.0.apk --www songdiary/www --keystore songdiary-release.p12 \
-  --version-name 1.3.1 --version-code 5 --out 노래일기-1.3.1.apk
+  --version-name 1.4.0 --version-code 6 --out 노래일기-1.4.0.apk
 ```
 
 - 필요한 것: Python 3.8+, `cryptography` 패키지
 - `--version-name`은 기존 값과 글자 수가 같아야 함 (예: `1.0.0` → `1.1.0`)
+- 먼저 `publish_update.py`로 `www/release.json`을 같은 버전으로 만들어 두세요 (APK 안의 버전 = 앱이 아는 버전)
 - 키 파일(`.p12`)은 저장소에 올리지 말 것
 
 ## 브라우저에서 확인
