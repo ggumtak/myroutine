@@ -47,17 +47,17 @@ const Store = {
     });
   },
   keys(store) { return withDB(db => reqP(db.transaction(store).objectStore(store).getAllKeys())); },
-  /* entries: [[key, value|undefined]] — undefined deletes */
-  write(store, entries) {
+  /* entries: [[key, value|undefined]] — undefined deletes. opts {durability: 'strict'}: on disk before it resolves */
+  write(store, entries, opts) {
     if (!entries.length) return Promise.resolve();
     return withDB(db => {
-      const t = db.transaction(store, 'readwrite');
+      const t = opts ? db.transaction(store, 'readwrite', opts) : db.transaction(store, 'readwrite');
       const st = t.objectStore(store);
       for (const [k, v] of entries) { if (v === undefined) st.delete(k); else st.put(v, k); }
       return done(t);
     });
   },
-  put(store, key, val) { return this.write(store, [[key, val]]); },
+  put(store, key, val, opts) { return this.write(store, [[key, val]], opts); },
   del(store, key) { return this.write(store, [[key, undefined]]); },
   clear(store) { return withDB(db => { const t = db.transaction(store, 'readwrite'); t.objectStore(store).clear(); return done(t); }); }
 };

@@ -17,21 +17,22 @@ const okUrl = u => /^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(u) || /^http:\/\/(127\
 function err(kind, extra) { const e = new Error(kind); e.kind = kind; Object.assign(e, extra || {}); return e; }
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-/* The login stays until 로그아웃 (자동 로그인). Every refresh replaces the refresh token and the old one stops
-   working, so the newest one must not be lost: it is kept in localStorage (read right away) and in IndexedDB,
-   which is written through at once — Android may end the app a few seconds after a refresh, before the WebView
-   has put localStorage on disk. Whichever copy is newer wins when the app starts (restore). */
+/* The login stays until 로그아웃 (자동 로그인): Supabase refresh tokens don't expire, but each refresh replaces the
+   token, and a token two replacements old ends the login. So the newest one must not be lost: it is kept in
+   localStorage (read right away) and in IndexedDB, written with strict durability before it is used — the WebView
+   puts localStorage on disk about a second later, and Android may end the app in between. Whichever copy is newer
+   wins when the app starts (restore). */
 const idb = () => (window.SD && window.SD.Store) || null;
 function saveAuth(v) {
   const prev = lsGet(LS_AUTH, null);
   const rec = Object.assign({}, v, { at: Math.max(Date.now(), ((prev && prev.at) || 0) + 1) });
   lsSet(LS_AUTH, rec);
   const S = idb();
-  return S ? S.put('meta', 'auth', rec).catch(() => {}) : Promise.resolve();
+  return S ? S.put('meta', 'auth', rec, { durability: 'strict' }).catch(() => {}) : Promise.resolve();
 }
-/* the answers to a refresh that mean this login is over (the others — too many requests, server trouble,
-   no connection — leave it as it is and are tried again later) */
-const GONE = ['refresh_token_not_found', 'refresh_token_already_used', 'session_not_found', 'session_expired', 'user_not_found', 'user_banned'];
+/* the answers to a refresh that mean this login is over (always HTTP 400). Everything else — 401 (a wrong key, from
+   the gateway), 409 (refreshes at the same moment), 429, 5xx, no connection — leaves it as it is and is tried later. */
+const GONE = ['refresh_token_not_found', 'refresh_token_already_used', 'session_not_found', 'session_expired', 'user_not_found', 'user_banned', 'validation_failed'];
 
 const Cloud = {
   BUCKET,
@@ -121,14 +122,16 @@ const Cloud = {
         catch (e) { if (i >= 2 || e.kind === 'offline') throw e; await wait(400); }
       }
       const b = await this.body(r);
-      if (r.ok) { await this.keep(b); return; }
       const now = this.session();
-      if (now && now.refresh_token !== s.refresh_token) return; /* replaced meanwhile by a newer one */
-      const code = b && typeof b === 'object' ? String(b.error_code || b.error || '') : '';
+      /* logged out meanwhile, or replaced by a newer one (e.g. restored): this answer is not kept */
+      if (!now) throw err('signed-out');
+      if (now.refresh_token !== s.refresh_token) return;
+      if (r.ok) { await this.keep(b); return; }
+      const code = b && typeof b === 'object' ? String(b.error_code || (typeof b.code === 'string' ? b.code : '') || b.error || '') : '';
       const text = b && typeof b === 'object' ? String(b.msg || b.message || b.error_description || '') : String(b || '');
       if (r.status === 429) throw err('rate-limit', { status: r.status });
-      if (r.status === 401 && /api ?key/i.test(text)) throw err('bad-key', { status: r.status });
-      if (GONE.includes(code) || (r.status === 400 && (code === 'invalid_grant' || /refresh token/i.test(text)))) {
+      if (r.status === 401) throw err('bad-key', { status: r.status });
+      if (r.status === 400 && (GONE.includes(code) || code === 'invalid_grant' || /refresh token/i.test(text))) {
         await saveAuth({ out: true });
         throw err('signed-out', { status: r.status, detail: b });
       }
@@ -140,7 +143,9 @@ const Cloud = {
     const s = this.session();
     if (!s) throw err('signed-out');
     if (s.expires_at - Date.now() < 60000) await this.refresh();
-    return this.session().access_token;
+    const n = this.session();
+    if (!n) throw err('signed-out');
+    return n.access_token;
   },
   /* an authorised request; retried once with a fresh token if the server says the old one expired */
   async call(path, o = {}) {
@@ -149,11 +154,14 @@ const Cloud = {
     let r = await this.raw(c.url, c.key, path, Object.assign({}, o, { token: await this.token() }));
     if (r.status === 401 || (r.status === 400 && /storage/.test(path) && /jwt|exp|Unauthorized/i.test(await r.clone().text()))) {
       await this.refresh();
-      r = await this.raw(c.url, c.key, path, Object.assign({}, o, { token: this.session().access_token }));
+      r = await this.raw(c.url, c.key, path, Object.assign({}, o, { token: await this.token() }));
     }
     return r;
   },
   async signOut() {
+    /* the server ends the login only for a token that is still good */
+    const s0 = this.session();
+    if (s0 && s0.expires_at - Date.now() < 60000) await Promise.race([this.refresh().catch(() => {}), wait(5000)]);
     const c = this.config(), s = this.session();
     await saveAuth({ out: true });
     if (c && s) { try { await this.raw(c.url, c.key, '/auth/v1/logout?scope=local', { method: 'POST', token: s.access_token, timeout: 6000 }); } catch (e) { /* signed out here anyway */ } }
