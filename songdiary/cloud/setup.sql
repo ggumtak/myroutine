@@ -92,6 +92,9 @@ grant execute on function public.sd_push_day(text, jsonb, bigint) to authenticat
 grant execute on function public.sd_push_settings(jsonb, bigint) to authenticated;
 grant select, insert, update, delete on public.sd_days, public.sd_settings to authenticated;
 grant usage on sequence public.sd_seq to authenticated;
+-- nothing for logged-out requests (the rules above already allow them nothing; this takes away the default grants too)
+revoke all on public.sd_days, public.sd_settings from anon;
+revoke all on sequence public.sd_seq from anon;
 
 -- recordings: a private bucket, one folder per account (<user id>/<recording id>)
 insert into storage.buckets (id, name, public) values ('sd-audio', 'sd-audio', false)

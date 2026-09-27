@@ -5066,10 +5066,10 @@ function CloudBlock() {
     const out = !u && st && Sync.err === 'signed-out';
     if (out) box.dataset.said = `로그인이 풀렸어요 (${st.email}). 다시 로그인하면 이어서 맞춰요. 이 폰의 기록은 그대로예요.`;
     add(out ? h('p', { class: 'hint warn' }, box.dataset.said) : null,
-      h('p', { class: 'hint', style: 'margin-bottom:8px' }, '이메일로 받은 6자리 번호로 한 번만 로그인하면, 그다음부터는 자동으로 로그인돼요. 같은 이메일로 로그인한 기기끼리 기록과 녹음이 맞춰져요.'),
+      h('p', { class: 'hint', style: 'margin-bottom:8px' }, '이메일로 받은 번호로 한 번만 로그인하면, 그다음부터는 자동으로 로그인돼요. 같은 이메일로 로그인한 기기끼리 기록과 녹음이 맞춰져요.'),
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn ink sm', 'data-fk': 'cloud-login', onclick: openLogin }, '이메일로 로그인'),
-        cfg.custom ? h('button', { class: 'btn ghost sm', onclick: openCloudConfig }, '서버 바꾸기') : null));
+        h('button', { class: 'btn ghost sm', 'data-fk': 'cloud-config', onclick: openCloudConfig }, cfg.custom ? '서버 바꾸기' : '다른 서버 쓰기')));
     return box;
   }
   const when = st.lastAt ? `마지막으로 맞춘 때: ${fmtMD(ymd(new Date(st.lastAt)))} ${fmtHM(st.lastAt)}` : '아직 맞추지 않았어요';
@@ -5152,7 +5152,7 @@ function openLogin() {
         busy = false;
       };
       bindEnter(inp, send);
-      body.replaceChildren(h('p', { class: 'lead' }, '이메일로 6자리 번호를 보내 드려요. 이 폰에서는 한 번만 로그인하면 로그아웃하기 전까지 자동으로 로그인돼요.'), field('이메일', inp), msg,
+      body.replaceChildren(h('p', { class: 'lead' }, '이메일로 로그인 번호를 보내 드려요. 이 폰에서는 한 번만 로그인하면 로그아웃하기 전까지 자동으로 로그인돼요.'), field('이메일', inp), msg,
         h('button', { class: 'btn ink wide', style: 'margin-top:10px', onclick: send }, '번호 받기'));
       setTimeout(() => inp.focus(), 320);
     } else {
@@ -5160,7 +5160,7 @@ function openLogin() {
       const verify = async () => {
         if (busy) return;
         const code = inp.value.replace(/\D/g, '');
-        if (code.length < 6) { msg.textContent = '메일로 받은 6자리 번호를 넣어 주세요.'; return; }
+        if (code.length < 6) { msg.textContent = '메일로 받은 번호(6자리 이상)를 모두 넣어 주세요.'; return; }
         busy = true; msg.textContent = '확인하는 중…';
         try { await Cloud.verifyCode(email, code); }
         catch (e) { msg.textContent = cloudErrText(e); busy = false; return; }
@@ -5169,7 +5169,7 @@ function openLogin() {
         busy = false;
       };
       bindEnter(inp, verify);
-      body.replaceChildren(h('p', { class: 'lead' }, `${email} 주소로 보낸 메일의 6자리 번호를 넣어 주세요. 안 보이면 스팸함도 확인해 주세요.`), field('번호', inp), msg,
+      body.replaceChildren(h('p', { class: 'lead' }, `${email} 주소로 보낸 메일의 번호를 넣어 주세요. 안 보이면 스팸함도 확인해 주세요.`), field('번호', inp), msg,
         h('button', { class: 'btn ink wide', style: 'margin-top:10px', onclick: verify }, '로그인'),
         h('div', { class: 'btn-row', style: 'margin-top:6px' },
           h('button', { class: 'btn ghost sm', onclick: async () => { if (busy) return; busy = true; msg.textContent = '다시 보내는 중…'; try { await Cloud.sendCode(email); msg.textContent = '다시 보냈어요.'; } catch (e) { msg.textContent = cloudErrText(e); } busy = false; } }, '번호 다시 받기'),

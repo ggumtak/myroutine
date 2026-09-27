@@ -3,10 +3,10 @@
 (function () {
 'use strict';
 
-/* The project this app uses. Filled in once the Supabase project exists; until then the address and the public
-   key can be entered in 설정 > 계정·동기화 (kept on this phone only). The public (anon/publishable) key is meant
-   to be in apps: what each account may read or write is enforced by the database rules in cloud/setup.sql. */
-const PROJECT = { url: '', key: '' };
+/* The project this app uses (the owner's Supabase project, Seoul). Another one can be entered in 설정 > 계정·동기화
+   (kept on that phone only). The publishable key is meant to be in apps: what each account may read or write is
+   enforced by the database rules in cloud/setup.sql. */
+const PROJECT = { url: 'https://tihkkibxulwdttqpqysr.supabase.co', key: 'sb_publishable_bxNL8TopRdgbGRleaLJv2A_QR75aFmb' };
 const LS_AUTH = 'songdiary:v1:auth', LS_CFG = 'songdiary:v1:cloudcfg', LS_EMAIL = 'songdiary:v1:email';
 const BUCKET = 'sd-audio';
 
