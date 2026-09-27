@@ -5308,6 +5308,13 @@ function UpdateRow() {
     OTA.isNative ? h('button', { class: 'btn soft sm', style: 'margin-top:6px', 'data-fk': 'ota-check', onclick: () => checkUpdate(true) }, icon('repeat', 16), '업데이트 확인') : null);
 }
 
+/* leaving the app: typing ends here (what was typed is saved already), so a change from another phone to the same
+   day can be put together with it and everything is sent before Android may end the app */
+function onAppPause() {
+  const a = document.activeElement;
+  if (isTyping() && a && !a.closest('.sheet')) a.blur();
+  flushWrites(); autoBackup(); Sync.run();
+}
 /* ================= boot ================= */
 function bindViewport() {
   const vv = window.visualViewport;
@@ -5403,7 +5410,7 @@ function bindGlobal() {
     lastBack = Date.now();
     toast('한 번 더 누르면 앱을 닫아요');
   });
-  Native.onPause(() => { flushWrites(); autoBackup(); Sync.run(); });
+  Native.onPause(onAppPause);
   Native.onResume(() => { followToday(true); Sync.run(); checkUpdate(false); });
   window.addEventListener('online', () => Sync.run());
   setInterval(() => { if (document.visibilityState === 'visible') Sync.run(); }, 5 * 60000);
@@ -5431,7 +5438,7 @@ function afterLoad() {
   OTA.confirmBoot().then(() => { const v = OTA.takeUpdated(); if (v) toast(`${v} 버전으로 업데이트했어요`); }).catch(() => {});
   setTimeout(() => checkUpdate(false), 5000);
   if (Sync.on()) setTimeout(() => Sync.run(), 1500);
-  if (!Native.isNative || window.SD_TEST) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer, Sync, Cloud, OTA, openLogin, openUpdate, checkUpdate, fp, queueWrite, flushWrites, storeAudio, audioBlob, AUD, afterLogin, audioWhy: () => audioWhy, merge3, mergeList, mergeSet3, dayBase, setBase };
+  if (!Native.isNative || window.SD_TEST) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer, Sync, Cloud, OTA, openLogin, openUpdate, checkUpdate, fp, queueWrite, flushWrites, storeAudio, audioBlob, AUD, afterLogin, audioWhy: () => audioWhy, onAppPause, merge3, mergeList, mergeSet3, dayBase, setBase };
   const R = S.settings.reminder;
   /* the switch stays on: once notifications are allowed again, the reminder comes back by itself */
   if (R.on) Native.ensureReminder(R.h, R.m, REMIND_TEXT).catch(() => {});
