@@ -58,6 +58,16 @@ const Store = {
     });
   },
   put(store, key, val, opts) { return this.write(store, [[key, val]], opts); },
+  /* several stores in one transaction: { store: [[key, value|undefined]] } — all written or none */
+  writeAll(map, opts) {
+    const stores = Object.keys(map).filter(k => map[k] && map[k].length);
+    if (!stores.length) return Promise.resolve();
+    return withDB(db => {
+      const t = opts ? db.transaction(stores, 'readwrite', opts) : db.transaction(stores, 'readwrite');
+      for (const name of stores) { const st = t.objectStore(name); for (const [k, v] of map[name]) { if (v === undefined) st.delete(k); else st.put(v, k); } }
+      return done(t);
+    });
+  },
   del(store, key) { return this.write(store, [[key, undefined]]); },
   clear(store) { return withDB(db => { const t = db.transaction(store, 'readwrite'); t.objectStore(store).clear(); return done(t); }); }
 };

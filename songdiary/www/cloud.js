@@ -91,8 +91,9 @@ const Cloud = {
     if (!c) throw err('no-config');
     const r = await this.raw(c.url, c.key, '/auth/v1/otp', { json: { email, create_user: true } });
     if (r.ok) { lsSet(LS_EMAIL, email); return; }
-    const b = await this.body(r);
-    throw err(r.status === 429 ? 'rate-limit' : (b && b.error_code) === 'validation_failed' ? 'bad-email' : 'send-failed', { status: r.status, detail: b });
+    const b = await this.body(r), code = b && typeof b === 'object' ? String(b.error_code || '') : '';
+    throw err(r.status === 429 ? 'rate-limit' : code === 'validation_failed' ? 'bad-email'
+      : code === 'email_address_not_authorized' ? 'not-authorized' : (code === 'otp_disabled' || code === 'signup_disabled') ? 'no-signup' : 'send-failed', { status: r.status, detail: b });
   },
   async verifyCode(email, code) {
     const c = this.config();
@@ -105,7 +106,8 @@ const Cloud = {
   },
   keep(b) {
     if (!b || !b.access_token || !b.refresh_token || !b.user || !b.user.id) throw err('bad-session');
-    const exp = b.expires_at ? b.expires_at * 1000 : Date.now() + (b.expires_in || 3600) * 1000;
+    /* by this phone's clock (a phone whose clock runs ahead would otherwise refresh before every request) */
+    const exp = b.expires_in ? Date.now() + b.expires_in * 1000 : b.expires_at ? b.expires_at * 1000 : Date.now() + 3600e3;
     return saveAuth({ access_token: b.access_token, refresh_token: b.refresh_token, expires_at: exp, user: { id: b.user.id, email: b.user.email } });
   },
   refreshing: null,
@@ -166,6 +168,11 @@ const Cloud = {
     await saveAuth({ out: true });
     if (c && s) { try { await this.raw(c.url, c.key, '/auth/v1/logout?scope=local', { method: 'POST', token: s.access_token, timeout: 6000 }); } catch (e) { /* signed out here anyway */ } }
   },
+  /* ends the login on every other phone (a lost phone keeps no access); this one stays logged in */
+  async signOutOthers() {
+    const r = await this.call('/auth/v1/logout?scope=others', { method: 'POST', timeout: 10000 });
+    if (!r.ok && r.status !== 204) throw err('server', { status: r.status });
+  },
 
   /* ---------- records ---------- */
   async select(table, query) {
@@ -188,6 +195,13 @@ const Cloud = {
     if (r.ok) return;
     const b = await this.body(r);
     throw err(r.status === 413 || (b && String(b.statusCode) === '413') ? 'too-big' : 'server', { status: r.status, detail: b });
+  },
+  async remove(aud) {
+    const r = await this.call(`/storage/v1/object/${BUCKET}/${this.audioPath(aud)}`, { method: 'DELETE', timeout: 20000 });
+    if (r.ok) return;
+    const b = await this.body(r);
+    if (b && String(b.statusCode) === '404') return; /* already gone */
+    throw err('server', { status: r.status, detail: b });
   },
   async download(aud) {
     const r = await this.call(`/storage/v1/object/authenticated/${BUCKET}/${this.audioPath(aud)}`, { timeout: 180000 });

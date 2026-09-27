@@ -31,14 +31,36 @@ const FS = (method, opts) => native('Filesystem', method, opts);
 const okPath = p => typeof p === 'string' && p.length < 200 && /^[A-Za-z0-9_.\-/]+$/.test(p) && !p.split('/').some(s => !s || s === '.' || s === '..');
 const enc = p => p.split('/').map(encodeURIComponent).join('/');
 
-async function getBytes(url, timeoutMs = 20000) {
+/* gives up only when nothing arrives for idleMs, so a big file on a slow connection still finishes */
+async function getBytes(url, idleMs = 20000) {
   const ctl = typeof AbortController === 'function' ? new AbortController() : null;
-  const t = setTimeout(() => { if (ctl) ctl.abort(); }, timeoutMs);
+  let t = 0;
+  const arm = () => { clearTimeout(t); t = setTimeout(() => { if (ctl) ctl.abort(); }, idleMs); };
+  arm();
   try {
     const r = await fetch(url, { cache: 'no-store', credentials: 'omit', signal: ctl ? ctl.signal : undefined });
     if (!r.ok) { const e = new Error('http ' + r.status); e.status = r.status; throw e; }
-    return await r.arrayBuffer();
+    if (!r.body || typeof r.body.getReader !== 'function') return await r.arrayBuffer();
+    const rd = r.body.getReader(), parts = [];
+    let n = 0;
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      parts.push(value); n += value.length; arm();
+    }
+    const out = new Uint8Array(n);
+    let o = 0;
+    for (const p of parts) { out.set(p, o); o += p.length; }
+    return out.buffer;
   } finally { clearTimeout(t); }
+}
+/* the copy the WebView serves now: a downloaded one ({code, path}) or the APK's own ({asset}); null if unknown */
+async function served() {
+  try {
+    const p = String(((await native('WebView', 'getServerBasePath')) || {}).path || '');
+    const m = /\/ota\/v(\d+)\/?$/.exec(p);
+    return m ? { code: +m[1], path: p } : { asset: true, path: p };
+  } catch (e) { return null; }
 }
 
 /* the version this copy of the app is (written by the publish tool) */
@@ -77,8 +99,8 @@ const OTA = {
     const s = load();
     return { cur, latest: latest.code > cur.code && s.bad !== latest.code ? latest : null, published: latest };
   },
-  /* downloads the changed files, copies the rest from this copy, checks all of them, then switches.
-     onProgress(done, total, fetched) */
+  /* downloads the changed files (by their sha256, from the version's own folder), copies the rest from this copy,
+     checks all of them, then switches. onProgress(done, total, fetched) */
   async apply(latest, onProgress) {
     if (!isNative) throw new Error('unsupported');
     const cur = await current();
@@ -93,7 +115,7 @@ const OTA = {
         try { buf = await getBytes(enc(p)); if (await sha256(buf) !== hash) buf = null; } catch (e) { buf = null; }
       }
       if (!buf) {
-        buf = await getBytes(latest.base + enc(p));
+        buf = await getBytes(latest.base + hash);
         fetched++;
         if (await sha256(buf) !== hash) throw new Error('bad-hash:' + p);
       }
@@ -111,38 +133,56 @@ const OTA = {
     }
     const uri = (await FS('getUri', { path: dir, directory: 'DATA' })).uri;
     const path = decodeURI(String(uri).replace(/^file:\/\//, ''));
-    const s = load();
+    const s = load(), sv = await served();
     s.pending = latest.code;
     s.pendingPath = path;
-    s.prev = s.active && s.activePath ? { type: 'file', path: s.activePath } : { type: 'asset' };
+    delete s.started;
+    /* if the new copy doesn't start, back to the one running now */
+    s.prev = sv && sv.code ? { type: 'file', path: sv.path } : { type: 'asset' };
     save(s);
     /* the WebView reloads from the new copy; it is kept only after it starts up fine (confirmBoot) */
     await native('WebView', 'setServerBasePath', { path });
   },
-  /* called once the app has started and drawn its first screen */
+  /* called once the app has started and drawn its first screen. What the WebView actually serves decides:
+     the notes kept here can lag behind when Android ends the app right after a switch. */
   async confirmBoot() {
     window.__sdBooted = true;
     if (!isNative) return;
     const cur = await current();
     if (!cur) return;
-    const s = load();
-    if (s.pending && s.pending === cur.code) {
-      try { await native('WebView', 'persistServerBasePath'); } catch (e) { return; }
-      s.active = s.pending; s.activePath = s.pendingPath;
-      delete s.pending; delete s.pendingPath; delete s.prev;
-      s.updatedTo = cur.version;
+    const s = load(), sv = await served();
+    if (s.pending) {
+      if (s.pending === cur.code && sv && sv.code === cur.code) {
+        /* the new copy started fine: keep it from now on */
+        try { await native('WebView', 'persistServerBasePath'); } catch (e) { return; }
+        s.active = cur.code; s.activePath = sv.path;
+        delete s.pending; delete s.pendingPath; delete s.prev; delete s.started;
+        s.updatedTo = cur.version;
+        save(s);
+        this.cleanup();
+        return;
+      }
+      /* started but never got this far (it hung or crashed and the app was closed): not offered again.
+         Not started at all (the app was closed before the switch): offered again. */
+      if (s.pending !== cur.code && s.started === s.pending) s.bad = s.pending;
+      delete s.pending; delete s.pendingPath; delete s.prev; delete s.started;
       save(s);
-      this.cleanup(`v${s.active}`);
-      return;
     }
-    if (s.pending) { delete s.pending; delete s.pendingPath; delete s.prev; save(s); } /* the switch never happened (app closed first) */
-    /* a newer APK was installed: Android serves its own copy again, so older downloads are not needed */
-    if (s.active && cur.code !== s.active && !s.pending) {
-      const apkNewer = cur.code > s.active;
-      if (apkNewer) { delete s.active; delete s.activePath; save(s); this.cleanup(null); }
+    if (!sv) return;
+    if (sv.code) {
+      if (s.active !== sv.code || s.activePath !== sv.path) { s.active = sv.code; s.activePath = sv.path; save(s); }
+    } else if (s.active) {
+      /* the APK's own copy is served again (a newer APK was installed) */
+      delete s.active; delete s.activePath; save(s);
     }
+    /* downloads other than the one being served (older ones, ones that failed) are not needed */
+    this.cleanup();
   },
-  async cleanup(keep) {
+  /* removes downloaded copies, never the one being served */
+  async cleanup() {
+    const sv = await served();
+    if (!sv) return;
+    const keep = sv.code ? `v${sv.code}` : null;
     try {
       const r = await FS('readdir', { path: 'ota', directory: 'DATA' });
       for (const f of r.files || []) {

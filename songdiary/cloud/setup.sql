@@ -96,6 +96,8 @@ grant usage on sequence public.sd_seq to authenticated;
 -- recordings: a private bucket, one folder per account (<user id>/<recording id>)
 insert into storage.buckets (id, name, public) values ('sd-audio', 'sd-audio', false)
   on conflict (id) do nothing;
+-- no file above 50 MB (the free plan's limit; the app keeps bigger recordings on the phone)
+update storage.buckets set file_size_limit = 52428800 where id = 'sd-audio';
 
 drop policy if exists "sd-audio own read" on storage.objects;
 create policy "sd-audio own read" on storage.objects for select to authenticated

@@ -953,6 +953,8 @@ body.kb .tnav{position:relative;top:auto}
 /* ================= 1.4: 계정·동기화, 앱 업데이트 ================= */
 .cloud-me{display:flex;align-items:center;gap:6px;font-weight:700;font-size:15px;color:var(--blue);min-width:0;margin-bottom:2px}
 .cloud-me .pill{flex:none;margin-left:2px}
+#cloud-block .btn[aria-disabled="true"]{opacity:.55;cursor:default}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 #cloud-block .hint{margin:2px 0 0}
 #cloud-block .toggle-row{margin-top:6px}
 .input.code{font-size:22px;letter-spacing:.3em;text-align:center;font-variant-numeric:tabular-nums}

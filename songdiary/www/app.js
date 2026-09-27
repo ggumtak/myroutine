@@ -202,10 +202,10 @@ function normSettings(s) {
   const d = defaultSettings();
   if (!s || typeof s !== 'object') return d;
   const rm = s.reminder && typeof s.reminder === 'object' ? s.reminder : {};
-  return {
+  const out = {
     v: 2,
     title: typeof s.title === 'string' && s.title.trim() ? s.title.trim().slice(0, 30) : d.title,
-    drills: Array.isArray(s.drills) ? s.drills.filter(x => x && x.id).map(x => ({ id: String(x.id), name: String(x.name || '연습').slice(0, 20), target: clampInt(x.target, 1, 99, 5), timed: !!x.timed, memo: String(x.memo || '').slice(0, 60) })) : d.drills,
+    drills: Array.isArray(s.drills) ? s.drills.filter(x => x && x.id).map(x => ({ ...x, id: String(x.id), name: String(x.name || '연습').slice(0, 20), target: clampInt(x.target, 1, 99, 5), timed: !!x.timed, memo: String(x.memo || '').slice(0, 60) })) : d.drills,
     tags: Array.isArray(s.tags) ? s.tags.filter(t => typeof t === 'string' && t.trim()).slice(0, MAX_TAGS) : d.tags,
     sound: s.sound !== false,
     haptic: s.haptic !== false,
@@ -215,9 +215,13 @@ function normSettings(s) {
     songSearch: s.songSearch !== false,
     scale: normScale(s.scale),
     routine: normRoutine(s.routine),
-    songs: Array.isArray(s.songs) ? s.songs.filter(x => x && typeof x.k === 'string').map(x => ({ k: x.k, artist: String(x.artist || ''), memo: String(x.memo || ''), status: SONG_STATUS.includes(x.status) ? x.status : '', cat: normCat(x.cat) })) : [],
+    songs: Array.isArray(s.songs) ? s.songs.filter(x => x && typeof x.k === 'string').map(x => ({ ...x, k: x.k, artist: String(x.artist || ''), memo: String(x.memo || ''), status: SONG_STATUS.includes(x.status) ? x.status : '', cat: normCat(x.cat) })) : [],
     updatedAt: +s.updatedAt || 0
   };
+  /* settings a newer version of the app may add are kept as they are (phones can be on different versions) */
+  const extra = {};
+  for (const k in s) if (!(k in out)) extra[k] = s[k];
+  return Object.assign(extra, out);
 }
 function blankDay(date) {
   const now = Date.now();
@@ -383,7 +387,7 @@ const MAX_AUDIO = 300 * 1024 * 1024;
 /* ids of recordings whose audio is on this phone — a text-only backup brings rows without their files */
 const AUD = new Set();
 let audKnown = false;
-const hasAudio = r => !!(r && r.aud) && (!audKnown || AUD.has(r.aud) || Sync.on());
+const hasAudio = r => !!(r && r.aud) && (!audKnown || AUD.has(r.aud) || (Sync.canFetch(r.aud) && !Sync.missed(r.aud)));
 async function sniff(blob) {
   try {
     const b = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
@@ -422,14 +426,28 @@ async function storeAudio(blob, name) {
   AUD.add(id);
   return { aud: id, mime, size: b.size };
 }
+/* why the last audioBlob() found nothing: null = not on this phone (nothing tried), '' = said already or cancelled,
+   text = what to say instead of the backup hint */
+let audioWhy = null;
 async function audioBlob(r) {
+  audioWhy = null;
   if (!r || !r.aud) return null;
   const a = await Store.get('audio', r.aud);
   if (a && a.blob) return a.blob;
+  if (Sync.on() && !Sync.st.audio) { audioWhy = '녹음 맞추기가 꺼져 있어서 다른 기기의 녹음을 받지 않았어요. 설정 > 계정·동기화에서 켜면 들을 수 있어요.'; return null; }
   /* made on another phone: brought from the server the first time it is played */
-  if (Sync.on()) {
-    try { toast('다른 기기의 녹음을 받아 오는 중이에요…'); return await Sync.fetchAudio(r.aud, r); }
-    catch (e) { toast(e && e.kind === 'not-found' ? '이 녹음은 아직 서버에 없어요. 녹음한 기기에서 동기화되면 들을 수 있어요.' : '녹음을 받아 오지 못했어요. 인터넷을 확인해 주세요.'); }
+  if (Sync.canFetch(r.aud)) {
+    if (Sync.st.wifiOnly && cellular()) {
+      const go = await askSheet({ title: '모바일 데이터로 받을까요?', text: `다른 기기에서 만든 녹음이에요${r.size > 1 ? ` (${fmtMB(r.size)})` : ''}. 녹음은 Wi-Fi에서만 주고받도록 해 두었어요.`, ok: '받기', no: '취소' });
+      if (!go) { audioWhy = ''; return null; }
+    }
+    const t = toastProgress('다른 기기의 녹음을 받아 오는 중이에요…');
+    try { const b = await Sync.fetchAudio(r.aud, r); t.done(); return b; }
+    catch (e) {
+      if (e && e.kind === 'not-found') { Sync.st.miss[r.aud] = Date.now(); Sync.save(); }
+      audioWhy = e && e.kind === 'not-found' ? '이 녹음은 아직 서버에 없어요. 녹음한 기기에서 동기화되면 들을 수 있어요.' : '녹음을 받아 오지 못했어요. 인터넷을 확인해 주세요.';
+      t.done();
+    }
   }
   return null;
 }
@@ -574,7 +592,7 @@ const Player = {
     try {
       const src = await this.srcFor(r);
       if (!this.cur || this.cur.id !== r.id) return;
-      if (!src) { this.loading = null; this.cur = null; this.sync(); toast('녹음 파일이 이 폰에 없어요. 글만 백업에서 불러온 기록이면 전체 백업(녹음 포함)을 불러오세요.'); return; }
+      if (!src) { this.loading = null; this.cur = null; this.sync(); if (audioWhy !== '') toast(audioWhy || '녹음 파일이 이 폰에 없어요. 글만 백업에서 불러온 기록이면 전체 백업(녹음 포함)을 불러오세요.'); return; }
       this.el.src = src;
       this.el.playbackRate = this.rate;
       try { this.el.preservesPitch = true; } catch (e) { /* ignore */ }
@@ -2856,7 +2874,7 @@ async function shareRec(date, r) {
   const t = toastProgress('보낼 준비를 하는 중…');
   try {
     const blob = await audioBlob(r);
-    if (!blob) { t.done('녹음 파일을 찾지 못했어요'); return; }
+    if (!blob) { t.done(audioWhy === '' ? undefined : audioWhy || '녹음 파일을 찾지 못했어요'); return; }
     await Files.share({ title: r.title || '녹음', text: `[노래일기] ${fmtMD(date)} ${r.title || '녹음'}${r.songTitle ? ` (${r.songTitle})` : ''}`, files: [{ name: recFileName(date, r, blob), blob }] });
     t.done();
   } catch (err) { console.error(err); t.done('보내지 못했어요. 다시 시도해 주세요.'); }
@@ -2868,7 +2886,7 @@ async function saveRecToPhone(date, r) {
   const t = toastProgress('폰에 저장하는 중…');
   try {
     const blob = await audioBlob(r);
-    if (!blob) { t.done('녹음 파일을 찾지 못했어요'); return; }
+    if (!blob) { t.done(audioWhy === '' ? undefined : audioWhy || '녹음 파일을 찾지 못했어요'); return; }
     const name = Native.isNative ? await Files.freeName('녹음', recFileName(date, r, blob)) : recFileName(date, r, blob);
     const where = await Files.saveToDocuments('녹음', name, blob, p => t.set(`폰에 저장하는 중… ${Math.round(p * 100)}%`));
     t.done(where ? `${where}에 저장했어요` : '파일로 저장했어요');
@@ -4348,6 +4366,8 @@ async function exportBackup(withAudio, how) {
 }
 async function exportBackupNow(withAudio, how) {
   await flushWrites();
+  let notHere = 0; /* recordings in the diary whose file is only on another phone */
+  const left = () => (notHere ? ` · 이 폰에 없는 녹음 ${notHere}개는 빠졌어요` : '');
   const t = toastProgress('백업 파일을 만드는 중…');
   try {
     let blob, name;
@@ -4356,6 +4376,7 @@ async function exportBackupNow(withAudio, how) {
       const audio = {};
       const used = usedAudioIds();
       const all = await Store.all('audio');
+      notHere = Array.from(used).filter(a => !AUD.has(a)).length;
       for (const [k, v] of all) {
         if (!used.has(k) || !v || !v.blob) continue;
         const fn = `audio/${k}.${extFor(v.mime)}`;
@@ -4375,10 +4396,10 @@ async function exportBackupNow(withAudio, how) {
       t.set('보낼 준비를 하는 중…');
       const r = await Files.share({ title: name, text: '노래일기 백업', files: [{ name, blob }] });
       if (r === 'cancelled') { t.done('보내기 창을 닫았어요. 보냈다면 괜찮아요.'); return; }
-      t.done();
+      t.done(notHere ? `보냈어요${left()}` : undefined);
     } else {
       const where = await Files.saveToDocuments('백업', name, blob, p => t.set(`폰에 저장하는 중… ${Math.round(p * 100)}%`));
-      t.done(where ? `${where}에 저장했어요 (${fmtMB(blob.size)})` : `백업 파일을 저장했어요 (${fmtMB(blob.size)})`);
+      t.done((where ? `${where}에 저장했어요 (${fmtMB(blob.size)})` : `백업 파일을 저장했어요 (${fmtMB(blob.size)})`) + left());
     }
     if (withAudio) { const u = lsGet(LS_UI, {}); u.lastFull = Date.now(); lsSet(LS_UI, u); }
   } catch (err) { console.error(err); t.done('백업 파일을 만들지 못했어요. 폰 저장 공간을 확인해 주세요.'); }
@@ -4606,7 +4627,7 @@ function openSettings() {
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '알림')), ReminderBlock()),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '계정·동기화'), h('span', { class: 'hint' }, '여러 기기에서 같은 기록 쓰기')), CloudBlock()),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '백업')),
-        h('p', { class: 'hint', style: 'margin-bottom:6px' }, '모든 기록과 녹음은 이 폰 안에만 저장돼요. 폰을 바꾸거나 앱을 지우기 전에 꼭 전체 백업을 해 두세요.'),
+        h('p', { class: 'hint', style: 'margin-bottom:6px' }, Sync.on() ? '기록은 로그인한 기기끼리 서버로 맞춰지고 있어요. 그래도 폰을 바꾸거나 앱을 지우기 전에는 전체 백업을 해 두면 더 안전해요.' : '모든 기록과 녹음은 이 폰 안에만 저장돼요. 폰을 바꾸거나 앱을 지우기 전에 꼭 전체 백업을 해 두세요.'),
         backupNote,
         h('div', { class: 'btn-row' },
           h('button', { class: 'btn ink sm', onclick: () => exportBackup(true, 'save') }, icon('down', 17), '전체 백업 (녹음 포함)'),
@@ -4637,17 +4658,53 @@ function fp(o) {
 }
 /* the notification time belongs to each phone; everything else in the settings is shared */
 const cloudSettings = s => { const o = clone(s); delete o.reminder; return o; };
-/* a day's fingerprint part by part ('cond.memo.recs…' as short codes), so that a day changed on two phones
-   can be put together part by part: what only one phone changed is taken from it (deleting included) */
+const fp6 = o => fp(o).slice(-6);
+/* What a record looked like when this phone and the server last agreed (its "base"): a short code per part, and per
+   item for lists. With it, a record changed on two phones is put together part by part and item by item — what only
+   one phone changed is taken from it (deleting included); only what both changed is joined. */
 const DAY_KEYS = Object.keys(blankDay('2000-01-01')).filter(k => k !== 'date' && k !== 'updatedAt');
+const DAY_LISTS = { recs: x => x.id, good: x => x.id, bad: x => x.id, fb: x => x.id, songs: x => normKey(x.title) || x.id };
+const SET_LISTS = { drills: x => x.id, songs: x => x.k, tags: x => x };
 const dayRest = e => { const o = {}; for (const k in e) if (!DAY_KEYS.includes(k) && k !== 'date' && k !== 'updatedAt') o[k] = e[k]; return o; };
-const dayPrint = e => DAY_KEYS.map(k => fp(e[k]).slice(-6)).concat(fp(dayRest(e)).slice(-6)).join('.');
+const itemPrints = (o, lists) => { const out = {}; for (const k in lists) { const m = {}; for (const x of Array.isArray(o[k]) ? o[k] : []) if (x != null) m[lists[k](x)] = fp6(x); out[k] = m; } return out; };
+const dayPrint = e => DAY_KEYS.map(k => fp6(e[k])).concat(fp6(dayRest(e))).join('.');
+const dayBase = e => (e ? { f: dayPrint(e), i: itemPrints(e, DAY_LISTS) } : null);
+const setParts = s => { const o = cloudSettings(s), p = {}; delete o.updatedAt; for (const k of Object.keys(o).sort()) p[k] = fp6(o[k]); return p; };
+const setPrint = s => JSON.stringify(setParts(s));
+const setBase = s => ({ f: setPrint(s), i: itemPrints(s, SET_LISTS) });
+const baseF = b => (b == null ? null : typeof b === 'string' ? b : b.f);
+const baseI = b => (b && typeof b === 'object' && b.i) || {};
+/* a list both phones changed, item by item: an item changed on one side comes from that side, one deleted on one side
+   and untouched on the other stays deleted, one changed on both comes from the newer edit */
+function mergeList(L, R, base, key, localNewer) {
+  L = Array.isArray(L) ? L.filter(x => x != null) : []; R = Array.isArray(R) ? R.filter(x => x != null) : [];
+  const ml = new Map(L.map(x => [key(x), x])), mr = new Map(R.map(x => [key(x), x]));
+  const pick = id => {
+    const l = ml.get(id), r = mr.get(id), b = base ? base[id] : undefined;
+    const fl = l === undefined ? null : fp6(l), fr = r === undefined ? null : fp6(r);
+    if (l !== undefined && r !== undefined) return fl === fr || fl === b ? r : fr === b ? l : localNewer ? l : r;
+    if (l !== undefined) return b === undefined || fl !== b ? l : undefined; /* new here, or changed here though deleted elsewhere */
+    return b === undefined || fr !== b ? r : undefined;
+  };
+  const out = [], seen = new Set();
+  for (const x of R.concat(L)) {
+    const id = key(x);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const v = pick(id);
+    if (v !== undefined) out.push(clone(v));
+  }
+  return out;
+}
 function merge3(date, local, remote, base) {
-  const b = base ? base.split('.') : [], lp = dayPrint(local).split('.'), rp = dayPrint(remote).split('.');
+  const bf = baseF(base), b = bf ? bf.split('.') : [], bi = baseI(base);
+  const lp = dayPrint(local).split('.'), rp = dayPrint(remote).split('.');
+  const localNewer = (local.updatedAt || 0) > (remote.updatedAt || 0);
   const out = clone(remote), both = [];
   DAY_KEYS.forEach((k, i) => {
     if (lp[i] === rp[i] || lp[i] === b[i]) return;  /* the same on both, or changed only elsewhere: the server's */
     if (rp[i] === b[i]) out[k] = clone(local[k]);    /* changed only here */
+    else if (DAY_LISTS[k]) out[k] = mergeList(local[k], remote[k], bi[k], DAY_LISTS[k], localNewer);
     else both.push(k);                               /* changed on both: nothing written on either is dropped */
   });
   if (both.length) { const u = mergeDay(local, remote, true); for (const k of both) out[k] = u[k]; }
@@ -4656,16 +4713,16 @@ function merge3(date, local, remote, base) {
   out.updatedAt = Math.max(Date.now(), local.updatedAt || 0, remote.updatedAt || 0);
   return normDay(date, out);
 }
-/* the same for the settings, one part per setting */
-const setPrint = s => { const o = cloudSettings(s), p = {}; delete o.updatedAt; for (const k of Object.keys(o).sort()) p[k] = fp(o[k]).slice(-6); return JSON.stringify(p); };
 function mergeSet3(local, remote, base) {
-  let b = {};
-  try { b = JSON.parse(base || '{}') || {}; } catch (e) { b = {}; }
-  const lp = JSON.parse(setPrint(local)), rp = JSON.parse(setPrint(remote));
+  let bp = {};
+  try { bp = JSON.parse(baseF(base) || '{}') || {}; } catch (e) { bp = {}; }
+  const bi = baseI(base), lp = setParts(local), rp = setParts(remote);
+  const localNewer = (local.updatedAt || 0) > (remote.updatedAt || 0);
   const out = clone(remote), both = [];
   for (const k of new Set(Object.keys(lp).concat(Object.keys(rp)))) {
-    if (lp[k] === rp[k] || lp[k] === b[k]) continue;
-    if (rp[k] === b[k]) { if (k in local) out[k] = clone(local[k]); else delete out[k]; }
+    if (lp[k] === rp[k] || lp[k] === bp[k]) continue;
+    if (rp[k] === bp[k]) { if (k in local) out[k] = clone(local[k]); else delete out[k]; }
+    else if (SET_LISTS[k]) out[k] = mergeList(local[k], remote[k], bi[k], SET_LISTS[k], localNewer);
     else both.push(k);
   }
   if (both.length) { const u = mergeSettings(clone(local), clone(remote)); for (const k of both) out[k] = u[k]; }
@@ -4673,30 +4730,65 @@ function mergeSet3(local, remote, base) {
   out.updatedAt = Math.max(Date.now(), local.updatedAt || 0, remote.updatedAt || 0);
   return normSettings(out);
 }
+const cellular = () => { const c = navigator.connection; return !!(c && c.type === 'cellular'); };
 const Sync = {
   st: null, busy: false, again: false, timer: 0, applying: false, audioBusy: false,
   status: 'idle', err: null, audioNote: '',
-  /* st: uid/email, base[date] = server rev this phone last saw, h[date] = the day's dayPrint at that moment
-     (null = absent), setRev/setH the same for settings, lastSeq = newest change seen, up/big/miss = recordings */
-  blank(u) { return { uid: u.id, email: u.email, base: {}, h: {}, setRev: 0, setH: null, lastSeq: 0, up: {}, big: {}, miss: {}, audio: true, wifiOnly: true, lastAt: 0 }; },
-  async load() { try { this.st = (await Store.get('meta', 'sync')) || null; } catch (e) { this.st = null; } },
+  /* days (and '@s' for the settings) whose sync notes changed: written together with the notes, in one step, so the
+     notes never describe something the phone hasn't saved. key -> change number (a later change isn't lost to a
+     save that was already on its way) */
+  pend: new Map(), pendN: 0,
+  mark(key) { this.pend.set(key, ++this.pendN); },
+  /* days from other phones kept aside while their date is being typed into (applied once typing stops) */
+  held: new Map(),
+  /* recordings that failed just now, not tried again until then (only while the app runs) */
+  skip: {},
+  /* st: uid/email, base[date] = server rev this phone last saw, h[date] = the day's base (dayBase) at that moment
+     (null = absent), setRev/setH the same for settings, lastSeq = newest change seen, up/big/miss/gone = recordings
+     (on the server / too big to send / not on the server yet / in no day since) */
+  blank(u) { return { uid: u.id, email: u.email, base: {}, h: {}, setRev: 0, setH: null, lastSeq: 0, up: {}, big: {}, miss: {}, gone: {}, audio: true, wifiOnly: true, lastAt: 0 }; },
+  async load() {
+    try { this.st = (await Store.get('meta', 'sync')) || null; } catch (e) { this.st = null; }
+    if (this.st) for (const k of ['base', 'h', 'up', 'big', 'miss', 'gone']) if (!this.st[k] || typeof this.st[k] !== 'object') this.st[k] = {};
+  },
   save() { clearTimeout(this.saveT); this.saveT = setTimeout(() => this.saveNow(), 400); },
-  saveNow() { clearTimeout(this.saveT); return this.st ? Store.put('meta', 'sync', this.st).catch(() => {}) : Promise.resolve(); },
+  saveNow() {
+    clearTimeout(this.saveT);
+    if (!this.st) return Promise.resolve();
+    /* taken now, as they are: what is written matches the notes exactly */
+    const keys = Array.from(this.pend), days = [], meta = [['sync', clone(this.st)]];
+    for (const [k] of keys) {
+      if (k === '@s') meta.push(['settings', clone(S.settings)]);
+      else { const e = S.days[k]; days.push([k, e && hasContent(e) ? clone(e) : undefined]); }
+    }
+    return Store.writeAll({ days, meta }).then(() => { for (const [k, n] of keys) if (this.pend.get(k) === n) this.pend.delete(k); }, () => {});
+  },
   on() { const u = Cloud.user(); return !!(u && this.st && this.st.uid === u.id && Cloud.config()); },
   /* a local change: send it a little later (several quick edits go together) */
   changed() { if (!this.applying && this.on()) this.schedule(6000); },
   schedule(ms) { clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), ms); },
+  /* until the sync running now has finished (bounded) */
+  async idle(ms = 30000) { const t0 = Date.now(); while (this.busy && Date.now() - t0 < ms) await new Promise(r => setTimeout(r, 100)); },
   live(date) { const e = S.days[date]; return e && hasContent(e) ? e : null; },
   dayDirty(date) {
-    const e = this.live(date), cur = e ? dayPrint(e) : null, prev = this.st.h[date] === undefined ? null : this.st.h[date];
+    const e = this.live(date), cur = e ? dayPrint(e) : null, prev = baseF(this.st.h[date]);
     if (cur === prev) return false;
     return !!e || !!this.st.base[date]; /* a day deleted here counts only if the server has it */
   },
-  setDirty() { return setPrint(S.settings) !== this.st.setH; },
+  setDirty() { return setPrint(S.settings) !== baseF(this.st.setH); },
+  anyDirty() {
+    if (!this.st) return false;
+    for (const d of new Set(Object.keys(S.days).concat(Object.keys(this.st.base)))) if (this.dayDirty(d)) return true;
+    return this.setDirty();
+  },
+  /* the day shown on 오늘 while one of its fields is being typed into: its text box would write the old text back */
+  typingOn(date) { const a = document.activeElement; return isTyping() && !!a && !a.closest('.sheet') && S.tab === 'today' && S.date === date; },
   /* a day from the server: taken as is when this phone didn't change it, merged when both did */
   applyDay(row) {
     const st = this.st, date = row.date;
     if (!isDateKey(date) || row.rev <= (st.base[date] || 0)) return false;
+    if (this.typingOn(date)) { const h = this.held.get(date); if (!h || h.rev < row.rev) this.held.set(date, row); return false; }
+    this.held.delete(date);
     const local = this.live(date), dirty = this.dayDirty(date);
     const remote = row.data ? normDay(date, row.data) : null, rOk = !!(remote && hasContent(remote));
     this.applying = true;
@@ -4712,8 +4804,9 @@ const Sync = {
       } /* deleted elsewhere but changed here: this phone's version is kept and sent */
     } finally { this.applying = false; }
     /* from now on the server's version is what both sides changed from */
-    st.h[date] = rOk ? dayPrint(remote) : null;
+    st.h[date] = rOk ? dayBase(remote) : null;
     st.base[date] = row.rev;
+    this.mark(date);
     return true;
   },
   applySettings(row) {
@@ -4727,31 +4820,32 @@ const Sync = {
       queueWrite('@s', 100);
       applyTheme();
     } finally { this.applying = false; }
-    st.setH = setPrint(remote);
+    st.setH = setBase(remote);
     st.setRev = row.rev;
+    this.mark('@s');
     if (setPrint(S.settings) !== before) this.settingsChanged = true;
     return true;
   },
   async pushDay(date) {
     const st = this.st;
     for (let tries = 0; tries < 4; tries++) {
-      const e = this.live(date), sent = e ? clone(e) : null, h = sent ? dayPrint(sent) : null;
+      const e = this.live(date), sent = e ? clone(e) : null;
       const r = await Cloud.rpc('sd_push_day', { p_date: date, p_data: sent, p_base: st.base[date] || 0 });
       if (!r) throw Object.assign(new Error('server'), { kind: 'server' });
-      if (r.ok) { st.base[date] = r.rev; st.h[date] = h; return; }
+      if (r.ok) { st.base[date] = r.rev; st.h[date] = dayBase(sent); this.mark(date); return; }
       if (!r.rev) { st.base[date] = 0; continue; } /* the server lost it (e.g. its database was reset): add it again */
       /* changed elsewhere in the meantime: merge with the server's version and try again */
       this.applyDay({ date, data: r.data, rev: r.rev });
-      if (!this.dayDirty(date)) return;
+      if (this.held.has(date) || !this.dayDirty(date)) return;
     }
   },
   async pushSettings() {
     const st = this.st;
     for (let tries = 0; tries < 4; tries++) {
-      const data = cloudSettings(S.settings), h = setPrint(S.settings);
-      const r = await Cloud.rpc('sd_push_settings', { p_data: data, p_base: st.setRev || 0 });
+      const sent = clone(S.settings);
+      const r = await Cloud.rpc('sd_push_settings', { p_data: cloudSettings(sent), p_base: st.setRev || 0 });
       if (!r) throw Object.assign(new Error('server'), { kind: 'server' });
-      if (r.ok) { st.setRev = r.rev; st.setH = h; return; }
+      if (r.ok) { st.setRev = r.rev; st.setH = setBase(sent); this.mark('@s'); return; }
       if (!r.rev) { st.setRev = 0; continue; }
       this.applySettings({ data: r.data, rev: r.rev });
       if (!this.setDirty()) return;
@@ -4761,12 +4855,13 @@ const Sync = {
   async run(force) {
     if (!this.on() || S.mode !== 'ready') return;
     if (this.busy) { this.again = true; return; }
-    /* a sheet may be holding one of the days being edited: bring in other phones' changes once it is closed */
-    if (!force && Sheets.length) { this.schedule(8000); return; }
+    /* a sheet or a text box may be holding one of the days: bring in other phones' changes once it is done */
+    if (!force && (Sheets.length || isTyping())) { this.schedule(8000); return; }
     this.busy = true; this.status = 'busy'; this.paint();
     let changed = false;
     try {
       const st = this.st;
+      for (const [d, row] of Array.from(this.held)) if (!this.typingOn(d) && this.applyDay(row)) changed = true;
       /* a little overlap: two changes saved at the same moment can become visible out of order */
       let from = Math.max(0, st.lastSeq - 50);
       for (;;) {
@@ -4775,13 +4870,16 @@ const Sync = {
         if (rows.length < 500) break;
         from = rows[rows.length - 1].seq;
       }
+      /* days kept aside are pulled again if the app is closed before they are applied */
+      for (const row of this.held.values()) st.lastSeq = Math.min(st.lastSeq, Math.max(0, row.seq - 1));
       const srows = await Cloud.select('sd_settings', 'select=data,rev,seq');
       if (srows[0] && this.applySettings(srows[0])) changed = true;
       const dates = new Set(Object.keys(S.days).concat(Object.keys(st.base)));
-      for (const d of dates) if (this.dayDirty(d)) await this.pushDay(d);
+      for (const d of dates) if (!this.held.has(d) && this.dayDirty(d)) await this.pushDay(d);
       if (this.setDirty()) await this.pushSettings();
       st.lastAt = Date.now();
       this.status = 'idle'; this.err = null;
+      if (this.held.size) this.schedule(8000);
     } catch (e) {
       this.status = 'error'; this.err = e && e.kind ? e.kind : 'network';
       if (['network', 'offline', 'server', 'rate-limit'].includes(this.err)) this.schedule(60000);
@@ -4789,26 +4887,34 @@ const Sync = {
       if (this.err === 'signed-out' && !force && !this.toldOut) { this.toldOut = true; toast('로그인이 풀렸어요. 기록은 이 폰에 그대로 있어요.', { action: '로그인', onAction: openLogin }); }
     } finally {
       this.busy = false;
-      this.saveNow();
+      await this.saveNow();
       if (changed) softRender();
-      /* the settings sheet holds the old practice items: open it again with the new ones */
-      if (this.settingsChanged) { this.settingsChanged = false; if ($('#cloud-block')) { closeSheet(Sheets[Sheets.length - 1], true); setTimeout(openSettings, 320); } }
+      /* the settings sheet holds the old practice items: open it again with the new ones (and close what is on it) */
+      if (this.settingsChanged) {
+        this.settingsChanged = false;
+        const blk = $('#cloud-block'), i = blk ? Sheets.findIndex(x => x.sheet.contains(blk)) : -1;
+        if (i >= 0) { for (let j = Sheets.length - 1; j >= i; j--) closeSheet(Sheets[j], true); setTimeout(openSettings, 320); }
+      }
       this.paint();
       if (this.again) { this.again = false; this.schedule(500); }
       else if (this.status === 'idle') this.syncAudio();
     }
   },
-  /* recordings: send new ones, bring the ones this phone doesn't have */
+  /* recordings: send new ones, bring the ones this phone doesn't have, remove deleted ones from the server.
+     One recording that fails is tried again later; the others go on. */
   async syncAudio() {
     const st = this.st;
     if (!this.on() || !st.audio || this.audioBusy) return;
-    const conn = navigator.connection;
-    if (st.wifiOnly && conn && conn.type === 'cellular') { this.audioNote = 'wifi'; this.paint(); return; }
+    if (st.wifiOnly && cellular()) { this.audioNote = 'wifi'; this.paint(); return; }
     this.audioBusy = true; this.audioNote = '';
+    let failed = 0;
+    const now = Date.now(), later = aud => { this.skip[aud] = Date.now() + 30 * 60e3; failed++; };
+    const stop = e => ['offline', 'signed-out', 'no-config', 'bad-key'].includes(e && e.kind);
     try {
       const refs = new Map();
       for (const d in S.days) for (const r of S.days[d].recs || []) if (r.aud) refs.set(r.aud, r);
-      const up = Array.from(refs.keys()).filter(a => !st.up[a] && !st.big[a] && AUD.has(a));
+      const ok = aud => !(this.skip[aud] > now);
+      const up = Array.from(refs.keys()).filter(a => !st.up[a] && !st.big[a] && AUD.has(a) && ok(a));
       let n = 0;
       for (const aud of up) {
         if (!this.on() || !st.audio) break;
@@ -4817,23 +4923,40 @@ const Sync = {
         if (!a || !a.blob) continue;
         if (a.blob.size > AUDIO_MAX_CLOUD) { st.big[aud] = 1; continue; }
         try { await Cloud.upload(aud, a.blob, a.mime); st.up[aud] = 1; }
-        catch (e) { if (e.kind === 'too-big') st.big[aud] = 1; else throw e; }
+        catch (e) { if (e.kind === 'too-big') st.big[aud] = 1; else if (stop(e)) throw e; else later(aud); }
         this.save();
       }
-      const down = Array.from(refs.keys()).filter(a => !AUD.has(a) && !(st.miss[a] && Date.now() - st.miss[a] < 3 * 3600e3));
+      const down = Array.from(refs.keys()).filter(a => !AUD.has(a) && !this.missed(a) && ok(a));
       n = 0;
       for (const aud of down) {
         if (!this.on() || !st.audio) break;
         this.audioNote = `받는 중 ${++n}/${down.length}`; this.paint();
-        try { await this.fetchAudio(aud, refs.get(aud)); } catch (e) { if (e.kind === 'not-found') st.miss[aud] = Date.now(); else throw e; }
+        try { await this.fetchAudio(aud, refs.get(aud)); }
+        catch (e) { if (e.kind === 'not-found') st.miss[aud] = Date.now(); else if (stop(e)) throw e; else later(aud); }
       }
-      this.audioNote = '';
+      /* recordings no longer in any day (deleted here or on another phone) leave the server a day later — not at
+         once, so one that is only missing for a moment while phones catch up is not lost */
+      for (const aud of Object.keys(st.up)) {
+        if (!this.on() || !st.audio) break;
+        if (refs.has(aud)) { delete st.gone[aud]; continue; }
+        if (!st.gone[aud]) { st.gone[aud] = now; this.save(); continue; }
+        if (now - st.gone[aud] < 86400e3 || !ok(aud)) continue;
+        try { await Cloud.remove(aud); delete st.up[aud]; delete st.gone[aud]; this.save(); }
+        catch (e) { if (stop(e)) throw e; later(aud); }
+      }
+      for (const aud of Object.keys(st.gone)) if (!st.up[aud]) delete st.gone[aud];
+      for (const m of [st.big, st.miss]) for (const aud of Object.keys(m)) if (!refs.has(aud)) delete m[aud];
+      this.audioNote = failed ? 'partial' : '';
     } catch (e) {
       this.audioNote = 'error';
     } finally {
       this.audioBusy = false; this.saveNow(); this.paint();
     }
   },
+  /* whether a recording that isn't on this phone can be brought from the server */
+  canFetch(aud) { return !!(this.on() && this.st.audio && !this.st.big[aud]); },
+  /* not on the server a little while ago (the phone that made it may not have sent it yet): tried again later */
+  missed(aud) { const m = this.st && this.st.miss[aud]; return !!(m && Date.now() - m < 10 * 60e3); },
   async fetchAudio(aud, r) {
     const blob = await Cloud.download(aud);
     const mime = (r && r.mime) || blob.type || 'audio/mp4';
@@ -4844,13 +4967,29 @@ const Sync = {
     this.save();
     return b;
   },
-  /* the settings block redraws itself while it is open */
-  paint() { const el = $('#cloud-block'); if (el) el.replaceWith(CloudBlock()); },
+  /* the settings block redraws itself while it is open; focus stays on the same control, and a new state is read out */
+  paint() {
+    const el = $('#cloud-block');
+    if (!el) return;
+    const a = document.activeElement, key = a && el.contains(a) ? (a.dataset.fk ? `[data-fk="${a.dataset.fk}"]` : a.getAttribute('aria-label') ? `[aria-label="${a.getAttribute('aria-label')}"]` : null) : null;
+    const said = el.dataset.said || '';
+    const nb = CloudBlock();
+    el.replaceWith(nb);
+    if (key) { const t = nb.querySelector(key); if (t && !t.disabled) t.focus({ preventScroll: true }); }
+    if (nb.dataset.said && nb.dataset.said !== said) announce(nb.dataset.said);
+  },
   errText() {
     return ({ 'signed-out': '로그인이 풀렸어요. 다시 로그인해 주세요.', 'no-tables': '서버에 아직 표가 없어요. Supabase에서 setup.sql을 실행해 주세요.', offline: '인터넷이 연결되지 않았어요. 연결되면 다시 맞춰요.', network: '서버에 닿지 않았어요. 잠시 뒤 다시 맞춰요.', server: '서버에서 오류가 났어요. 잠시 뒤 다시 맞춰요.', 'rate-limit': '서버가 잠깐 바빠요. 로그인은 그대로예요. 잠시 뒤 다시 맞춰요.', 'bad-key': '서버 키가 바뀌었어요. 로그인은 그대로예요. ‘서버 바꾸기’로 새 키를 넣어 주세요.' })[this.err] || '동기화하지 못했어요.';
   }
 };
-const cloudErrText = e => ({ 'no-config': '먼저 서버를 연결해 주세요.', 'bad-url': '주소가 올바르지 않아요. https://로 시작하는 Project URL을 넣어 주세요.', 'bad-key': '키가 맞지 않아요. anon(public) 키를 넣어 주세요.', unreachable: '서버에 닿지 않았어요. 주소를 확인해 주세요.', offline: '인터넷이 연결되지 않았어요.', network: '서버에 닿지 않았어요.', 'rate-limit': '너무 자주 보냈어요. 잠시 뒤에 다시 해 주세요.', 'bad-email': '이메일 주소를 확인해 주세요.', 'bad-code': '번호가 맞지 않거나 시간이 지났어요. 다시 받아 주세요.', 'send-failed': '메일을 보내지 못했어요. 서버의 이메일 설정을 확인해 주세요.' })[e && e.kind] || '잠시 뒤에 다시 해 주세요.';
+/* read out by screen readers without showing anything */
+function announce(text) {
+  let el = $('#sr-live');
+  if (!el) { el = h('div', { id: 'sr-live', class: 'sr-only', 'aria-live': 'polite' }); document.body.append(el); }
+  el.textContent = '';
+  setTimeout(() => { el.textContent = text; }, 60);
+}
+const cloudErrText = e => ({ 'no-config': '먼저 서버를 연결해 주세요.', 'bad-url': '주소가 올바르지 않아요. https://로 시작하는 Project URL을 넣어 주세요.', 'bad-key': '키가 맞지 않아요. anon(public) 키를 넣어 주세요.', unreachable: '서버에 닿지 않았어요. 주소를 확인해 주세요.', offline: '인터넷이 연결되지 않았어요.', network: '서버에 닿지 않았어요.', 'rate-limit': '너무 자주 보냈어요. 잠시 뒤에 다시 해 주세요.', 'bad-email': '이메일 주소를 확인해 주세요.', 'bad-code': '번호가 맞지 않거나 시간이 지났어요. 다시 받아 주세요.', 'send-failed': '메일을 보내지 못했어요. 서버의 이메일 설정을 확인해 주세요.', 'not-authorized': '이 이메일로는 번호를 보낼 수 없어요. Supabase 기본 메일은 Supabase 계정(팀원) 이메일로만 가요. 그 이메일로 로그인하거나 설명서의 메일 설정을 해 주세요.', 'no-signup': '이 서버는 새 가입을 막아 두었어요. 전에 로그인했던 이메일을 넣어 주세요.' })[e && e.kind] || '잠시 뒤에 다시 해 주세요.';
 function CloudBlock() {
   const cfg = Cloud.config(), u = Cloud.user(), st = Sync.st;
   const box = h('div', { id: 'cloud-block' });
@@ -4862,7 +5001,8 @@ function CloudBlock() {
   }
   if (!u || !st || st.uid !== u.id) {
     const out = !u && st && Sync.err === 'signed-out';
-    add(out ? h('p', { class: 'hint warn', role: 'status' }, `로그인이 풀렸어요 (${st.email}). 다시 로그인하면 이어서 맞춰요. 이 폰의 기록은 그대로예요.`) : null,
+    if (out) box.dataset.said = `로그인이 풀렸어요 (${st.email}). 다시 로그인하면 이어서 맞춰요. 이 폰의 기록은 그대로예요.`;
+    add(out ? h('p', { class: 'hint warn' }, box.dataset.said) : null,
       h('p', { class: 'hint', style: 'margin-bottom:8px' }, '이메일로 받은 6자리 번호로 한 번만 로그인하면, 그다음부터는 자동으로 로그인돼요. 같은 이메일로 로그인한 기기끼리 기록과 녹음이 맞춰져요.'),
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn ink sm', 'data-fk': 'cloud-login', onclick: openLogin }, '이메일로 로그인'),
@@ -4871,20 +5011,38 @@ function CloudBlock() {
   }
   const when = st.lastAt ? `마지막으로 맞춘 때: ${fmtMD(ymd(new Date(st.lastAt)))} ${fmtHM(st.lastAt)}` : '아직 맞추지 않았어요';
   const state = Sync.status === 'busy' ? '맞추는 중…' : Sync.status === 'error' ? Sync.errText() : when;
-  const upN = Object.keys(st.up).length, bigN = Object.keys(st.big).length;
-  const audioLine = !st.audio ? '녹음은 이 폰에만 둬요' : Sync.audioNote === 'wifi' ? '녹음은 Wi-Fi에 연결되면 주고받아요' : Sync.audioNote === 'error' ? '녹음을 주고받다가 멈췄어요. 다음에 이어서 해요.' : Sync.audioNote || `녹음 ${upN}개가 서버에 있어요${bigN ? ` · 50MB가 넘어서 못 올린 녹음 ${bigN}개` : ''}`;
+  const used = usedAudioIds();
+  const upN = Object.keys(st.up).filter(a => used.has(a)).length, bigN = Object.keys(st.big).length;
+  const audioLine = !st.audio ? '녹음은 이 폰에만 둬요' : Sync.audioNote === 'wifi' ? '녹음은 Wi-Fi에 연결되면 주고받아요' : Sync.audioNote === 'error' ? '녹음을 주고받다가 멈췄어요. 다음에 이어서 해요.' : Sync.audioNote === 'partial' ? '녹음 몇 개를 주고받지 못했어요. 조금 뒤에 다시 해요.' : Sync.audioNote || `녹음 ${upN}개가 서버에 있어요${bigN ? ` · 50MB가 넘어서 못 올린 녹음 ${bigN}개` : ''}`;
+  if (Sync.status !== 'busy') box.dataset.said = state;
   add(
     h('div', { class: 'cloud-me' }, icon('check', 16), h('span', { class: 'clip' }, u.email || st.email), h('span', { class: 'pill blue' }, '자동 로그인')),
     h('p', { class: 'hint' }, '로그아웃하기 전까지 이 폰에서는 계속 로그인돼 있어요.'),
-    h('p', { class: 'hint' + (Sync.status === 'error' ? ' warn' : ''), role: 'status' }, state),
+    h('p', { class: 'hint' + (Sync.status === 'error' ? ' warn' : '') }, state),
     h('p', { class: 'hint' }, audioLine),
     h('div', { class: 'btn-row', style: 'margin-top:8px' },
-      h('button', { class: 'btn soft sm', 'data-fk': 'cloud-now', disabled: Sync.status === 'busy', onclick: () => { if (Sync.err === 'signed-out' || !Cloud.user()) { openLogin(); return; } Sync.run(true); } }, icon('repeat', 16), '지금 맞추기'),
-      h('button', { class: 'btn ghost sm', 'data-fk': 'cloud-out', onclick: () => confirmSheet({ title: '로그아웃할까요?', text: '이 폰의 기록과 녹음은 그대로 남아요. 자동 로그인이 풀려서, 다시 맞추려면 이메일 번호로 다시 로그인해야 해요.', ok: '로그아웃', onOk: async () => { await Sync.run(true); await Cloud.signOut(); Sync.err = null; Sync.status = 'idle'; Sync.paint(); toast('로그아웃했어요'); } }) }, '로그아웃'),
-      Sync.err === 'bad-key' ? h('button', { class: 'btn ghost sm', onclick: openCloudConfig }, '서버 바꾸기') : null),
+      /* aria-disabled, not disabled: the button keeps focus while it works */
+      h('button', { class: 'btn soft sm', 'data-fk': 'cloud-now', 'aria-disabled': Sync.status === 'busy' ? 'true' : null, onclick: () => { if (Sync.status === 'busy') return; if (Sync.err === 'signed-out' || !Cloud.user()) { openLogin(); return; } Sync.run(true); } }, icon('repeat', 16), '지금 맞추기'),
+      h('button', { class: 'btn ghost sm', 'data-fk': 'cloud-out', onclick: () => confirmSheet({ title: '로그아웃할까요?', text: '이 폰의 기록과 녹음은 그대로 남아요. 자동 로그인이 풀려서, 다시 맞추려면 이메일 번호로 다시 로그인해야 해요.', ok: '로그아웃', onOk: logOut }) }, '로그아웃'),
+      Sync.err === 'bad-key' ? h('button', { class: 'btn ghost sm', onclick: openCloudConfig }, '서버 바꾸기') : null,
+      h('button', { class: 'btn ghost sm', 'data-fk': 'cloud-out-others', onclick: () => confirmSheet({ title: '다른 기기를 모두 로그아웃할까요?', text: '이 폰을 뺀 다른 폰·태블릿의 자동 로그인이 모두 풀려요. 폰을 잃어버렸을 때 써요. 그 기기에서 아직 보내지 못한 기록은 그 기기에만 남아요.', ok: '모두 로그아웃', danger: true, onOk: async () => { try { await Cloud.signOutOthers(); toast('다른 기기를 모두 로그아웃했어요'); } catch (e) { toast(e && e.kind === 'signed-out' ? '로그인이 풀렸어요. 다시 로그인해 주세요.' : '로그아웃하지 못했어요. 인터넷을 확인해 주세요.'); } } }) }, '다른 기기 로그아웃')),
     ToggleRow('녹음도 맞추기', st.audio, v => { st.audio = v; Sync.saveNow(); if (v) Sync.syncAudio(); Sync.paint(); }, '녹음 파일도 서버에 올리고 다른 기기에서 받아요. 무료 서버는 모두 합쳐 1GB까지예요.', 'mic'),
     navigator.connection ? ToggleRow('Wi-Fi에서만 녹음 주고받기', st.wifiOnly, v => { st.wifiOnly = v; Sync.saveNow(); Sync.syncAudio(); }, '데이터 요금이 나가지 않게 해요. 글 기록은 언제나 맞춰요.', 'down') : null);
   return box;
+}
+/* sends what is left first; if something can't be sent, asks before going on */
+async function logOut() {
+  const t = toastProgress('남은 기록을 보내는 중…');
+  await Sync.idle(); await Sync.run(true); await Sync.idle();
+  t.done();
+  if (Sync.status === 'error' || Sync.anyDirty()) {
+    const go = await askSheet({ title: '아직 보내지 못한 기록이 있어요', text: '지금 로그아웃하면 이 폰에서 고친 내용 일부가 다른 기기에 가지 않아요. 기록은 이 폰에 그대로 남고, 다시 로그인하면 그때 보내요.', ok: '그래도 로그아웃', no: '취소', danger: true });
+    if (!go) { Sync.paint(); return; }
+  }
+  clearTimeout(Sync.timer);
+  await Cloud.signOut();
+  Sync.err = null; Sync.status = 'idle'; Sync.paint();
+  toast('로그아웃했어요');
 }
 function openCloudConfig() {
   const cur = Cloud.config();
@@ -4932,15 +5090,17 @@ function openLogin() {
         const code = inp.value.replace(/\D/g, '');
         if (code.length < 6) { msg.textContent = '메일로 받은 6자리 번호를 넣어 주세요.'; return; }
         busy = true; msg.textContent = '확인하는 중…';
-        try { await Cloud.verifyCode(email, code); await afterLogin(); closeSheet(s, true); }
-        catch (e) { msg.textContent = cloudErrText(e); }
+        try { await Cloud.verifyCode(email, code); }
+        catch (e) { msg.textContent = cloudErrText(e); busy = false; return; }
+        /* logged in: the sheet closes right away, the first sync goes on in the background (계정·동기화 shows it) */
+        await afterLogin(() => closeSheet(s, true));
         busy = false;
       };
       bindEnter(inp, verify);
-      body.replaceChildren(h('p', { class: 'lead' }, `${email}로 보낸 메일의 6자리 번호를 넣어 주세요. 안 보이면 스팸함도 확인해 주세요.`), field('번호', inp), msg,
+      body.replaceChildren(h('p', { class: 'lead' }, `${email} 주소로 보낸 메일의 6자리 번호를 넣어 주세요. 안 보이면 스팸함도 확인해 주세요.`), field('번호', inp), msg,
         h('button', { class: 'btn ink wide', style: 'margin-top:10px', onclick: verify }, '로그인'),
         h('div', { class: 'btn-row', style: 'margin-top:6px' },
-          h('button', { class: 'btn ghost sm', onclick: async () => { msg.textContent = '다시 보내는 중…'; try { await Cloud.sendCode(email); msg.textContent = '다시 보냈어요.'; } catch (e) { msg.textContent = cloudErrText(e); } } }, '번호 다시 받기'),
+          h('button', { class: 'btn ghost sm', onclick: async () => { if (busy) return; busy = true; msg.textContent = '다시 보내는 중…'; try { await Cloud.sendCode(email); msg.textContent = '다시 보냈어요.'; } catch (e) { msg.textContent = cloudErrText(e); } busy = false; } }, '번호 다시 받기'),
           h('button', { class: 'btn ghost sm', onclick: () => { step = 'email'; msg.textContent = ''; draw(); } }, '이메일 바꾸기')));
       setTimeout(() => inp.focus(), 50);
     }
@@ -4957,19 +5117,21 @@ function askSheet({ title, text, ok, no, danger }) {
     s = openSheet({ title, body: h('p', { class: 'confirm-text' }, text || ''), foot: [nope, yes], onClose: () => { if (!answered) res(false); } });
   });
 }
-/* the first time on this phone: what is here and what is on the server are put together */
-async function afterLogin() {
+/* the first time on this phone: what is here and what is on the server are put together.
+   ready() is called once it is settled (before the first sync, which can take a while) */
+async function afterLogin(ready) {
   const u = Cloud.user();
-  if (!u) return;
+  if (!u) { if (ready) ready(); return; }
   const old = Sync.st;
   if (old && old.uid !== u.id && entryDates().length) {
-    const go = await askSheet({ title: '다른 계정의 기록이 있어요', text: `이 폰의 기록은 ${old.email || '다른 계정'}과 맞추던 기록이에요. ${u.email} 계정에 합칠까요?`, ok: '합치기', no: '로그인 취소' });
-    if (!go) { await Cloud.signOut(); Sync.paint(); return; }
+    const go = await askSheet({ title: '다른 계정의 기록이 있어요', text: `이 폰의 기록은 ${old.email || '다른 계정'} 계정과 맞추던 기록이에요. ${u.email} 계정에 합칠까요?`, ok: '합치기', no: '로그인 취소' });
+    if (!go) { await Cloud.signOut(); Sync.paint(); if (ready) ready(); return; }
   }
-  if (!old || old.uid !== u.id) Sync.st = Sync.blank(u);
+  if (!old || old.uid !== u.id) { Sync.st = Sync.blank(u); Sync.pend.clear(); Sync.held.clear(); }
   else Sync.st.email = u.email;
   Sync.err = null; Sync.toldOut = false;
   await Sync.saveNow();
+  if (ready) ready();
   toast(entryDates().length ? '로그인했어요. 이 폰의 기록과 서버의 기록을 맞추는 중이에요' : '로그인했어요. 기록을 받아 오는 중이에요');
   Sync.paint();
   await Sync.run(true);
@@ -4978,38 +5140,67 @@ async function afterLogin() {
 }
 
 /* ================= 앱 업데이트 (in the app, no reinstall) ================= */
+let checking = false;
 async function checkUpdate(manual) {
   if (!OTA.isNative && !manual) return;
+  if (checking) return;
   const u = lsGet(LS_UI, {});
-  if (!manual && u.otaAt && Date.now() - u.otaAt < 6 * 3600e3) return;
+  if (!manual && u.otaAt && Date.now() - u.otaAt < 6 * 3600e3) {
+    /* checked a little while ago: show what was found then (the app may have been closed since) */
+    if (!S.update && u.otaNew) {
+      const cur = await OTA.current();
+      if (cur && u.otaNew.code > cur.code && u.otaNew.code !== OTA.state().bad) { S.update = u.otaNew; await noteApk(); softRender(); }
+    }
+    return;
+  }
+  checking = true;
+  const t = manual ? toastProgress('업데이트를 확인하는 중…') : null;
   try {
     const r = await OTA.check();
     uiSet('otaAt', Date.now());
+    uiSet('otaNew', r.latest ? { code: r.latest.code, version: r.latest.version, notes: r.latest.notes, minApk: r.latest.minApk } : null);
     S.update = r.latest;
+    await noteApk();
+    if (t) t.done();
     if (r.latest) { if (manual) openUpdate(r.latest); else softRender(); }
     else if (manual) toast(r.cur ? `최신 버전이에요 (${r.cur.version})` : '버전 정보를 읽지 못했어요');
   } catch (e) {
-    if (manual) toast(e && /signature|bad-/.test(e.message) ? '업데이트 정보를 믿을 수 없어서 받지 않았어요' : '업데이트를 확인하지 못했어요. 인터넷을 확인해 주세요.');
-  }
+    if (t) t.done(e && /signature|bad-/.test(e.message) ? '업데이트 정보를 믿을 수 없어서 받지 않았어요' : '업데이트를 확인하지 못했어요. 인터넷을 확인해 주세요.');
+  } finally { checking = false; }
+}
+/* a version that needs a newer APK can't be installed from here: no banner on 오늘 for it */
+async function noteApk() {
+  const L = S.update;
+  if (!L || !L.minApk) { S.updateApk = false; return; }
+  const v = await Native.version();
+  S.updateApk = !!(v && +v.build && +v.build < L.minApk);
 }
 function UpdateBanner() {
   const L = S.update;
   if (!L || !OTA.isNative) return null;
   const u = lsGet(LS_UI, {});
-  if (u.otaLater && u.otaLater.code === L.code && Date.now() < u.otaLater.until) return null;
+  if (S.updateApk || (u.otaLater && u.otaLater.code === L.code && Date.now() < u.otaLater.until)) return null;
   const box = h('div', { class: 'banner news update' },
-    h('b', null, `새 버전 ${L.version}이 나왔어요`),
+    h('b', null, `새 버전이 나왔어요 (${L.version})`),
     L.notes && L.notes.length ? h('ul', null, L.notes.slice(0, 3).map(n => h('li', null, n))) : null,
     h('div', { class: 'btn-row', style: 'margin-top:8px' },
       h('button', { class: 'btn ink sm', 'data-fk': 'ota-open', onclick: () => openUpdate(L) }, icon('down', 16), '업데이트'),
-      h('button', { class: 'btn ghost sm', onclick: () => { uiSet('otaLater', { code: L.code, until: Date.now() + 3 * 86400e3 }); box.remove(); toast('설정 > 앱 정보에서 언제든 업데이트할 수 있어요'); } }, '나중에')));
+      h('button', { class: 'btn ghost sm', onclick: () => {
+        uiSet('otaLater', { code: L.code, until: Date.now() + 3 * 86400e3 });
+        /* focus goes on to what follows, not lost with the banner */
+        const next = box.nextElementSibling;
+        box.remove();
+        if (next) { if (!next.hasAttribute('tabindex')) next.setAttribute('tabindex', '-1'); next.focus({ preventScroll: true }); }
+        toast('설정 > 앱 정보에서 언제든 업데이트할 수 있어요');
+      } }, '나중에')));
   return box;
 }
 async function openUpdate(L) {
   const info = await Native.version();
   const apk = info && +info.build ? +info.build : 0;
   const needApk = L.minApk && apk && apk < L.minApk;
-  const prog = h('div', { class: 'ota-prog', hidden: true }, h('i'));
+  const prog = h('div', { class: 'ota-prog', hidden: true, role: 'progressbar', 'aria-label': '받는 중', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': 0 }, h('i'));
+  const count = h('p', { class: 'hint', 'aria-hidden': 'true' });
   const msg = h('p', { class: 'hint', role: 'status', 'aria-live': 'polite' });
   let s = null, running = false;
   const go = h('button', { class: 'btn ink', disabled: !!needApk || !OTA.isNative, onclick: async () => {
@@ -5018,7 +5209,20 @@ async function openUpdate(L) {
     msg.textContent = '새 버전을 받는 중…';
     try {
       await flushWrites();
-      await OTA.apply(L, (done, total, fetched) => { prog.firstChild.style.width = `${Math.round(done / total * 100)}%`; msg.textContent = `받는 중 ${done}/${total}${fetched ? ` · 새 파일 ${fetched}개` : ''}`; });
+      /* the list shown may be hours old: install what is newest right now */
+      const fresh = await OTA.check();
+      const T = fresh.latest;
+      if (!T) { S.update = null; running = false; prog.hidden = true; msg.textContent = fresh.cur ? `이미 최신 버전이에요 (${fresh.cur.version}).` : '버전 정보를 읽지 못했어요.'; return; }
+      if (T.minApk && apk && apk < T.minApk) { running = false; go.disabled = false; prog.hidden = true; msg.textContent = '이 버전은 새 설치 파일(APK)이 필요해요. 새 APK를 받아 설치해 주세요.'; return; }
+      S.update = T;
+      let said = 0;
+      await OTA.apply(T, (done, total, fetched) => {
+        const pct = Math.round(done / total * 100);
+        prog.firstChild.style.width = `${pct}%`; prog.setAttribute('aria-valuenow', pct);
+        count.textContent = `받는 중 ${done}/${total}${fetched ? ` · 새 파일 ${fetched}개` : ''}`;
+        if (pct >= said + 25) { said = pct - pct % 25; msg.textContent = `받는 중 ${said}%`; }
+      });
+      count.textContent = '';
       msg.textContent = '새 버전으로 다시 열어요…';
     } catch (e) {
       running = false; go.disabled = false; prog.hidden = true;
@@ -5029,7 +5233,7 @@ async function openUpdate(L) {
     L.notes && L.notes.length ? h('ul', { class: 'ota-notes' }, L.notes.map(n => h('li', null, n))) : h('p', { class: 'hint' }, '새 버전이 나왔어요.'),
     needApk ? h('p', { class: 'banner warn' }, '이 버전은 새 설치 파일(APK)이 필요해요. 새 APK를 받아 설치해 주세요.') : h('p', { class: 'hint' }, '기록과 녹음은 그대로예요. 바뀐 파일만 받아서 앱 안에서 바꾸고, 잠깐 다시 열려요.'),
     !OTA.isNative ? h('p', { class: 'hint' }, '안드로이드 앱에서만 업데이트할 수 있어요.') : null,
-    prog, msg),
+    prog, count, msg),
   foot: [go], beforeClose: () => !running || (toast('받는 중이에요. 잠시만 기다려 주세요'), false) });
 }
 function UpdateRow() {
@@ -5159,10 +5363,10 @@ function afterLoad() {
   Native.onShared(takeShared);
   Files.clearShareCache();
   setTimeout(() => { if (!Sheets.length) offerDraft(); }, 800);
-  OTA.confirmBoot().then(() => { const v = OTA.takeUpdated(); if (v) toast(`${v}로 업데이트했어요`); }).catch(() => {});
+  OTA.confirmBoot().then(() => { const v = OTA.takeUpdated(); if (v) toast(`${v} 버전으로 업데이트했어요`); }).catch(() => {});
   setTimeout(() => checkUpdate(false), 5000);
   if (Sync.on()) setTimeout(() => Sync.run(), 1500);
-  if (!Native.isNative || window.SD_TEST) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer, Sync, Cloud, OTA, openLogin, openUpdate, checkUpdate, fp, queueWrite, flushWrites, storeAudio, audioBlob, AUD, afterLogin };
+  if (!Native.isNative || window.SD_TEST) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer, Sync, Cloud, OTA, openLogin, openUpdate, checkUpdate, fp, queueWrite, flushWrites, storeAudio, audioBlob, AUD, afterLogin, audioWhy: () => audioWhy, merge3, mergeList, mergeSet3, dayBase, setBase };
   const R = S.settings.reminder;
   /* the switch stays on: once notifications are allowed again, the reminder comes back by itself */
   if (R.on) Native.ensureReminder(R.h, R.m, REMIND_TEXT).catch(() => {});

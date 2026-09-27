@@ -40,18 +40,29 @@
 <input type="file" id="file-audio" hidden multiple accept="audio/*,video/mp4,.m4a,.amr,.3gp,.aac,.opus,.flac">
 <input type="file" id="file-json" hidden accept=".zip,.json,application/zip,application/json,application/x-zip-compressed">
 <script>
-/* in-app update: if a just-installed version does not start, go back to the one before it */
+/* in-app update: the copy being tried notes that it started; if it doesn't get as far as its first screen
+   within 15 s, go back to the copy before it (and don't offer this version again) */
 (function () { try {
-  var K = 'songdiary:v1:ota', s = JSON.parse(localStorage.getItem(K) || 'null'), C = window.Capacitor;
-  if (!s || !s.pending || !C || !C.nativePromise) return;
-  setTimeout(function () {
-    if (window.__sdBooted) return;
-    var p = s.prev || { type: 'asset' };
-    s.bad = s.pending; delete s.pending; delete s.pendingPath; delete s.prev;
-    localStorage.setItem(K, JSON.stringify(s));
-    if (p.type === 'file') C.nativePromise('WebView', 'setServerBasePath', { path: p.path });
-    else C.nativePromise('WebView', 'setServerAssetPath', { path: 'public' });
-  }, 15000);
+  var K = 'songdiary:v1:ota', C = window.Capacitor;
+  var get = function () { try { return JSON.parse(localStorage.getItem(K) || 'null'); } catch (e) { return null; } };
+  var s0 = get();
+  if (!s0 || !s0.pending || !C || !C.nativePromise) return;
+  C.nativePromise('WebView', 'getServerBasePath', {}).then(function (r) {
+    var m = /\/ota\/v(\d+)\/?$/.exec(String((r && r.path) || ''));
+    if (!m || +m[1] !== s0.pending) return; /* the copy running is not the one being tried */
+    var s = get();
+    if (!s || s.pending !== s0.pending) return;
+    s.started = s.pending; localStorage.setItem(K, JSON.stringify(s));
+    setTimeout(function () {
+      var t = get();
+      if (window.__sdBooted || !t || t.pending !== s0.pending) return;
+      var p = t.prev || { type: 'asset' };
+      t.bad = t.pending; delete t.pending; delete t.pendingPath; delete t.prev; delete t.started;
+      localStorage.setItem(K, JSON.stringify(t));
+      if (p.type === 'file') C.nativePromise('WebView', 'setServerBasePath', { path: p.path });
+      else C.nativePromise('WebView', 'setServerAssetPath', { path: 'public' });
+    }, 15000);
+  }).catch(function () { /* nothing to undo */ });
 } catch (e) { /* nothing to undo */ } })();
 </script>
 <script src="native.js"></script>
