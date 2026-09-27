@@ -897,6 +897,7 @@ function closeSheet(obj, force) {
   if (!Sheets.length) { S.sheetOpen = false; document.body.classList.remove('noscroll'); NowPlaying.paint(); }
   try { if (obj.onClose) obj.onClose(); } catch (e) { console.error(e); }
   if (deferred && !Sheets.length) setTimeout(() => softRender(), 320);
+  if (obj.beforeClose && Sync.settingsChanged) setTimeout(() => Sync.reopenSettings(), 340);
 }
 /* for beforeClose: returns true when it is fine to close now */
 function guardUnsaved(isDirty, close) {
@@ -4755,7 +4756,10 @@ const Sync = {
   blank(u) { return { uid: u.id, email: u.email, base: {}, h: {}, setRev: 0, setH: null, lastSeq: 0, up: {}, big: {}, miss: {}, gone: {}, audio: true, wifiOnly: true, lastAt: 0 }; },
   async load() {
     try { this.st = (await Store.get('meta', 'sync')) || null; } catch (e) { this.st = null; }
-    if (this.st) for (const k of ['base', 'h', 'up', 'big', 'miss', 'gone']) if (!this.st[k] || typeof this.st[k] !== 'object') this.st[k] = {};
+    if (this.st) {
+      for (const k of ['base', 'h', 'up', 'big', 'miss', 'gone']) if (!this.st[k] || typeof this.st[k] !== 'object') this.st[k] = {};
+      if (!Number.isFinite(this.st.lastSeq)) this.st.lastSeq = 0;
+    }
   },
   save() { clearTimeout(this.saveT); this.saveT = setTimeout(() => this.saveNow(), 400); },
   saveNow() {
@@ -4811,9 +4815,11 @@ const Sync = {
     const local = this.live(date), dirty = this.dayDirty(date);
     const remote = row.data ? normDay(date, row.data) : null, rOk = !!(remote && hasContent(remote));
     if (this.typingOn(date)) {
-      /* the text box being typed into would write its old text back: kept aside only if this changes that text */
-      const f = (document.activeElement.dataset || {}).fk, next = !dirty || (!local && rOk) ? (rOk ? remote : null) : local && rOk ? merge3(date, local, remote, st.h[date]) : local;
-      const same = ['goal', 'memo', 'next'].includes(f) && next && local && next[f] === local[f];
+      /* the day's text boxes still show the old text and would write it back when typed into: kept aside if this
+         changes any of them (other parts are applied now) */
+      const TEXTS = ['goal', 'memo', 'next'], f = (document.activeElement.dataset || {}).fk;
+      const next = !dirty || (!local && rOk) ? (rOk ? remote : null) : local && rOk ? merge3(date, local, remote, st.h[date]) : local;
+      const same = TEXTS.includes(f) && !!next && !!local && TEXTS.every(k => next[k] === local[k]);
       if (!same) { const h = this.held.get(date); if (!h || h.rev < row.rev) this.held.set(date, row); return false; }
     }
     this.held.delete(date);
@@ -4862,7 +4868,7 @@ const Sync = {
       if (r.ok) { st.base[date] = r.rev; st.h[date] = dayBase(sent); this.mark(date); return; }
       if (!r.rev) { st.base[date] = 0; continue; } /* the server lost it (e.g. its database was reset): add it again */
       /* changed elsewhere in the meantime: merge with the server's version and try again */
-      this.applyDay({ date, data: r.data, rev: r.rev });
+      this.applyDay({ date, data: r.data, rev: r.rev, seq: r.seq });
       if (this.held.has(date) || !this.dayDirty(date)) return;
     }
   },
@@ -4899,7 +4905,7 @@ const Sync = {
         from = rows[rows.length - 1].seq;
       }
       /* days kept aside are pulled again if the app is closed before they are applied */
-      for (const row of this.held.values()) st.lastSeq = Math.min(st.lastSeq, Math.max(0, row.seq - 1));
+      for (const row of this.held.values()) if (Number.isFinite(row.seq)) st.lastSeq = Math.min(st.lastSeq, Math.max(0, row.seq - 1));
       const srows = await Cloud.select('sd_settings', 'select=data,rev,seq');
       if (srows[0] && this.applySettings(srows[0])) changed = true;
       const dates = new Set(Object.keys(S.days).concat(Object.keys(st.base)));
@@ -4917,13 +4923,7 @@ const Sync = {
       this.busy = false;
       await this.saveNow();
       if (changed) softRender();
-      /* the settings sheet holds the old practice items: open it again with the new ones (and close what is on it) */
-      if (this.settingsChanged) {
-        this.settingsChanged = false;
-        const blk = $('#cloud-block'), i = blk ? Sheets.findIndex(x => x.sheet.contains(blk)) : -1;
-        const guarded = i >= 0 && Sheets.slice(i + 1).some(x => x.beforeClose);
-        if (i >= 0 && !this.quiet && !guarded) { for (let j = Sheets.length - 1; j >= i; j--) closeSheet(Sheets[j], true); setTimeout(openSettings, 320); }
-      }
+      this.reopenSettings();
       this.paint();
       if (this.again) { this.again = false; this.schedule(500); }
       else if (this.status === 'idle') this.syncAudio();
@@ -4995,6 +4995,18 @@ const Sync = {
     this.st.up[aud] = 1; delete this.st.miss[aud];
     this.save();
     return b;
+  },
+  /* the settings sheet holds the old practice items: it is opened again with the new ones (closing what is on it).
+     Not while another flow owns the sheets (logout) or a sheet above guards its closing (an update being
+     installed): then it waits and happens when that is over. */
+  reopenSettings() {
+    if (!this.settingsChanged) return;
+    const blk = $('#cloud-block'), i = blk ? Sheets.findIndex(x => x.sheet.contains(blk)) : -1;
+    if (i < 0) { this.settingsChanged = false; return; } /* not open: it shows the new ones when opened */
+    if (this.quiet || Sheets.slice(i + 1).some(x => x.beforeClose)) return;
+    this.settingsChanged = false;
+    for (let j = Sheets.length - 1; j >= i; j--) closeSheet(Sheets[j], true);
+    setTimeout(openSettings, 320);
   },
   /* the settings block redraws itself while it is open; focus stays on the same control, and a new state is read out */
   paint() {
@@ -5068,17 +5080,18 @@ async function logOut() {
     /* recordings too: the upload that the sync started, or one more pass */
     await Sync.audioIdle();
     if (Sync.status === 'idle' && Sync.unsentAudio() && !(Sync.st.wifiOnly && cellular())) { t.set('녹음을 올리는 중…'); await Sync.syncAudio(); await Sync.audioIdle(); }
-  } finally { Sync.quiet = false; Sync.settingsChanged = false; }
+  } finally { Sync.quiet = false; }
   t.done();
   const dirty = Sync.anyDirty(), audio = Sync.unsentAudio();
   if (dirty || audio) {
     const what = [dirty ? '이 폰에서 고친 기록 일부' : '', audio ? `녹음 ${audio}개` : ''].filter(Boolean).join('와 ');
     const go = await askSheet({ title: '아직 보내지 못한 기록이 있어요', text: `지금 로그아웃하면 ${what}가 다른 기기에 가지 않아요. 이 폰에는 그대로 남고, 다시 로그인하면 그때 보내요. 이 폰을 지우거나 넘길 거라면 먼저 인터넷(Wi-Fi)에 연결해서 보내 주세요.`, ok: '그래도 로그아웃', no: '취소', danger: true });
-    if (!go) { Sync.paint(); return; }
+    if (!go) { Sync.paint(); Sync.reopenSettings(); return; }
   }
   clearTimeout(Sync.timer);
   await Cloud.signOut();
   Sync.err = null; Sync.status = 'idle'; Sync.paint();
+  Sync.reopenSettings();
   toast('로그아웃했어요');
 }
 function openCloudConfig() {
@@ -5183,6 +5196,7 @@ async function checkUpdate(manual) {
   if (checking) {
     /* a check is on its way: a manual one reports itself; an automatic one is waited for and then reported */
     if (!manual || checkingManual) return;
+    checkingManual = true; /* further taps wait with this one */
     const t = toastProgress('업데이트를 확인하는 중…');
     await checking.catch(() => {});
     t.done();

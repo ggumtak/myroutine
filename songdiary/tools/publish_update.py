@@ -61,20 +61,27 @@ def git_ignored(www: Path, rels):
 
 
 def main_needs(out: Path):
-    """The files the version on main (what phones see now) needs, read from git: kept even when this code is
-    published again before merging."""
+    """The files the version on main (what phones see now) needs, read from git (fetched first when possible):
+    kept even when this code is published again before merging. Returns (hashes, found)."""
+    git = ['git', '-C', str(out.parent)]
+    try:
+        subprocess.run(git + ['fetch', '-q', 'origin', 'main'], capture_output=True, timeout=30)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    need, found = set(), False
     for ref in ('origin/main', 'main'):
         try:
-            r = subprocess.run(['git', '-C', str(out.parent), 'show', f'{ref}:./{out.name}'], capture_output=True)
+            r = subprocess.run(git + ['show', f'{ref}:./{out.name}'], capture_output=True)
         except FileNotFoundError:
-            return set()
+            break
         if r.returncode == 0:
             try:
                 body = json.loads(json.loads(r.stdout.decode())['body'])
-                return set(body.get('files', {}).values()) | {body.get('releaseJson')}
+                need |= set(body.get('files', {}).values()) | {body.get('releaseJson')}
+                found = True
             except (ValueError, KeyError, TypeError):
-                return set()
-    return set()
+                pass
+    return need, found
 
 
 def main():
@@ -135,7 +142,10 @@ def main():
             tmp = p.with_suffix('.part')
             tmp.write_bytes(b)
             tmp.replace(p)
-    keep = set(blobs) | prev_need | main_needs(out)
+    live, found = main_needs(out)
+    if not found and not prev_need and out.exists():
+        print('note: the version on main could not be read (git fetch origin main?); only this and the previous list are kept')
+    keep = set(blobs) | prev_need | live
     removed = 0
     for p in fdir.iterdir():
         if p.is_file() and p.name not in keep:
