@@ -4806,6 +4806,20 @@ const Sync = {
     return n;
   },
   async audioIdle(ms = 120000) { const t0 = Date.now(); while (this.audioBusy && Date.now() - t0 < ms) await new Promise(r => setTimeout(r, 150)); },
+  /* the text boxes of the day shown on 오늘 get the day's text (after a change arrived while one of them has the
+     cursor: the page itself is redrawn only once typing stops) */
+  syncBoxes(date) {
+    if (S.tab !== 'today' || S.date !== date || !isTyping()) return;
+    const e = S.days[date] || {};
+    for (const k of ['goal', 'memo', 'next']) {
+      const el = $(`#view [data-fk="${k}"]`), v = e[k] || '';
+      if (!el || el.value === v) continue;
+      const focused = el === document.activeElement;
+      el.value = v;
+      if (focused) try { el.setSelectionRange(v.length, v.length); } catch (err) { /* not a text box */ }
+      el.dispatchEvent(new Event('focus')); /* the box fits its height to the text (autoTA) */
+    }
+  },
   /* the day shown on 오늘 while one of its fields is being typed into: its text box would write the old text back */
   typingOn(date) { const a = document.activeElement; return isTyping() && !!a && !a.closest('.sheet') && S.tab === 'today' && S.date === date; },
   /* a day from the server: taken as is when this phone didn't change it, merged when both did */
@@ -4820,7 +4834,8 @@ const Sync = {
       const TEXTS = ['goal', 'memo', 'next'], f = (document.activeElement.dataset || {}).fk;
       const next = !dirty || (!local && rOk) ? (rOk ? remote : null) : local && rOk ? merge3(date, local, remote, st.h[date]) : local;
       const same = TEXTS.includes(f) && !!next && !!local && TEXTS.every(k => next[k] === local[k]);
-      if (!same) { const h = this.held.get(date); if (!h || h.rev < row.rev) this.held.set(date, row); return false; }
+      /* (when the app is going to the background, the boxes are simply given the new text) */
+      if (!same && !(this.boxesOk && TEXTS.includes(f))) { const h = this.held.get(date); if (!h || h.rev < row.rev) this.held.set(date, row); return false; }
     }
     this.held.delete(date);
     this.applying = true;
@@ -4836,6 +4851,7 @@ const Sync = {
         this.resend(S.days[date], remote);
       } else this.resend(local, null); /* deleted elsewhere but changed here: this phone's version is kept and sent */
     } finally { this.applying = false; }
+    this.syncBoxes(date);
     /* from now on the server's version is what both sides changed from */
     st.h[date] = rOk ? dayBase(remote) : null;
     st.base[date] = row.rev;
@@ -4895,7 +4911,7 @@ const Sync = {
     let changed = false;
     try {
       const st = this.st;
-      for (const [d, row] of Array.from(this.held)) if (!this.typingOn(d) && this.applyDay(row)) changed = true;
+      for (const [d, row] of Array.from(this.held)) if ((!this.typingOn(d) || this.boxesOk) && this.applyDay(row)) changed = true;
       /* a little overlap: two changes saved at the same moment can become visible out of order */
       let from = Math.max(0, st.lastSeq - 50);
       for (;;) {
@@ -5308,11 +5324,10 @@ function UpdateRow() {
     OTA.isNative ? h('button', { class: 'btn soft sm', style: 'margin-top:6px', 'data-fk': 'ota-check', onclick: () => checkUpdate(true) }, icon('repeat', 16), '업데이트 확인') : null);
 }
 
-/* leaving the app: typing ends here (what was typed is saved already), so a change from another phone to the same
-   day can be put together with it and everything is sent before Android may end the app */
+/* leaving the app: nobody is typing now, so a change from another phone to the day being typed into is put together
+   with it (its text boxes show the result at once) and everything is sent before Android may end the app */
 function onAppPause() {
-  const a = document.activeElement;
-  if (isTyping() && a && !a.closest('.sheet')) a.blur();
+  Sync.boxesOk = true;
   flushWrites(); autoBackup(); Sync.run();
 }
 /* ================= boot ================= */
@@ -5411,7 +5426,7 @@ function bindGlobal() {
     toast('한 번 더 누르면 앱을 닫아요');
   });
   Native.onPause(onAppPause);
-  Native.onResume(() => { followToday(true); Sync.run(); checkUpdate(false); });
+  Native.onResume(() => { Sync.boxesOk = false; followToday(true); Sync.run(); checkUpdate(false); });
   window.addEventListener('online', () => Sync.run());
   setInterval(() => { if (document.visibilityState === 'visible') Sync.run(); }, 5 * 60000);
 }
