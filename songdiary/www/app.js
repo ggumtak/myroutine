@@ -320,6 +320,7 @@ async function loadAll() {
     S.settings = normSettings(meta);
     S.days = {};
     for (const [k, v] of days) if (isDateKey(k)) S.days[k] = normDay(k, v);
+    await Cloud.restore();
     await Sync.load();
     S.mode = 'ready';
     if (!meta) { queueWrite('@s', 50); S.firstRun = true; const u = lsGet(LS_UI, {}); u.seen11 = 1; u.seen12 = 1; u.seen13 = 1; lsSet(LS_UI, u); }
@@ -4783,7 +4784,7 @@ const Sync = {
       this.status = 'idle'; this.err = null;
     } catch (e) {
       this.status = 'error'; this.err = e && e.kind ? e.kind : 'network';
-      if (this.err === 'network' || this.err === 'offline' || this.err === 'server') this.schedule(60000);
+      if (['network', 'offline', 'server', 'rate-limit'].includes(this.err)) this.schedule(60000);
       /* found while syncing by itself: say it once, the records stay on this phone meanwhile */
       if (this.err === 'signed-out' && !force && !this.toldOut) { this.toldOut = true; toast('로그인이 풀렸어요. 기록은 이 폰에 그대로 있어요.', { action: '로그인', onAction: openLogin }); }
     } finally {
@@ -4846,7 +4847,7 @@ const Sync = {
   /* the settings block redraws itself while it is open */
   paint() { const el = $('#cloud-block'); if (el) el.replaceWith(CloudBlock()); },
   errText() {
-    return ({ 'signed-out': '로그인이 풀렸어요. 다시 로그인해 주세요.', 'no-tables': '서버에 아직 표가 없어요. Supabase에서 setup.sql을 실행해 주세요.', offline: '인터넷이 연결되지 않았어요. 연결되면 다시 맞춰요.', network: '서버에 닿지 않았어요. 잠시 뒤 다시 맞춰요.', server: '서버에서 오류가 났어요. 잠시 뒤 다시 맞춰요.' })[this.err] || '동기화하지 못했어요.';
+    return ({ 'signed-out': '로그인이 풀렸어요. 다시 로그인해 주세요.', 'no-tables': '서버에 아직 표가 없어요. Supabase에서 setup.sql을 실행해 주세요.', offline: '인터넷이 연결되지 않았어요. 연결되면 다시 맞춰요.', network: '서버에 닿지 않았어요. 잠시 뒤 다시 맞춰요.', server: '서버에서 오류가 났어요. 잠시 뒤 다시 맞춰요.', 'rate-limit': '서버가 잠깐 바빠요. 로그인은 그대로예요. 잠시 뒤 다시 맞춰요.', 'bad-key': '서버 키가 바뀌었어요. 로그인은 그대로예요. ‘서버 바꾸기’로 새 키를 넣어 주세요.' })[this.err] || '동기화하지 못했어요.';
   }
 };
 const cloudErrText = e => ({ 'no-config': '먼저 서버를 연결해 주세요.', 'bad-url': '주소가 올바르지 않아요. https://로 시작하는 Project URL을 넣어 주세요.', 'bad-key': '키가 맞지 않아요. anon(public) 키를 넣어 주세요.', unreachable: '서버에 닿지 않았어요. 주소를 확인해 주세요.', offline: '인터넷이 연결되지 않았어요.', network: '서버에 닿지 않았어요.', 'rate-limit': '너무 자주 보냈어요. 잠시 뒤에 다시 해 주세요.', 'bad-email': '이메일 주소를 확인해 주세요.', 'bad-code': '번호가 맞지 않거나 시간이 지났어요. 다시 받아 주세요.', 'send-failed': '메일을 보내지 못했어요. 서버의 이메일 설정을 확인해 주세요.' })[e && e.kind] || '잠시 뒤에 다시 해 주세요.';
@@ -4862,7 +4863,7 @@ function CloudBlock() {
   if (!u || !st || st.uid !== u.id) {
     const out = !u && st && Sync.err === 'signed-out';
     add(out ? h('p', { class: 'hint warn', role: 'status' }, `로그인이 풀렸어요 (${st.email}). 다시 로그인하면 이어서 맞춰요. 이 폰의 기록은 그대로예요.`) : null,
-      h('p', { class: 'hint', style: 'margin-bottom:8px' }, '이메일로 받은 6자리 번호로 로그인해요. 같은 이메일로 로그인한 기기끼리 기록과 녹음이 맞춰져요.'),
+      h('p', { class: 'hint', style: 'margin-bottom:8px' }, '이메일로 받은 6자리 번호로 한 번만 로그인하면, 그다음부터는 자동으로 로그인돼요. 같은 이메일로 로그인한 기기끼리 기록과 녹음이 맞춰져요.'),
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn ink sm', 'data-fk': 'cloud-login', onclick: openLogin }, '이메일로 로그인'),
         cfg.custom ? h('button', { class: 'btn ghost sm', onclick: openCloudConfig }, '서버 바꾸기') : null));
@@ -4873,12 +4874,14 @@ function CloudBlock() {
   const upN = Object.keys(st.up).length, bigN = Object.keys(st.big).length;
   const audioLine = !st.audio ? '녹음은 이 폰에만 둬요' : Sync.audioNote === 'wifi' ? '녹음은 Wi-Fi에 연결되면 주고받아요' : Sync.audioNote === 'error' ? '녹음을 주고받다가 멈췄어요. 다음에 이어서 해요.' : Sync.audioNote || `녹음 ${upN}개가 서버에 있어요${bigN ? ` · 50MB가 넘어서 못 올린 녹음 ${bigN}개` : ''}`;
   add(
-    h('div', { class: 'cloud-me' }, icon('check', 16), h('span', { class: 'clip' }, u.email || st.email)),
+    h('div', { class: 'cloud-me' }, icon('check', 16), h('span', { class: 'clip' }, u.email || st.email), h('span', { class: 'pill blue' }, '자동 로그인')),
+    h('p', { class: 'hint' }, '로그아웃하기 전까지 이 폰에서는 계속 로그인돼 있어요.'),
     h('p', { class: 'hint' + (Sync.status === 'error' ? ' warn' : ''), role: 'status' }, state),
     h('p', { class: 'hint' }, audioLine),
     h('div', { class: 'btn-row', style: 'margin-top:8px' },
       h('button', { class: 'btn soft sm', 'data-fk': 'cloud-now', disabled: Sync.status === 'busy', onclick: () => { if (Sync.err === 'signed-out' || !Cloud.user()) { openLogin(); return; } Sync.run(true); } }, icon('repeat', 16), '지금 맞추기'),
-      h('button', { class: 'btn ghost sm', 'data-fk': 'cloud-out', onclick: () => confirmSheet({ title: '로그아웃할까요?', text: '이 폰의 기록과 녹음은 그대로 남아요. 다시 로그인하면 이어서 맞춰요.', ok: '로그아웃', onOk: async () => { await Sync.run(true); await Cloud.signOut(); Sync.err = null; Sync.status = 'idle'; Sync.paint(); toast('로그아웃했어요'); } }) }, '로그아웃')),
+      h('button', { class: 'btn ghost sm', 'data-fk': 'cloud-out', onclick: () => confirmSheet({ title: '로그아웃할까요?', text: '이 폰의 기록과 녹음은 그대로 남아요. 자동 로그인이 풀려서, 다시 맞추려면 이메일 번호로 다시 로그인해야 해요.', ok: '로그아웃', onOk: async () => { await Sync.run(true); await Cloud.signOut(); Sync.err = null; Sync.status = 'idle'; Sync.paint(); toast('로그아웃했어요'); } }) }, '로그아웃'),
+      Sync.err === 'bad-key' ? h('button', { class: 'btn ghost sm', onclick: openCloudConfig }, '서버 바꾸기') : null),
     ToggleRow('녹음도 맞추기', st.audio, v => { st.audio = v; Sync.saveNow(); if (v) Sync.syncAudio(); Sync.paint(); }, '녹음 파일도 서버에 올리고 다른 기기에서 받아요. 무료 서버는 모두 합쳐 1GB까지예요.', 'mic'),
     navigator.connection ? ToggleRow('Wi-Fi에서만 녹음 주고받기', st.wifiOnly, v => { st.wifiOnly = v; Sync.saveNow(); Sync.syncAudio(); }, '데이터 요금이 나가지 않게 해요. 글 기록은 언제나 맞춰요.', 'down') : null);
   return box;
@@ -4903,7 +4906,7 @@ function openCloudConfig() {
 }
 function openLogin() {
   if (!Cloud.config()) { openCloudConfig(); return; }
-  let step = 'email', email = '', s = null, busy = false;
+  let step = 'email', email = Cloud.lastEmail() || (Sync.st && Sync.st.email) || '', s = null, busy = false;
   const body = h('div', { class: 'login' });
   const msg = h('p', { class: 'hint', role: 'status', 'aria-live': 'polite' });
   const draw = () => {
@@ -4919,7 +4922,7 @@ function openLogin() {
         busy = false;
       };
       bindEnter(inp, send);
-      body.replaceChildren(h('p', { class: 'lead' }, '이메일로 6자리 번호를 보내 드려요. 같은 이메일로 로그인한 기기끼리 기록이 맞춰져요.'), field('이메일', inp), msg,
+      body.replaceChildren(h('p', { class: 'lead' }, '이메일로 6자리 번호를 보내 드려요. 이 폰에서는 한 번만 로그인하면 로그아웃하기 전까지 자동으로 로그인돼요.'), field('이메일', inp), msg,
         h('button', { class: 'btn ink wide', style: 'margin-top:10px', onclick: send }, '번호 받기'));
       setTimeout(() => inp.focus(), 320);
     } else {
