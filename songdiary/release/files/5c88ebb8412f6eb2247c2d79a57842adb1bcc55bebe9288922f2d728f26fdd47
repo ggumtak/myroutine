@@ -5156,11 +5156,14 @@ function openLogin() {
         h('button', { class: 'btn ink wide', style: 'margin-top:10px', onclick: send }, '번호 받기'));
       setTimeout(() => inp.focus(), 320);
     } else {
-      const inp = h('input', { class: 'input code', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 10, placeholder: '123456', 'aria-label': '받은 번호' });
+      const inp = h('input', { class: 'input code', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', placeholder: '123456', 'aria-label': '받은 번호' });
+      inp.addEventListener('input', () => inp.classList.toggle('long', inp.value.length > 12));
       const verify = async () => {
         if (busy) return;
-        const code = inp.value.replace(/\D/g, '');
-        if (code.length < 6) { msg.textContent = '메일로 받은 번호(6자리 이상)를 모두 넣어 주세요.'; return; }
+        /* a pasted login link from the email works too */
+        const link = Cloud.linkToken(inp.value);
+        const code = link ? inp.value.trim() : inp.value.replace(/\D/g, '');
+        if (!link && code.length < 6) { msg.textContent = '메일로 받은 번호(6자리 이상)를 모두 넣어 주세요. 메일에 번호 대신 링크만 있으면 그 링크를 복사해서 넣어도 돼요.'; return; }
         busy = true; msg.textContent = '확인하는 중…';
         try { await Cloud.verifyCode(email, code); }
         catch (e) { msg.textContent = cloudErrText(e); busy = false; return; }
@@ -5169,7 +5172,8 @@ function openLogin() {
         busy = false;
       };
       bindEnter(inp, verify);
-      body.replaceChildren(h('p', { class: 'lead' }, `${email} 주소로 보낸 메일의 번호를 넣어 주세요. 안 보이면 스팸함도 확인해 주세요.`), field('번호', inp), msg,
+      body.replaceChildren(h('p', { class: 'lead' }, `${email} 주소로 보낸 메일의 번호를 넣어 주세요. 안 보이면 스팸함도 확인해 주세요.`), field('번호', inp),
+        h('p', { class: 'hint' }, '메일에 번호 없이 ‘Log In’ 링크만 있으면, 링크를 길게 눌러 복사한 뒤 여기에 붙여 넣어도 로그인돼요.'), msg,
         h('button', { class: 'btn ink wide', style: 'margin-top:10px', onclick: verify }, '로그인'),
         h('div', { class: 'btn-row', style: 'margin-top:6px' },
           h('button', { class: 'btn ghost sm', onclick: async () => { if (busy) return; busy = true; msg.textContent = '다시 보내는 중…'; try { await Cloud.sendCode(email); msg.textContent = '다시 보냈어요.'; } catch (e) { msg.textContent = cloudErrText(e); } busy = false; } }, '번호 다시 받기'),

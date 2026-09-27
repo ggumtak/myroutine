@@ -958,6 +958,7 @@ body.kb .tnav{position:relative;top:auto}
 #cloud-block .hint{margin:2px 0 0}
 #cloud-block .toggle-row{margin-top:6px}
 .input.code{font-size:22px;letter-spacing:.3em;text-align:center;font-variant-numeric:tabular-nums}
+.input.code.long{font-size:14px;letter-spacing:0;text-align:left}
 .login .lead{margin:0 0 12px;font-size:15px;line-height:1.5}
 .login .hint[role="status"]{min-height:20px;margin-top:6px}
 .banner.update{background:var(--blue-soft)}

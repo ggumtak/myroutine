@@ -95,10 +95,20 @@ const Cloud = {
     throw err(r.status === 429 ? 'rate-limit' : code === 'validation_failed' ? 'bad-email'
       : code === 'email_address_not_authorized' ? 'not-authorized' : (code === 'otp_disabled' || code === 'signup_disabled') ? 'no-signup' : 'send-failed', { status: r.status, detail: b });
   },
+  /* the code from the email; or the email's login link itself (while the email template still sends a link, not a
+     code: the link carries the same one-time token, hashed) */
+  linkToken(text) {
+    const m = /[?&#]token(?:_hash)?=([A-Za-z0-9_.~-]{16,})/.exec(String(text || ''));
+    if (!m) return null;
+    const t = /[?&#]type=([a-z_]+)/.exec(text);
+    return { token_hash: m[1], type: t && ['magiclink', 'signup', 'email', 'invite'].includes(t[1]) ? t[1] : 'email' };
+  },
   async verifyCode(email, code) {
     const c = this.config();
     if (!c) throw err('no-config');
-    const r = await this.raw(c.url, c.key, '/auth/v1/verify', { json: { type: 'email', email, token: String(code).trim() } });
+    const link = this.linkToken(code);
+    const json = link ? { type: link.type, token_hash: link.token_hash } : { type: 'email', email, token: String(code).replace(/\D/g, '') };
+    const r = await this.raw(c.url, c.key, '/auth/v1/verify', { json });
     const b = await this.body(r);
     if (!r.ok) throw err(r.status === 429 ? 'rate-limit' : 'bad-code', { status: r.status, detail: b });
     await this.keep(b);
