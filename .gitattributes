@@ -1,0 +1,2 @@
+# the update files are published by their sha256: git must store them byte for byte (no line-ending changes)
+songdiary/release/files/** -text
