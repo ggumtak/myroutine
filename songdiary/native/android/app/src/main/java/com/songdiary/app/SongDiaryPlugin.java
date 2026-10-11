@@ -1,0 +1,140 @@
+package com.songdiary.app;
+
+import android.content.ContentResolver;
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
+import android.provider.Settings;
+import android.util.Log;
+import android.view.WindowManager;
+import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
+
+/** What www/native.js asks of Android beyond the standard plugins: keep the screen on, open the app's settings,
+ *  and recordings shared to the app (copied into cache/share, then picked up with takeSharedFiles). */
+@CapacitorPlugin(name = "SongDiary")
+public class SongDiaryPlugin extends Plugin {
+    private static final String TAG = "SongDiary";
+    private static final long MAX_SIZE = 300L * 1024 * 1024; /* the app refuses bigger files anyway (MAX_AUDIO) */
+    private final List<JSObject> pending = new ArrayList<>();
+
+    @Override
+    public void load() {
+        take(getActivity().getIntent());
+    }
+
+    @Override
+    protected void handleOnNewIntent(Intent intent) {
+        super.handleOnNewIntent(intent);
+        take(intent);
+    }
+
+    @PluginMethod
+    public void keepAwake(PluginCall call) {
+        final boolean on = Boolean.TRUE.equals(call.getBoolean("on", false));
+        getActivity().runOnUiThread(() -> {
+            if (on) getActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            else getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getContext().getPackageName(), null));
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(i);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void takeSharedFiles(PluginCall call) {
+        JSArray files = new JSArray();
+        synchronized (pending) {
+            for (JSObject f : pending) files.put(f);
+            pending.clear();
+        }
+        JSObject r = new JSObject();
+        r.put("files", files);
+        call.resolve(r);
+    }
+
+    /* a share from another app: copy the files off the main thread, then tell the page */
+    private void take(Intent intent) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        final List<Uri> uris = new ArrayList<>();
+        if (Intent.ACTION_SEND.equals(action)) {
+            Uri u = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (u != null) uris.add(u);
+        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            ArrayList<Uri> list = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (list != null) uris.addAll(list);
+        } else {
+            return;
+        }
+        intent.setAction(Intent.ACTION_MAIN); /* not taken twice when the activity is recreated */
+        if (uris.isEmpty()) return;
+        new Thread(() -> {
+            File dir = new File(getContext().getCacheDir(), "share");
+            dir.mkdirs();
+            ContentResolver cr = getContext().getContentResolver();
+            List<JSObject> got = new ArrayList<>();
+            for (Uri u : uris) {
+                try {
+                    String name = "녹음";
+                    long size = -1;
+                    try (Cursor c = cr.query(u, null, null, null, null)) {
+                        if (c != null && c.moveToFirst()) {
+                            int ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME), si = c.getColumnIndex(OpenableColumns.SIZE);
+                            if (ni >= 0 && c.getString(ni) != null) name = c.getString(ni);
+                            if (si >= 0 && !c.isNull(si)) size = c.getLong(si);
+                        }
+                    } catch (Exception e) { /* no metadata */ }
+                    String mime = cr.getType(u);
+                    JSObject f = new JSObject();
+                    f.put("name", name);
+                    f.put("mime", mime == null ? "" : mime);
+                    if (size > MAX_SIZE) {
+                        f.put("size", size);
+                        f.put("path", "");
+                    } else {
+                        File out = free(dir, name.replaceAll("[\\\\/:*?\"<>|]", "_"));
+                        long n = 0;
+                        try (InputStream in = cr.openInputStream(u); OutputStream os = new FileOutputStream(out)) {
+                            byte[] buf = new byte[65536];
+                            int r;
+                            while ((r = in.read(buf)) > 0) { os.write(buf, 0, r); n += r; if (n > MAX_SIZE) break; }
+                        }
+                        f.put("size", n);
+                        f.put("path", Uri.fromFile(out).toString());
+                    }
+                    got.add(f);
+                } catch (Exception e) {
+                    Log.w(TAG, "shared file", e);
+                }
+            }
+            synchronized (pending) { pending.addAll(got); }
+            notifyListeners("sharedFiles", new JSObject(), true);
+        }).start();
+    }
+
+    private static File free(File dir, String name) {
+        File f = new File(dir, name);
+        int dot = name.lastIndexOf('.');
+        String base = dot > 0 ? name.substring(0, dot) : name, ext = dot > 0 ? name.substring(dot) : "";
+        for (int i = 2; f.exists(); i++) f = new File(dir, base + " (" + i + ")" + ext);
+        return f;
+    }
+}

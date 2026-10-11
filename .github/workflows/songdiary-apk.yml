@@ -1,6 +1,6 @@
-# 노래일기: every push that changes the app builds its APK and puts it in your Google Drive (like ReaderaPlus).
-# Drive side: a small Apps Script web app in your own Google account (songdiary/tools/gdrive/upload.gs, steps in its
-# header) and two secrets, SONGDIARY_DRIVE_URL and SONGDIARY_DRIVE_KEY. Until they exist the job only says so.
+# 노래일기: every push that changes the app builds its APK from songdiary/native (Capacitor) + songdiary/www and puts
+# it in your Google Drive (like ReaderaPlus). Drive side: the Apps Script web app songdiary/tools/gdrive/upload.gs and
+# two secrets, SONGDIARY_DRIVE_URL and SONGDIARY_DRIVE_KEY. Until they exist the job only says so.
 # The signing key is made on the first build and kept in that Drive folder, never in git or in the Actions cache
 # (this repository is public: a fork's pull request could read the cache).
 name: 노래일기 APK → Google Drive
@@ -9,7 +9,7 @@ on:
   push:
     paths:
       - 'songdiary/www/**'
-      - 'songdiary/tools/build_apk.py'
+      - 'songdiary/native/**'
       - 'songdiary/tools/drive_apk.py'
       - '.github/workflows/songdiary-apk.yml'
   workflow_dispatch:
@@ -24,7 +24,7 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       SONGDIARY_DRIVE_URL: ${{ secrets.SONGDIARY_DRIVE_URL }}
       SONGDIARY_DRIVE_KEY: ${{ secrets.SONGDIARY_DRIVE_KEY }}
@@ -38,30 +38,59 @@ jobs:
       - uses: actions/checkout@v4
         if: steps.on.outputs.on == 'true'
 
+      - uses: actions/setup-java@v4
+        if: steps.on.outputs.on == 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: actions/setup-node@v4
+        if: steps.on.outputs.on == 'true'
+        with:
+          node-version: 22
+
       - uses: actions/setup-python@v5
         if: steps.on.outputs.on == 'true'
         with:
           python-version: '3.12'
 
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.on.outputs.on == 'true'
+
+      - name: Signing key from Google Drive
+        if: steps.on.outputs.on == 'true'
+        run: |
+          pip install -q cryptography
+          python3 songdiary/tools/drive_apk.py key --out-dir "$RUNNER_TEMP/sign"
+
       - name: Build APK
         if: steps.on.outputs.on == 'true'
         id: build
+        working-directory: songdiary/native
         run: |
-          pip install -q cryptography
-          name="$(python3 -c "import json; print(json.load(open('songdiary/www/release.json'))['version'])")"
-          code="$(python3 -c "import json; print(json.load(open('songdiary/www/release.json'))['code'])")"
-          python3 songdiary/tools/drive_apk.py base --out "$RUNNER_TEMP/base.apk"
-          python3 songdiary/tools/drive_apk.py key --out-dir "$RUNNER_TEMP/sign"
+          name="$(node -p "require('../www/release.json').version")"
+          code="$(node -p "require('../www/release.json').code")"
+          npm ci --no-audit --no-fund
+          npx cap sync android
+          export SONGDIARY_VERSION_NAME="$name" SONGDIARY_VERSION_CODE="$code"
+          export SONGDIARY_KEYSTORE="$RUNNER_TEMP/sign/release.p12" SONGDIARY_STOREPASS="$(cat "$RUNNER_TEMP/sign/storepass")"
+          (cd android && ./gradlew --stacktrace assembleRelease)
           apk="$RUNNER_TEMP/노래일기-$name.apk"
-          SONGDIARY_STOREPASS="$(cat "$RUNNER_TEMP/sign/storepass")" python3 songdiary/tools/build_apk.py \
-            --base "$RUNNER_TEMP/base.apk" --www songdiary/www --keystore "$RUNNER_TEMP/sign/release.p12" \
-            --version-name "$name" --version-code "$code" --out "$apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
+          ls -la "$apk"
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK to Google Drive
         if: steps.on.outputs.on == 'true'
         run: python3 songdiary/tools/drive_apk.py upload --file "${{ steps.build.outputs.apk }}"
 
+      - uses: actions/upload-artifact@v4
+        if: steps.on.outputs.on == 'true'
+        with:
+          name: songdiary-apk
+          path: ${{ steps.build.outputs.apk }}
+          retention-days: 7
+
       - name: Remove the key
         if: always()
-        run: rm -rf "$RUNNER_TEMP/sign" "$RUNNER_TEMP/base.apk"
+        run: rm -rf "$RUNNER_TEMP/sign"
