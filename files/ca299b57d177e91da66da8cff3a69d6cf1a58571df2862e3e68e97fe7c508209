@@ -1,0 +1,10 @@
+{
+  "name": "노래일기",
+  "short_name": "노래일기",
+  "lang": "ko",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#ECEFF3",
+  "theme_color": "#ECEFF3",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
