@@ -144,35 +144,22 @@ SONGDIARY_STOREPASS=... python3 songdiary/tools/build_apk.py \
 
 ## 새 APK를 구글 드라이브로 (자동)
 
-`main`에서 `www/release.json`이 바뀌면(= `publish_update.py`로 새 버전을 내보내고 합치면) GitHub Actions
-(`.github/workflows/songdiary-apk.yml`)가 그 버전의 APK를 만들어 구글 드라이브 폴더에 올려요.
-같은 이름이 이미 있으면 내용만 바꿔요 (드라이브의 버전 기록에 이전 것이 남음). Actions 탭에서 손으로 돌릴 수도 있어요.
-`tools/drive_apk.py`가 드라이브에서 받고 올리는 일을 해요 (표준 라이브러리만 씀).
+ReaderaPlus와 같은 방식이에요. 앱(`www/`)이 바뀐 푸시마다 GitHub Actions(`.github/workflows/songdiary-apk.yml`)가
+APK를 만들어 구글 드라이브 `노래일기` 폴더에 `노래일기-<버전>.apk`로 올리고, 예전 APK는 휴지통으로 보내요
+(30일 동안 되살릴 수 있음). Actions 탭에서 손으로 돌릴 수도 있어요.
 
-처음 한 번 준비:
+처음 한 번 (폰으로도 됨) — 자세한 순서는 [`tools/gdrive/upload.gs`](tools/gdrive/upload.gs) 맨 위:
 
-1. **드라이브**: APK를 받을 폴더를 만들고, 주소 `drive.google.com/drive/folders/<폴더 ID>`의 ID를 적어 둬요.
-   `노래일기-1.0.0.apk`(APK의 안드로이드 부분을 가져올 원본)도 드라이브에 올리고, 공유 링크 `/file/d/<파일 ID>/`의 ID를 적어요.
-2. **구글 로그인 키**: [Google Cloud Console](https://console.cloud.google.com/)에서 프로젝트를 만들고 Google Drive API를 켜요.
-   OAuth 동의 화면(External)을 만든 뒤 **앱 게시(프로덕션)**로 바꿔요. ‘테스트’ 상태로 두면 아래 토큰이 7일 뒤 끊겨요
-   (나만 쓰는 앱이라 확인 절차 없이 ‘확인되지 않은 앱’ 경고만 넘기면 돼요).
-   사용자 인증 정보 → OAuth 클라이언트 ID(웹 애플리케이션), 승인된 리디렉션 URI에 `https://developers.google.com/oauthplayground`.
-3. **refresh token**: [OAuth Playground](https://developers.google.com/oauthplayground) 오른쪽 위 톱니 → *Use your own OAuth credentials*에
-   2의 클라이언트 ID·비밀번호 → 범위에 `https://www.googleapis.com/auth/drive` 입력 → Authorize → *Exchange authorization code for tokens*
-   → Refresh token 복사.
-4. **GitHub 저장소 → Settings → Secrets and variables → Actions**에 넣기:
+1. script.google.com에 **새 프로젝트**를 만들어 `upload.gs`를 붙여 넣고, `KEY`를 긴 비밀번호로 바꿔 웹 앱으로 배포.
+2. 이 저장소 Settings → Secrets → Actions에 `SONGDIARY_DRIVE_URL`(웹 앱 주소), `SONGDIARY_DRIVE_KEY`(그 비밀번호).
+3. `노래일기-1.0.0.apk`(APK의 안드로이드 부분을 가져올 원본)를 드라이브 아무 곳에나 한 번 올리기.
 
-| 이름 | 값 |
-|---|---|
-| `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET` | 2의 클라이언트 ID·비밀번호 |
-| `GDRIVE_REFRESH_TOKEN` | 3의 refresh token |
-| `SONGDIARY_DRIVE_FOLDER_ID` | 1의 폴더 ID |
-| `SONGDIARY_BASE_APK_ID` | 1의 `노래일기-1.0.0.apk` 파일 ID |
-| `SONGDIARY_KEYSTORE_B64` | `base64 -w0 songdiary-release.p12` 결과 (맥: `base64 -i songdiary-release.p12`) |
-| `SONGDIARY_STOREPASS` | 키스토어 비밀번호 |
-
-- 서명 키는 시크릿으로만 쓰고 작업이 끝나면 지워요. 저장소엔 올라가지 않아요.
-- 버전 이름은 원본과 글자 수가 같아야 해요 (`1.0.0` → `1.5.0`처럼 한 자리씩).
+- 서명 키는 첫 빌드 때 만들어 드라이브 `노래일기` 폴더의 `songdiary-signing.json`에 둬요. 지우지 마세요
+  (다음 APK가 지금 깔린 앱 위에 설치되려면 같은 키여야 해요). 저장소가 공개라서 Actions 캐시에는 두지 않아요.
+- 지금 폰의 앱이 다른 키로 서명돼 있으면 처음 한 번은 지우고 새로 깔아야 해요. 그 전에 설정 → 계정·동기화나 백업을 확인하세요.
+- 시크릿이 없으면 빌드는 ‘설정 안 됨’만 알리고 끝나요 (실패로 뜨지 않음).
+- 버전 이름은 `www/release.json`의 것을 쓰고, 원본과 글자 수가 같아야 해요 (`1.0.0` → `1.5.0`처럼 한 자리씩).
+- 웹 화면만 바뀐 버전은 APK 없이도 앱 안 업데이트로 받아져요. APK는 새로 깔거나 다른 폰에 깔 때 쓰면 돼요.
 
 ## 브라우저에서 확인
 

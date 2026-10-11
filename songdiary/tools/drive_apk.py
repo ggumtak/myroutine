@@ -1,27 +1,22 @@
 #!/usr/bin/env python3
-"""Fetch the base APK from Google Drive and put a built APK into a Drive folder — standard library only.
+"""Talk to the 노래일기 Google Drive web app (tools/gdrive/upload.gs) — standard library only.
 
-Used by .github/workflows/songdiary-apk.yml; also works by hand:
+Used by .github/workflows/songdiary-apk.yml. Needs SONGDIARY_DRIVE_URL (the web app's /exec URL) and
+SONGDIARY_DRIVE_KEY (the password in the script).
 
-    GDRIVE_CLIENT_ID=... GDRIVE_CLIENT_SECRET=... GDRIVE_REFRESH_TOKEN=... \\
-        python3 drive_apk.py download --id <file id of 노래일기-1.0.0.apk> --out base.apk
-    python3 drive_apk.py upload --file 노래일기-1.5.0.apk --folder <folder id>
-
-Signs in as you with an OAuth refresh token (scope https://www.googleapis.com/auth/drive), because a service
-account can't own files in a personal My Drive. Uploading a name that is already in the folder replaces that
-file's content (a re-run doesn't make copies; Drive keeps the old one in the file's version history).
+    python3 drive_apk.py base --out base.apk            # 노래일기-1.0.0.apk from your Drive
+    python3 drive_apk.py key --out-dir DIR              # the signing key (made on the first build if there is none)
+    python3 drive_apk.py upload --file 노래일기-1.5.0.apk
 """
 import argparse
+import base64
+import datetime
 import json
 import os
+import secrets
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
-
-TOKEN_URL = os.environ.get('GDRIVE_TOKEN_URL', 'https://oauth2.googleapis.com/token')
-API = os.environ.get('GDRIVE_API', 'https://www.googleapis.com')
-APK_TYPE = 'application/vnd.android.package-archive'
 
 
 def env(name):
@@ -31,79 +26,74 @@ def env(name):
     return v
 
 
-def call(req, what):
+def call(action, what, **fields):
+    body = json.dumps({'key': env('SONGDIARY_DRIVE_KEY'), 'action': action, **fields}).encode()
+    # POST; Apps Script answers with a redirect that urllib follows as a GET, which is what it expects
+    req = urllib.request.Request(env('SONGDIARY_DRIVE_URL'), data=body, method='POST', headers={'Content-Type': 'application/json'})
     try:
         with urllib.request.urlopen(req, timeout=300) as r:
-            return r.read(), r.headers
+            answer = r.read().decode('utf-8', 'replace')
     except urllib.error.HTTPError as e:
-        sys.exit(f'{what} failed: HTTP {e.code} {e.read().decode("utf-8", "replace")[:500]}')
+        sys.exit(f'{what} failed: HTTP {e.code}')
     except urllib.error.URLError as e:
         sys.exit(f'{what} failed: {e.reason}')
+    if answer.startswith('ok'):
+        return answer[3:]
+    if action == 'getkey' and answer == 'none':
+        return None
+    sys.exit(f'{what} failed: {answer[:300]}')
 
 
-def token():
-    body = urllib.parse.urlencode({
-        'client_id': env('GDRIVE_CLIENT_ID'), 'client_secret': env('GDRIVE_CLIENT_SECRET'),
-        'refresh_token': env('GDRIVE_REFRESH_TOKEN'), 'grant_type': 'refresh_token'}).encode()
-    data, _ = call(urllib.request.Request(TOKEN_URL, data=body, method='POST'), 'sign-in')
-    return json.loads(data)['access_token']
-
-
-def download(tok, file_id, out):
-    url = f'{API}/drive/v3/files/{urllib.parse.quote(file_id)}?alt=media&supportsAllDrives=true'
-    data, _ = call(urllib.request.Request(url, headers={'Authorization': f'Bearer {tok}'}), 'download')
-    with open(out, 'wb') as f:
-        f.write(data)
-    print(f'{out}: {len(data) / 1048576:.1f} MB from Drive')
-
-
-def find(tok, folder, name):
-    q = "name = '%s' and '%s' in parents and trashed = false" % (name.replace("\\", "\\\\").replace("'", "\\'"), folder)
-    url = f'{API}/drive/v3/files?' + urllib.parse.urlencode({'q': q, 'fields': 'files(id)', 'supportsAllDrives': 'true', 'includeItemsFromAllDrives': 'true'})
-    data, _ = call(urllib.request.Request(url, headers={'Authorization': f'Bearer {tok}'}), 'search')
-    files = json.loads(data).get('files', [])
-    return files[0]['id'] if files else None
-
-
-def upload(tok, path, folder, name):
-    with open(path, 'rb') as f:
-        blob = f.read()
-    old = find(tok, folder, name)
-    auth = {'Authorization': f'Bearer {tok}'}
-    # resumable upload: works for any size (simple multipart is limited to 5 MB)
-    if old:
-        start = f'{API}/upload/drive/v3/files/{old}?uploadType=resumable&supportsAllDrives=true'
-        meta, method = {}, 'PATCH'
-    else:
-        start = f'{API}/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true'
-        meta, method = {'name': name, 'parents': [folder], 'mimeType': APK_TYPE}, 'POST'
-    _, headers = call(urllib.request.Request(start, data=json.dumps(meta).encode(), method=method, headers={
-        **auth, 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': APK_TYPE,
-        'X-Upload-Content-Length': str(len(blob))}), 'upload start')
-    session = headers.get('Location')
-    if not session:
-        sys.exit('upload start failed: no upload URL')
-    data, _ = call(urllib.request.Request(session, data=blob, method='PUT', headers={'Content-Type': APK_TYPE}), 'upload')
-    fid = json.loads(data)['id']
-    print(f'{"replaced" if old else "uploaded"} {name} ({len(blob) / 1048576:.1f} MB): https://drive.google.com/file/d/{fid}/view')
+def new_key(storepass):
+    """A signing key like `keytool -genkeypair -keyalg RSA -keysize 2048 -storetype PKCS12` makes."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    from cryptography.x509.oid import NameOID
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'SongDiary'), x509.NameAttribute(NameOID.ORGANIZATION_NAME, 'Personal'), x509.NameAttribute(NameOID.COUNTRY_NAME, 'KR')])
+    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number()).not_valid_before(now).not_valid_after(now + datetime.timedelta(days=36500))
+            .sign(key, hashes.SHA256()))
+    return pkcs12.serialize_key_and_certificates(b'songdiary', key, cert, None, serialization.BestAvailableEncryption(storepass.encode()))
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
-    d = sub.add_parser('download')
-    d.add_argument('--id', required=True)
-    d.add_argument('--out', required=True)
-    u = sub.add_parser('upload')
-    u.add_argument('--file', required=True)
-    u.add_argument('--folder', required=True)
-    u.add_argument('--name', help='name in Drive (default: the file name)')
+    sub.add_parser('base').add_argument('--out', required=True)
+    sub.add_parser('key').add_argument('--out-dir', required=True)
+    sub.add_parser('upload').add_argument('--file', required=True)
     a = ap.parse_args()
-    tok = token()
-    if a.cmd == 'download':
-        download(tok, a.id, a.out)
+    if a.cmd == 'base':
+        data = base64.b64decode(call('base', 'base APK'))
+        with open(a.out, 'wb') as f:
+            f.write(data)
+        print(f'{a.out}: {len(data) / 1048576:.1f} MB from Drive')
+    elif a.cmd == 'key':
+        got = call('getkey', 'signing key')
+        if got:
+            k = json.loads(got)
+            p12, storepass = base64.b64decode(k['p12']), k['pass']
+            print('signing key from Drive')
+        else:
+            storepass = secrets.token_hex(24)
+            p12 = new_key(storepass)
+            call('putkey', 'saving the new signing key', p12=base64.b64encode(p12).decode(), **{'pass': storepass})
+            print('::warning::made a NEW signing key and saved it in Drive (songdiary-signing.json). An app signed with another key must be reinstalled once.')
+        print(f'::add-mask::{storepass}')
+        os.makedirs(a.out_dir, exist_ok=True)
+        with open(os.path.join(a.out_dir, 'release.p12'), 'wb') as f:
+            f.write(p12)
+        with open(os.path.join(a.out_dir, 'storepass'), 'w') as f:
+            f.write(storepass)
     else:
-        upload(tok, a.file, a.folder, a.name or os.path.basename(a.file))
+        name = os.path.basename(a.file)
+        with open(a.file, 'rb') as f:
+            data = base64.b64encode(f.read()).decode()
+        print('Google Drive: ok', call('upload', 'upload', name=name, data=data))
 
 
 if __name__ == '__main__':
