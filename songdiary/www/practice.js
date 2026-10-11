@@ -16,7 +16,7 @@ const GROUPS = [
   { k: 'r1', n: '①', no: 1, name: '준비', min: 2, light: true },
   { k: 'r2', n: '②', no: 2, name: '호흡', min: 6, light: true },
   { k: 'r3', n: '③', no: 3, name: '입술 떨기·혀 굴리기', min: 6, light: true },
-  { k: 'r4', n: '④', no: 4, name: '책 진도', min: 8 },
+  { k: 'r4', n: '④', no: 4, name: '단계 연습', min: 8 },
   { k: 'r5', n: '⑤', no: 5, name: '노래에 적용', min: 5 },
   { k: 'rx', n: '', no: 0, name: '그 밖의 연습', min: 0 }
 ];
@@ -27,8 +27,8 @@ const ITEMS = [
   { id: 'rs_ready', g: 'r1', name: '자세·긴장 풀기', target: 1, memo: '머리·가슴·골반 한 줄로 · 심호흡·스트레칭 · 조용한 곳' },
   { id: 'rs_lip', g: 'r3', name: '입술 떨기 (립롤)', target: 2, memo: '“어~” 하며 입술 부르르 · 1번 → 3번', ph: [['1번 1옥타브 반', 1], ['3번 크게 뛰기', 1]], pats: ['b01', 'b03'], keys: true },
   { id: 'rs_trill', g: 'r3', name: '혀 굴리기 (트릴)', target: 2, memo: '“드르르” 혀 떨며 “어~” · 2번 → 4번', ph: [['2번 1옥타브 반', 1], ['4번 크게 뛰기', 1]], pats: ['b02', 'b04'], keys: true },
-  { id: 'rs_book', g: 'r4', name: '책 진도 연습', target: 3, memo: '지금 진도의 연습을 오르내리기 ×3', book: true, keys: true },
-  { id: 'rs_song', g: 'r5', name: '연습곡 고음에 적용', target: 4, memo: '막히는 음 한 곳에 27~30번을 하나씩', ph: [['몸 숙이기 (27번)', 1], ['살짝 울먹임 (28번)', 1], ['모음 바꾸기 (29번)', 1], ['키 올려 부르기 (30번)', 1]], song: true }
+  { id: 'rs_book', g: 'r4', name: '오늘의 단계 연습', target: 3, memo: '앱이 골라 준 연습 1개를 피아노 따라 오르내리기 ×3', book: true, keys: true },
+  { id: 'rs_song', g: 'r5', name: '연습곡 고음에 적용', target: 4, memo: '노래에서 막히는 음 한 곳에 4가지 방법을 하나씩', ph: [['몸 숙이기 (27번)', 1], ['살짝 울먹이기 (28번)', 1], ['모음 바꾸기 (29번)', 1], ['키 올려 부르기 (30번)', 1]], song: true }
 ];
 const BY_ID = {};
 ITEMS.forEach(d => { BY_ID[d.id] = d; });
@@ -40,24 +40,40 @@ const LEGACY_IDS = ['rt_warm', 'rt_elastic', 'rt_straw', 'rt_siren', 'rt_link', 
 const LEGACY_LIGHT = ['rt_warm', 'rt_elastic', 'rt_straw', 'rt_siren'];
 const HISS_MEMO = '“스—” 30~50% 힘으로 ×5', PANT_MEMO = '20초×2 (어지러우면 중단)';
 const HISS_SEC = [20, 25, 30, 35], PANT_SEC = 20;
-/* 책 진도 starts after the warm-ups (1~4번 are in ③ every day) */
+/* 단계 연습 (the book's exercises one after another) starts after the warm-ups (1~4번 are in ③ every day) */
 const BOOK_FIRST = 5, BOOK_LAST = 26;
 
-/* the whole routine, for 루틴 안내 (' / ' splits a step into its parts) */
+/* the whole routine, for 루틴 안내 (' / ' splits a step into its parts); why: what the step is for */
 const STEPS = [
-  { name: '준비', min: 2, text: '바른 자세: 머리·가슴·골반이 한 줄로, 짝다리·구부정하게 서지 않기 / 심호흡·스트레칭으로 몸과 마음의 긴장 풀기 / 조용한 곳에서, 된다고 믿고' },
-  { name: '호흡', min: 6, text: '히싱 “스—” 30~50% 힘으로 ×5 (1주 20초→2주 25초→3주 30초→4주 35초) / 개호흡 20초×2 (어지러우면 중단)' },
-  { name: '입술 떨기·혀 굴리기', min: 6, text: '입술 떨기(립롤): 1번(1옥타브 반) → 3번(크게 뛰기) / 혀 굴리기(트릴): 2번 → 4번 / 1~4번은 책에서도 계속 쓰는 몸풀기예요' },
-  { name: '책 진도', min: 8, text: '지금 진도의 연습을 오르내리기 ×3 (5번부터 26번까지 차례로) / 바르게 되면 ‘해냈어요’ → 다음 번호로 / 성구가 이미 이어지면 12·13번은 건너뛰어도 돼요' },
-  { name: '노래에 적용', min: 5, text: '연습곡에서 막히는 음 한 곳을 골라 / 27번 몸 숙이기 → 28번 살짝 울먹임 → 29번 모음 바꾸기 → 30번 키 올려 부르기' }
+  { name: '준비', min: 2, text: '바르게 서기: 머리·가슴·골반이 한 줄로, 짝다리·구부정 X / 숨을 크게 세 번 / 목·어깨 천천히 돌리기', why: '몸에 힘이 들어가 있으면 그 힘이 목으로 가요. 긴장을 풀고 시작해야 나머지 연습이 제대로 돼요.' },
+  { name: '호흡', min: 6, text: '히싱 “스—” 30~50% 힘으로 ×5 (1주 20초→2주 25초→3주 30초→4주 35초) / 개호흡 20초×2 (어지러우면 중단)', why: '숨을 고르고 길게 내보내는 힘을 길러요. 원래 하던 그대로예요.' },
+  { name: '입술 떨기·혀 굴리기', min: 6, text: '입술 떨기(립롤): 1번 → 3번 / 혀 굴리기(트릴): 2번 → 4번 / 피아노가 반음씩 올라갔다 내려와요', why: '목에 힘을 안 주고 낮은 음부터 높은 음까지 이어 부르는 몸풀기예요. 책에서도 매일 하라고 해요.' },
+  { name: '단계 연습', min: 8, text: '앱이 골라 준 연습 1개를 피아노 따라 ×3 / 편해지면 ‘이제 잘 돼요’ → 다음 연습으로', why: '책의 5~26번을 쉬운 것부터 하나씩 익혀요. 매일 하나만 하면 돼요.' },
+  { name: '노래에 적용', min: 5, text: '연습곡에서 막히는 음 한 곳 / 몸 숙이기 → 살짝 울먹이기 → 모음 바꾸기 → 키 올려 부르기 (책 27~30번)', why: '연습에서 익힌 걸 실제 노래에 옮겨요.' }
+];
+/* how to practise, in plain words (루틴 안내 맨 위, 따라 하기 첫 화면) */
+const PLAN = [
+  '매일 같은 순서로 5단계, 약 27분이에요. ‘오늘 연습 따라 하기’를 누르면 한 단계씩 화면이 안내해요.',
+  '책에는 1~30번이 있지만 매일 다 하지 않아요. 매일 하는 건 ① 몸풀기 1~4번, ② 앱이 골라 주는 단계 연습 1개, ③ 노래에 적용(27~30번)이에요.',
+  '단계 연습은 5번부터 26번까지 쉬운 것부터 하나씩이에요. 지금 연습이 편해지면(목에 힘 안 들어가고, 처음부터 끝까지 소리가 안 끊기면) ‘이제 잘 돼요’를 눌러 다음 번호로 넘어가요. 하루 만에 넘어가도, 1~2주 걸려도 괜찮아요.',
+  '5~13번은 가슴소리와 머리소리가 “이어지는 느낌”을 익히는 연습이에요. 이미 고음이 끊기거나 뒤집히지 않고 이어지면 ‘14번부터 하기’로 건너뛰어도 돼요.',
+  '힘들거나 목이 조금이라도 아프면 바로 멈춰요. 크게 부를 필요 없어요.'
+];
+/* 단계 연습 in groups, so it's clear where you are */
+const STAGES = [
+  { from: 5, to: 11, name: '이어지는 느낌 익히기', text: '가슴소리→머리소리가 끊기지 않게 잇는 느낌을 처음 배워요' },
+  { from: 12, to: 13, name: '가성으로 길 내기', text: '그래도 안 이어질 때만 해요. 이어지면 건너뛰어요' },
+  { from: 14, to: 18, name: '“끼익” 소리로 말하는 높이 찾기', text: '작은 끼익 소리로, 말할 때처럼 편한 목으로 높이 가는 법을 익혀요' },
+  { from: 19, to: 22, name: '끼익 빼고 진짜 소리로', text: '도움 소리를 빼고 실제 모음으로 불러요' },
+  { from: 23, to: 26, name: '모음 바꾸며 다듬기', text: '가사처럼 모음이 바뀌어도 흔들리지 않게 다듬어요' }
 ];
 
 /* 3부 기술 유지: the book's ways to keep speech-level singing inside a song */
 const SONG = [
-  { no: 27, name: '몸 숙이기', text: '막히는 음에 다가갈 때 몸을 앞으로 숙이고, 그 음이 끝나면 다시 서요. 다가오는 바닥 때문에 ‘올라간다’보다 ‘내려간다’고 느껴져 겁이 줄어요.' },
-  { no: 28, name: '살짝 울먹임', text: '소리에 살짝 ‘울먹임’을 넣어 바깥 근육이 끼어들지 않게 해요. 필요 없다는 걸 몸에 잠깐 상기시키는 용도로만.' },
-  { no: 29, name: '모음 바꾸기', text: '그 음의 모음이 낮은 음역에 묶여 안 올라가면, 아래 표의 다른 모음으로 그 음을 시작했다가 같은 자리에서 원래 모음으로 바꿔요.' },
-  { no: 30, name: '키 올려 부르기', text: '노래를 원래보다 높게 옮겨 불러요. 한 음역에 갇히지 않게, 문제없는 노래도 가끔 확인용으로.' }
+  { no: 27, name: '몸 숙이기', good: '고음이 무서워서 몸이 미리 굳는 걸 풀어 줘요', text: '막히는 음에 다가갈 때 몸을 앞으로 숙이고, 그 음이 끝나면 다시 서요. 다가오는 바닥 때문에 ‘올라간다’보다 ‘내려간다’고 느껴져 겁이 줄어요.' },
+  { no: 28, name: '살짝 울먹이기', good: '목이 조이기 시작할 때 다시 편한 자리로 돌려놔요', text: '소리에 살짝 ‘울먹임’을 넣어 바깥 근육이 끼어들지 않게 해요. 필요 없다는 걸 몸에 잠깐 상기시키는 용도로만.' },
+  { no: 29, name: '모음 바꾸기', good: '특정 모음에서만 막히는 음을 뚫어 줘요', text: '그 음의 모음이 낮은 음역에 묶여 안 올라가면, 아래 표의 다른 모음으로 그 음을 시작했다가 같은 자리에서 원래 모음으로 바꿔요.' },
+  { no: 30, name: '키 올려 부르기', good: '한 음역에 갇히지 않게 하고, 원래 키를 더 편하게 만들어 줘요', text: '노래를 원래보다 높게 옮겨 불러요. 한 음역에 갇히지 않게, 문제없는 노래도 가끔 확인용으로.' }
 ];
 /* 29번: if the problem vowel is … try … */
 const VOWEL_SUB = [
@@ -119,5 +135,5 @@ function shiftVowels(text) {
   return { text: out.join(''), chars: out, changed };
 }
 
-window.Practice = { STOP_RULES, GROUPS, ITEMS, BY_ID, ORDER, LEGACY_IDS, LEGACY_LIGHT, HISS_MEMO, PANT_MEMO, HISS_SEC, PANT_SEC, BOOK_FIRST, BOOK_LAST, STEPS, SONG, VOWEL_SUB, CAUTIONS, PRON, CUES, CUE_ONE, V, C, syl, shiftVowels };
+window.Practice = { STOP_RULES, GROUPS, ITEMS, BY_ID, ORDER, LEGACY_IDS, LEGACY_LIGHT, HISS_MEMO, PANT_MEMO, HISS_SEC, PANT_SEC, BOOK_FIRST, BOOK_LAST, STEPS, PLAN, STAGES, SONG, VOWEL_SUB, CAUTIONS, PRON, CUES, CUE_ONE, V, C, syl, shiftVowels };
 })();
