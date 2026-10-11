@@ -1006,3 +1006,6 @@ body.kb .tnav{position:relative;top:auto}
 .book-log button .d{flex:none;font-size:12px;color:var(--ink-3)}
 .book-log li.cur button .n,.book-log li.cur button .t{color:var(--blue)}
 .book-log li.ok button .d{color:var(--ok)}
+.words{margin:4px 0 6px;font-size:13.5px;line-height:1.55}
+.words dt{font-weight:700;color:var(--ink);margin-top:6px}
+.words dd{margin:1px 0 0;color:var(--ink-2)}

@@ -1295,7 +1295,7 @@ function grpOf(id) {
   return id === hissId() || id === pantId() ? 'r2' : 'rx';
 }
 const isLight = g => !!(PR.GROUPS.find(x => x.k === g) || {}).light;
-/* ①~③ = 준비·호흡·립롤·혀 트릴: what a light day (멈춤 규칙 2) still does */
+/* ①~③ = 준비·호흡·입술 떨기·혀 굴리기: what a light day (멈춤 규칙 2) still does */
 const LIGHT_NAMES = PR.GROUPS.filter(g => g.light).map(g => g.name).join('·');
 const RT_MIN = PR.GROUPS.reduce((a, g) => a + g.min, 0);
 /* 멈춤 규칙 2: the day before ended with 목 상태 5 or lower → only steps ①~③ today (returns that score) */
@@ -1900,6 +1900,7 @@ function openScaleTrainer(o = {}) {
       vs,
       h('details', { class: 'sc-more' }, h('summary', null, '방법 더 보기'),
         h('ul', null, bk.text.map(t => h('li', null, t)), h('li', null, `${SK.START[bk.start]} — 책의 테너 시작 음: ${noteName(bk.t)} (${noteSci(bk.t)})`), bk.no <= 4 ? h('li', null, '공기를 너무 쓰거나 높은 음을 미리 걱정하면 입술·혀가 멈춰요. 그럴 땐 높은 음에 다가갈 때 몸을 앞으로 숙였다가 끝나면 일어서요.') : null)),
+      h('details', { class: 'sc-more' }, h('summary', null, '말 풀이 (가슴소리·머리소리·끼익 소리…)'), WordList()),
       h('div', { class: 'sc-log' }, h('span', { class: 'hint' }, `시작한 날 ${L.s ? fmtMD(L.s) : '—'} · 해낸 날 ${L.a ? fmtMD(L.a) : '—'}`), act)].filter(Boolean));
   };
   /* the exercise as 계이름; the note being heard lights up */
@@ -3844,6 +3845,7 @@ function openGuide() {
     sec('⛔ 멈춤 규칙', h('ul', null, PR.STOP_RULES.map(t => h('li', null, t)))),
     sec('책의 주의 사항', h('ul', null, PR.CAUTIONS.map(t => h('li', null, t)))),
     sec(`노래 전 루틴 (약 ${RT_MIN}분)`, steps, h('p', { class: 'hint' }, `①~③단계 = ${LIGHT_NAMES} (멈춤 규칙 2번)`), weekSeg),
+    sec('말 풀이', WordList()),
     sec('책의 순서', h('ul', null, SK.PARTS.map(p => h('li', null, h('b', null, `${p.name} (${p.range})`), ' ', p.text)))),
     sec(`책 진도 (지금 ${S.settings.book.cur}번)`, h('p', { class: 'hint' }, '번호를 누르면 건반에서 열려요. 바르게 되면 건반 화면에서 ‘해냈어요’를 눌러 다음 번호로 넘어가요.'), logList()),
     sec('3부 노래에 적용 (27~30번)', SongTips()),
@@ -3852,6 +3854,8 @@ function openGuide() {
       h('ul', null, REC_FIELDS.map(([k, w]) => h('li', null, h('b', null, k), ` → ${w}`)))));
   s = openSheet({ title: '노래 전 루틴 안내', body, full: true, onClose: () => softRender(), foot: rOn ? null : [h('button', { class: 'btn ink', onclick: () => { closeSheet(s, true); openRoutineInsert(); } }, '노래 전 루틴 넣기')] });
 }
+/* 말 풀이: the words the book's instructions use */
+function WordList() { return h('dl', { class: 'words' }, SK.WORDS.map(([w, d]) => [h('dt', null, w), h('dd', null, d)])); }
 /* 3부: 27~30번, and 29번's vowel table */
 function SongTips() {
   return h('div', { class: 'song-tips' },
@@ -3911,7 +3915,7 @@ function openRoutineInsert() {
     hiss && hiss.target !== 5 ? ToggleRow('히싱 목표를 5회로', true, v => { opts.hiss5 = v; }, `지금 ${hiss.target}회 · 강의: ×5`) : null,
     pant && pant.target !== 2 ? ToggleRow('개호흡 목표를 2회로', true, v => { opts.pant2 = v; }, `지금 ${pant.target}회 · 강의: 20초×2`) : null,
     oldMemo.length ? ToggleRow('방법 메모를 강의 내용으로', true, v => { opts.memo = v; }, `지금: ${oldMemo.join(' / ')}`) : null,
-    overlap.length ? ToggleRow(`겹치는 ${overlap.map(d => `‘${d.name}’`).join('·')} 빼기`, false, v => { opts.dropOverlap = v; }, '루틴의 립롤·책 진도 스케일과 겹쳐요. 빼도 지난 기록은 남아요.') : null);
+    overlap.length ? ToggleRow(`겹치는 ${overlap.map(d => `‘${d.name}’`).join('·')} 빼기`, false, v => { opts.dropOverlap = v; }, '루틴의 입술 떨기·책 진도 스케일과 겹쳐요. 빼도 지난 기록은 남아요.') : null);
   const ok = h('button', { class: 'btn ink', onclick: () => {
     closeSheet(s, true);
     const undo = insertRoutine(opts);
@@ -3968,6 +3972,15 @@ function insertRoutine(opts = {}) {
    memos, records and 히싱 주차; today's unused old items go, ones already done stay counted as finished */
 function migrateRoutine() {
   const ds = S.settings.drills;
+  const OLD = { rs_lip: ['립롤', '“어” 입술 떨기로 오르내리기 · 1번 → 3번'], rs_trill: ['혀 트릴', '“어” 혀 떨기로 오르내리기 · 2번 → 4번'] };
+  let renamed = false;
+  ds.forEach(d => {
+    const o = OLD[d.id], n = PR.BY_ID[d.id];
+    if (!o) return;
+    if (d.name === o[0]) { d.name = n.name; renamed = true; }
+    if (d.memo === o[1]) { d.memo = n.memo; renamed = true; }
+  });
+  if (renamed) touchSettings();
   if (!ds.some(d => PR.LEGACY_IDS.includes(d.id))) return;
   const start = S.settings.routine && S.settings.routine.start;
   ds.forEach(d => { if (PR.LEGACY_IDS.includes(d.id)) dropToday(d.id); });

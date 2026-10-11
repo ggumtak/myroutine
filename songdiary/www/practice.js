@@ -15,7 +15,7 @@ const STOP_RULES = [
 const GROUPS = [
   { k: 'r1', n: '①', no: 1, name: '준비', min: 2, light: true },
   { k: 'r2', n: '②', no: 2, name: '호흡', min: 6, light: true },
-  { k: 'r3', n: '③', no: 3, name: '립롤·혀 트릴', min: 6, light: true },
+  { k: 'r3', n: '③', no: 3, name: '입술 떨기·혀 굴리기', min: 6, light: true },
   { k: 'r4', n: '④', no: 4, name: '책 진도', min: 8 },
   { k: 'r5', n: '⑤', no: 5, name: '노래에 적용', min: 5 },
   { k: 'rx', n: '', no: 0, name: '그 밖의 연습', min: 0 }
@@ -25,8 +25,8 @@ const GROUPS = [
    each of those checks; book: plays the exercise you are on (책 진도); song: 3부 (27~30번) on your own song */
 const ITEMS = [
   { id: 'rs_ready', g: 'r1', name: '자세·긴장 풀기', target: 1, memo: '머리·가슴·골반 한 줄로 · 심호흡·스트레칭 · 조용한 곳' },
-  { id: 'rs_lip', g: 'r3', name: '립롤', target: 2, memo: '“어” 입술 떨기로 오르내리기 · 1번 → 3번', ph: [['1번 1.5옥타브', 1], ['3번 도약', 1]], pats: ['b01', 'b03'], keys: true },
-  { id: 'rs_trill', g: 'r3', name: '혀 트릴', target: 2, memo: '“어” 혀 떨기로 오르내리기 · 2번 → 4번', ph: [['2번 1.5옥타브', 1], ['4번 도약', 1]], pats: ['b02', 'b04'], keys: true },
+  { id: 'rs_lip', g: 'r3', name: '입술 떨기 (립롤)', target: 2, memo: '“어~” 하며 입술 부르르 · 1번 → 3번', ph: [['1번 1옥타브 반', 1], ['3번 크게 뛰기', 1]], pats: ['b01', 'b03'], keys: true },
+  { id: 'rs_trill', g: 'r3', name: '혀 굴리기 (트릴)', target: 2, memo: '“드르르” 혀 떨며 “어~” · 2번 → 4번', ph: [['2번 1옥타브 반', 1], ['4번 크게 뛰기', 1]], pats: ['b02', 'b04'], keys: true },
   { id: 'rs_book', g: 'r4', name: '책 진도 연습', target: 3, memo: '지금 진도의 연습을 오르내리기 ×3', book: true, keys: true },
   { id: 'rs_song', g: 'r5', name: '연습곡 고음에 적용', target: 4, memo: '막히는 음 한 곳에 27~30번을 하나씩', ph: [['몸 숙이기 (27번)', 1], ['살짝 울먹임 (28번)', 1], ['모음 바꾸기 (29번)', 1], ['키 올려 부르기 (30번)', 1]], song: true }
 ];
@@ -47,7 +47,7 @@ const BOOK_FIRST = 5, BOOK_LAST = 26;
 const STEPS = [
   { name: '준비', min: 2, text: '바른 자세: 머리·가슴·골반이 한 줄로, 짝다리·구부정하게 서지 않기 / 심호흡·스트레칭으로 몸과 마음의 긴장 풀기 / 조용한 곳에서, 된다고 믿고' },
   { name: '호흡', min: 6, text: '히싱 “스—” 30~50% 힘으로 ×5 (1주 20초→2주 25초→3주 30초→4주 35초) / 개호흡 20초×2 (어지러우면 중단)' },
-  { name: '립롤·혀 트릴', min: 6, text: '립롤: 1번(1.5옥타브) → 3번(도약)을 오르내리기 / 혀 트릴: 2번 → 4번 / 1~4번은 책에서도 계속 쓰는 워밍업이에요' },
+  { name: '입술 떨기·혀 굴리기', min: 6, text: '입술 떨기(립롤): 1번(1옥타브 반) → 3번(크게 뛰기) / 혀 굴리기(트릴): 2번 → 4번 / 1~4번은 책에서도 계속 쓰는 몸풀기예요' },
   { name: '책 진도', min: 8, text: '지금 진도의 연습을 오르내리기 ×3 (5번부터 26번까지 차례로) / 바르게 되면 ‘해냈어요’ → 다음 번호로 / 성구가 이미 이어지면 12·13번은 건너뛰어도 돼요' },
   { name: '노래에 적용', min: 5, text: '연습곡에서 막히는 음 한 곳을 골라 / 27번 몸 숙이기 → 28번 살짝 울먹임 → 29번 모음 바꾸기 → 30번 키 올려 부르기' }
 ];
