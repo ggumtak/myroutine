@@ -148,9 +148,11 @@ ReaderaPlus와 같은 방식이에요. 앱(`www/`)이 바뀐 푸시마다 GitHub
 APK를 만들어 구글 드라이브 `노래일기` 폴더에 `노래일기-<버전>.apk`로 올리고, 예전 APK는 휴지통으로 보내요
 (30일 동안 되살릴 수 있음). Actions 탭에서 손으로 돌릴 수도 있어요.
 
-처음 한 번 (폰으로도 됨) — 자세한 순서는 [`tools/gdrive/upload.gs`](tools/gdrive/upload.gs) 맨 위:
+처음 한 번 (폰으로도 됨):
 
-1. script.google.com에 **새 프로젝트**를 만들어 `upload.gs`를 붙여 넣고, `KEY`를 긴 비밀번호로 바꿔 웹 앱으로 배포.
+1. script.google.com → **새 프로젝트**(ReaderaPlus 것 말고) → Code.gs를 [`tools/gdrive/upload.gs`](tools/gdrive/upload.gs)로 바꾸고,
+   첫 줄 `KEY`를 긴 비밀번호(영문·숫자)로 바꿔 저장 → 배포 → 새 배포 → 웹 앱(실행: 나, 액세스: 모든 사용자)
+   → 권한 승인(고급 → 안전하지 않음으로 이동 → 허용) → 웹 앱 URL(`…/exec`) 복사.
 2. 이 저장소 Settings → Secrets → Actions에 `SONGDIARY_DRIVE_URL`(웹 앱 주소), `SONGDIARY_DRIVE_KEY`(그 비밀번호).
 3. `노래일기-1.0.0.apk`(APK의 안드로이드 부분을 가져올 원본)를 드라이브 아무 곳에나 한 번 올리기.
 
