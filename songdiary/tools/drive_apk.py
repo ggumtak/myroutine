@@ -13,9 +13,11 @@ import base64
 import datetime
 import json
 import os
+import re
 import secrets
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -26,21 +28,53 @@ def env(name):
     return v
 
 
-def call(action, what, **fields):
-    body = json.dumps({'key': env('SONGDIARY_DRIVE_KEY'), 'action': action, **fields}).encode()
-    # POST; Apps Script answers with a redirect that urllib follows as a GET, which is what it expects
-    req = urllib.request.Request(env('SONGDIARY_DRIVE_URL'), data=body, method='POST', headers={'Content-Type': 'application/json'})
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def where(url):
+    u = urllib.parse.urlsplit(url)
+    return f'{u.netloc}{u.path[:40]}…'
+
+
+def http(req, what):
+    """(status, headers, body) without following redirects; errors explained without printing secrets"""
     try:
-        with urllib.request.urlopen(req, timeout=300) as r:
-            answer = r.read().decode('utf-8', 'replace')
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=300) as r:
+            return r.status, r.headers, r.read()
     except urllib.error.HTTPError as e:
-        sys.exit(f'{what} failed: HTTP {e.code}')
+        if e.code in (301, 302, 303, 307, 308):
+            return e.code, e.headers, b''
+        body = e.read().decode('utf-8', 'replace')
+        m = re.search(r'<title>(.*?)</title>', body, re.S)
+        sys.exit(f'{what} failed: HTTP {e.code} at {where(req.full_url)} {(m.group(1).strip() if m else body[:200])!r}')
     except urllib.error.URLError as e:
         sys.exit(f'{what} failed: {e.reason}')
+
+
+def call(action, what, **fields):
+    url = env('SONGDIARY_DRIVE_URL')
+    if not os.environ.get('SONGDIARY_DRIVE_ANYURL') and not re.fullmatch(r'https://script\.google\.com/(a/macros/[^/]+|macros)/s/[A-Za-z0-9_-]+/exec', url):
+        sys.exit(f'{what} failed: SONGDIARY_DRIVE_URL should look like https://script.google.com/macros/s/…/exec '
+                 f'(it is {where(url)} — copy the 웹 앱 URL from 배포 → 배포 관리)')
+    body = json.dumps({'key': env('SONGDIARY_DRIVE_KEY'), 'action': action, **fields}).encode()
+    status, headers, data = http(urllib.request.Request(url, data=body, method='POST', headers={'Content-Type': 'application/json'}), what)
+    # Apps Script answers a POST with a redirect to the result, fetched with a GET
+    for _ in range(5):
+        if status not in (301, 302, 303, 307, 308):
+            break
+        url = urllib.parse.urljoin(url, headers.get('Location', ''))
+        status, headers, data = http(urllib.request.Request(url, method='GET'), what)
+    answer = data.decode('utf-8', 'replace')
     if answer.startswith('ok'):
         return answer[3:]
     if action == 'getkey' and answer == 'none':
         return None
+    if answer.lstrip().startswith('<'):
+        m = re.search(r'<title>(.*?)</title>', answer, re.S)
+        sys.exit(f'{what} failed: the web app sent a web page ({m.group(1).strip() if m else "no title"!r}) from {where(url)} — '
+                 'check 배포: 실행 = 나, 액세스 = 모든 사용자, and that the code was saved before 배포')
     sys.exit(f'{what} failed: {answer[:300]}')
 
 
