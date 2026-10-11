@@ -150,6 +150,12 @@ SONGDIARY_STOREPASS=... python3 songdiary/tools/build_apk.py \
 
 ## 새 APK를 구글 드라이브로 (자동)
 
+**앱 안 업데이트도 자동이에요.** 같은 빌드가 `songdiary-ota` 브랜치에 서명된 업데이트(`latest.json`, `files/<sha256>`)로 올라가고,
+앱은 열 때(6시간에 한 번까지) 그걸 확인해서 오늘 화면 위에 ‘업데이트’를 띄워요. 누르면 바뀐 파일만 받아 바로 바뀌어요(다시 설치 X).
+업데이트 서명 키는 드라이브의 APK 서명 키에서 매번 같게 만들어 내서(`tools/ci_release.py`) 따로 준비할 게 없어요.
+버전은 빌드마다 `1.5.<실행 번호>`, 번호는 `100 + 실행 번호`. APK는 새 폰에 깔거나 안드로이드 쪽(`native/`)이 바뀌었을 때만
+필요해요(그때는 워크플로의 `SONGDIARY_MIN_APK`를 올려요).
+
 ReaderaPlus와 같은 방식이에요. 앱이 바뀐 푸시마다 GitHub Actions(`.github/workflows/songdiary-apk.yml`)가
 `native/`(Capacitor 8 안드로이드 프로젝트)에 `www/`를 넣어 APK를 빌드하고, 구글 드라이브 `노래일기` 폴더에
 `노래일기-<버전>.apk`로 올려요. 예전 APK는 휴지통으로 가요(30일 동안 되살릴 수 있음). Actions 탭에서 손으로 돌릴 수도 있고,

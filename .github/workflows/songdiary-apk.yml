@@ -1,8 +1,10 @@
-# 노래일기: every push that changes the app builds its APK from songdiary/native (Capacitor) + songdiary/www and puts
-# it in your Google Drive (like ReaderaPlus). Drive side: the Apps Script web app songdiary/tools/gdrive/upload.gs and
-# two secrets, SONGDIARY_DRIVE_URL and SONGDIARY_DRIVE_KEY. Until they exist the job only says so.
-# The signing key is made on the first build and kept in that Drive folder, never in git or in the Actions cache
-# (this repository is public: a fork's pull request could read the cache).
+# 노래일기: every push that changes the app
+#   1. becomes an in-app update (the songdiary-ota branch): the app takes it by itself, no reinstall
+#   2. is built into an APK and put in your Google Drive (only needed for a new phone or a new Android side)
+# Drive side: the Apps Script web app songdiary/tools/gdrive/upload.gs and two secrets, SONGDIARY_DRIVE_URL and
+# SONGDIARY_DRIVE_KEY. Until they exist the job only says so. The APK signing key is made on the first build and
+# kept in that Drive folder (never in git or the Actions cache: this repository is public); the update-signing key
+# is derived from it, so nothing else needs setting up.
 name: 노래일기 APK → Google Drive
 
 on:
@@ -11,15 +13,20 @@ on:
       - 'songdiary/www/**'
       - 'songdiary/native/**'
       - 'songdiary/tools/drive_apk.py'
+      - 'songdiary/tools/ci_release.py'
       - '.github/workflows/songdiary-apk.yml'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: songdiary-apk-${{ github.ref }}
-  cancel-in-progress: true
+  group: songdiary-apk
+  cancel-in-progress: false
+
+env:
+  # the oldest APK (versionCode) the published screens work with; raise it when songdiary/native changes
+  SONGDIARY_MIN_APK: '100'
 
 jobs:
   apk:
@@ -63,22 +70,48 @@ jobs:
           pip install -q cryptography
           python3 songdiary/tools/drive_apk.py key --out-dir "$RUNNER_TEMP/sign"
 
+      # every build is a newer version: code 100 + the run number (the APK's versionCode too)
+      - name: Version and in-app update
+        if: steps.on.outputs.on == 'true'
+        id: ver
+        run: |
+          code=$((100 + GITHUB_RUN_NUMBER))
+          name="1.5.$GITHUB_RUN_NUMBER"
+          echo "code=$code" >> "$GITHUB_OUTPUT"; echo "name=$name" >> "$GITHUB_OUTPUT"
+          ota="$RUNNER_TEMP/ota"
+          if git fetch -q --depth 1 origin songdiary-ota; then git worktree add -q "$ota" FETCH_HEAD && git -C "$ota" switch -q -C songdiary-ota
+          else git worktree add -q --orphan -b songdiary-ota "$ota"; fi
+          msg="$(git log -1 --format=%s | cut -c1-120)"
+          python3 songdiary/tools/ci_release.py --www songdiary/www --p12 "$RUNNER_TEMP/sign/release.p12" \
+            --storepass-file "$RUNNER_TEMP/sign/storepass" --version "$name" --code "$code" \
+            --min-apk "$SONGDIARY_MIN_APK" --out "$ota" --note "$msg"
+
       - name: Build APK
         if: steps.on.outputs.on == 'true'
         id: build
         working-directory: songdiary/native
         run: |
-          name="$(node -p "require('../www/release.json').version")"
-          code="$(node -p "require('../www/release.json').code")"
           npm ci --no-audit --no-fund
           npx cap sync android
-          export SONGDIARY_VERSION_NAME="$name" SONGDIARY_VERSION_CODE="$code"
+          export SONGDIARY_VERSION_NAME="${{ steps.ver.outputs.name }}" SONGDIARY_VERSION_CODE="${{ steps.ver.outputs.code }}"
           export SONGDIARY_KEYSTORE="$RUNNER_TEMP/sign/release.p12" SONGDIARY_STOREPASS="$(cat "$RUNNER_TEMP/sign/storepass")"
           (cd android && ./gradlew --stacktrace assembleRelease)
-          apk="$RUNNER_TEMP/노래일기-$name.apk"
+          apk="$RUNNER_TEMP/노래일기-${{ steps.ver.outputs.name }}.apk"
           cp android/app/build/outputs/apk/release/app-release.apk "$apk"
           ls -la "$apk"
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
+
+      # only after the APK built: the same screens go out as the in-app update
+      - name: Publish in-app update
+        if: steps.on.outputs.on == 'true'
+        run: |
+          ota="$RUNNER_TEMP/ota"
+          git -C "$ota" config user.name "github-actions[bot]"
+          git -C "$ota" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$ota" add -A
+          git -C "$ota" commit -q -m "노래일기 ${{ steps.ver.outputs.name }} (code ${{ steps.ver.outputs.code }}) from ${GITHUB_SHA::7}"
+          git -C "$ota" push -q origin songdiary-ota
+          echo "in-app update ${{ steps.ver.outputs.name }} published"
 
       - name: Upload APK to Google Drive
         if: steps.on.outputs.on == 'true'

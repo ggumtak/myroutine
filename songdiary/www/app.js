@@ -1892,15 +1892,15 @@ function openScaleTrainer(o = {}) {
     const acts = warm ? [] : isCur ? [
       h('button', { class: 'btn blue sm', 'data-fk': 'sc-bookdone', onclick: () => {
         const undo = bookDone(bk.no, todayStr()), nx = S.settings.book.cur;
-        toast(nx !== bk.no ? `좋아요! 다음 단계 연습은 ${nx}번 ${SK.BOOK[nx - 1].name}` : '좋아요! 책의 단계 연습을 모두 마쳤어요', { action: '되돌리기', onAction: () => { undo(); drawInfo(); } });
+        toast(nx !== bk.no ? `좋아요! 다음 단계 연습은 ‘${SK.BOOK[nx - 1].name}’이에요` : '좋아요! 책의 단계 연습을 모두 마쳤어요', { action: '되돌리기', onAction: () => { undo(); drawInfo(); } });
         drawInfo();
-      } }, icon('check', 16), bk.no < PR.BOOK_LAST ? `이제 잘 돼요 → ${bk.no + 1}번으로` : '이제 잘 돼요'),
-      bk.no < 14 ? h('button', { class: 'btn soft sm', 'data-fk': 'sc-skip14', onclick: () => { B.cur = 14; touchSettings(); softRender(); drawInfo(); toast('14번부터 할게요. 고음이 끊기면 언제든 앞 번호로 돌아와도 돼요'); } }, '이미 잘 이어져요 → 14번부터') : null
-    ].filter(Boolean) : [h('button', { class: 'btn soft sm', 'data-fk': 'sc-bookcur', onclick: () => { B.cur = bk.no; touchSettings(); softRender(); drawInfo(); toast(`오늘의 단계 연습을 ${bk.no}번 ${bk.name}(으)로 바꿨어요`); } }, '이걸 오늘의 단계 연습으로')];
+      } }, icon('check', 16), bk.no < PR.BOOK_LAST ? '이제 잘 돼요 → 다음 연습으로' : '이제 잘 돼요'),
+      bk.no < 14 ? h('button', { class: 'btn soft sm', 'data-fk': 'sc-skip14', onclick: () => { B.cur = 14; touchSettings(); softRender(); drawInfo(); toast('“끼익” 소리 단계부터 할게요. 고음이 끊기면 언제든 앞 연습으로 돌아와도 돼요'); } }, '고음이 이미 잘 이어져요 → “끼익” 단계로') : null
+    ].filter(Boolean) : [h('button', { class: 'btn soft sm', 'data-fk': 'sc-bookcur', onclick: () => { B.cur = bk.no; touchSettings(); softRender(); drawInfo(); toast(`오늘의 단계 연습을 ‘${bk.name}’(으)로 바꿨어요`); } }, '이걸 오늘의 단계 연습으로')];
     infoBox.replaceChildren(...[
-      h('div', { class: 'sc-info-h' }, h('b', null, `${bk.no}번 ${bk.name}`), h('span', { class: 'hint' }, ` · ${bk.sound}`),
+      h('div', { class: 'sc-info-h' }, h('b', null, bk.name), h('span', { class: 'hint' }, ` · ${bk.sound} · 책 ${bk.no}번`),
         warm ? h('span', { class: 'pill' }, '매일 몸풀기') : isCur ? h('span', { class: 'pill blue' }, '오늘의 단계 연습') : null),
-      st ? h('p', { class: 'hint sc-stage' }, `${st.name} (${st.from}~${st.to}번)`) : null,
+      st ? h('p', { class: 'hint sc-stage' }, `단계: ${st.name}`) : null,
       h('p', { class: 'sc-how' }, bk.how),
       bk.good && bk.good.length ? h('div', { class: 'sc-good' }, h('b', null, '이런 데 좋아요'), h('ul', null, bk.good.map(t => h('li', null, t)))) : null,
       vs,
@@ -2615,7 +2615,7 @@ function DrillRow(date, d) {
     h('div', { class: 'drill-bottom' },
       h('span', { class: 'drill-rec' },
         ph ? h('span', { class: 'ph' }, `지금: ${ph.label}${ph.n > 1 ? ` (${ph.i}/${ph.n})` : ''}`) : null,
-        bk ? h('span', { class: 'ph' }, `오늘: ${bk.no}번 ${bk.name}`) : null,
+        bk ? h('span', { class: 'ph' }, `오늘: ${bk.name}`) : null,
         bk && stageOf(bk.no) ? h('span', null, stageOf(bk.no).name) : null,
         goalTxt ? h('span', { class: 'goal' }, goalTxt) : null,
         todayBest != null ? h('span', null, `오늘 최고 ${fmtSec(todayBest)}`) : null, best ? h('span', null, `최고 기록 ${fmtSec(best.sec)}`) : null),
@@ -3947,24 +3947,24 @@ function openSession() {
       const name = isBook ? '오늘의 단계 연습' : rt.name;
       return [title(st, name), why(PR.STEPS[st.g].why),
         bk ? h('div', { class: 'ses-ex' },
-          h('b', null, `${bk.no}번 ${bk.name}`), ph ? h('span', { class: 'hint' }, ` · 지금 ${ph.label}`) : null,
-          stg ? h('p', { class: 'hint' }, `단계: ${stg.name} (${stg.from}~${stg.to}번 중 ${bk.no - stg.from + 1}번째) — ${stg.text}`) : null,
+          h('b', null, isBook ? bk.name : ph ? ph.label : bk.name),
+          stg ? h('p', { class: 'hint' }, `지금 단계: ${stg.name} (${stg.to - stg.from + 1}개 중 ${bk.no - stg.from + 1}번째) — ${stg.text}`) : null,
           h('p', { class: 'ses-how' }, bk.how),
           bk.good ? h('div', { class: 'sc-good' }, h('b', null, '이런 데 좋아요'), h('ul', null, bk.good.map(t => h('li', null, t)))) : null,
           bk.text.length ? h('details', { class: 'sc-more' }, h('summary', null, '방법 더 보기'), h('ul', null, bk.text.map(t => h('li', null, t)))) : null) : null,
         h('button', { class: 'btn ink wide ses-big', disabled: !!(d && d.done >= d.target), onclick: () => openScaleTrainer({ date, drillId: st.id, pat, autostart: true, onClose: () => { draw(); if (doneOf(st)) setTimeout(() => { if (steps[i] === st) go(i + 1); }, 600); } }) }, icon('piano', 18), '피아노 켜고 따라 부르기'),
         h('p', { class: 'hint' }, '피아노가 시작 음에서 반음씩 꼭대기 음까지 올라갔다가 다시 내려와요. 한 번 다 오르내리면 1회 체크돼요. 힘들면 언제든 멈춰요.'),
         h('div', { class: 'ses-sub' }, plusOne(st, '피아노 없이 1회 체크'),
-          isBook && bk ? h('button', { class: 'btn soft sm', onclick: () => { const undo = bookDone(bk.no, todayStr()); draw(); toast(`좋아요! 다음부터는 ${S.settings.book.cur}번이에요`, { action: '되돌리기', onAction: () => { undo(); draw(); } }); } }, '이제 잘 돼요 → 다음 번호') : null,
-          isBook && bk && bk.no < 14 ? h('button', { class: 'btn soft sm', onclick: () => { S.settings.book.cur = 14; touchSettings(); softRender(); draw(); toast('14번부터 할게요'); } }, '이미 잘 이어져요 → 14번부터') : null),
+          isBook && bk ? h('button', { class: 'btn soft sm', onclick: () => { const undo = bookDone(bk.no, todayStr()); draw(); toast(`좋아요! 다음부터는 ‘${SK.BOOK[S.settings.book.cur - 1].name}’이에요`, { action: '되돌리기', onAction: () => { undo(); draw(); } }); } }, '이제 잘 돼요 → 다음 연습') : null,
+          isBook && bk && bk.no < 14 ? h('button', { class: 'btn soft sm', onclick: () => { S.settings.book.cur = 14; touchSettings(); softRender(); draw(); toast('“끼익” 소리 단계부터 할게요'); } }, '고음이 이미 잘 이어져요 → “끼익” 단계로') : null),
         isBook ? h('p', { class: 'hint' }, '‘이제 잘 돼요’는 목에 힘이 안 들어가고 처음부터 끝까지 소리가 안 끊길 때 눌러요. 며칠이 걸려도 괜찮아요.') : null];
     }
     if (st.k === 'song') {
-      const d = item(st.id), ph = d && phaseOf(d), no = ph ? +((/(\d+)번/.exec(ph.label) || [])[1]) : 27;
-      const m = PR.SONG.find(x => x.no === no) || PR.SONG[0];
+      const d = item(st.id), ph = d && phaseOf(d), k = ph ? PR.BY_ID.rs_song.ph.findIndex(x => x[0] === ph.label) : 0;
+      const m = PR.SONG[Math.max(0, k)];
       return [title(st, '노래에 적용'), why(PR.STEPS[4].why),
         h('p', { class: 'ses-lead' }, '연습하는 노래에서 고음이 막히는 곳 한 군데를 골라, 그 앞뒤 한 소절을 아래 방법으로 불러요.'),
-        h('div', { class: 'ses-ex' }, h('b', null, `${m.no}번 ${m.name}`), h('p', { class: 'ses-how' }, m.text), m.good ? h('p', { class: 'hint' }, `이런 데 좋아요: ${m.good}`) : null,
+        h('div', { class: 'ses-ex' }, h('b', null, m.name), h('p', { class: 'ses-how' }, m.text), m.good ? h('p', { class: 'hint' }, `이런 데 좋아요: ${m.good}`) : null,
           m.no === 29 ? h('div', { class: 'song-tips' }, PR.VOWEL_SUB.map(([a, b]) => h('div', { class: 'vs-row' }, h('span', null, a), h('span', { 'aria-hidden': 'true' }, '→'), h('span', null, b)))) : null),
         h('button', { class: 'btn ink wide ses-big', disabled: doneOf(st), onclick: () => check(st) }, icon('check', 18), doneOf(st) ? '4가지 다 했어요' : '불러 봤어요 → 다음 방법'),
         h('div', { class: 'ses-sub' }, h('button', { class: 'link', onclick: openSongTips }, '4가지 방법 모두 보기'))];
@@ -4096,14 +4096,18 @@ function insertRoutine(opts = {}) {
    memos, records and 히싱 주차; today's unused old items go, ones already done stay counted as finished */
 function migrateRoutine() {
   const ds = S.settings.drills;
-  const OLD = { rs_lip: ['립롤', '“어” 입술 떨기로 오르내리기 · 1번 → 3번'], rs_trill: ['혀 트릴', '“어” 혀 떨기로 오르내리기 · 2번 → 4번'],
-    rs_book: ['책 진도 연습', '지금 진도의 연습을 오르내리기 ×3'], rs_song: ['연습곡 고음에 적용', '막히는 음 한 곳에 27~30번을 하나씩'] };
+  const OLD = {
+    rs_lip: [['립롤'], ['“어” 입술 떨기로 오르내리기 · 1번 → 3번', '“어~” 하며 입술 부르르 · 1번 → 3번']],
+    rs_trill: [['혀 트릴'], ['“어” 혀 떨기로 오르내리기 · 2번 → 4번', '“드르르” 혀 떨며 “어~” · 2번 → 4번']],
+    rs_book: [['책 진도 연습'], ['지금 진도의 연습을 오르내리기 ×3', '앱이 골라 준 연습 1개를 피아노 따라 오르내리기 ×3']],
+    rs_song: [[], ['막히는 음 한 곳에 27~30번을 하나씩', '노래에서 막히는 음 한 곳에 4가지 방법을 하나씩']]
+  };
   let renamed = false;
   ds.forEach(d => {
     const o = OLD[d.id], n = PR.BY_ID[d.id];
     if (!o) return;
-    if (d.name === o[0] && o[0] !== n.name) { d.name = n.name; renamed = true; }
-    if (d.memo === o[1] && o[1] !== n.memo) { d.memo = n.memo; renamed = true; }
+    if (o[0].includes(d.name)) { d.name = n.name; renamed = true; }
+    if (o[1].includes(d.memo)) { d.memo = n.memo; renamed = true; }
   });
   if (renamed) touchSettings();
   if (!ds.some(d => PR.LEGACY_IDS.includes(d.id))) return;
