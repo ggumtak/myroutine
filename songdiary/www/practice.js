@@ -36,6 +36,8 @@ ITEMS.forEach(d => { BY_ID[d.id] = d; });
 const ORDER = ['rs_ready', '@hiss', '@pant', 'rs_lip', 'rs_trill', 'rs_book', 'rs_song'];
 /* the lecture routine this one replaced: its items are swapped for these when the app opens */
 const LEGACY_IDS = ['rt_warm', 'rt_elastic', 'rt_straw', 'rt_siren', 'rt_link', 'rt_pa', 'rt_pb', 'rt_pc', 'rt_thumb', 'rt_oh', 'rt_far', 'rt_hsing', 'rt_rec'];
+/* its steps ①~③ (몸 풀기·호흡·빨대 발성): what still counted on a light day back then */
+const LEGACY_LIGHT = ['rt_warm', 'rt_elastic', 'rt_straw', 'rt_siren'];
 const HISS_MEMO = '“스—” 30~50% 힘으로 ×5', PANT_MEMO = '20초×2 (어지러우면 중단)';
 const HISS_SEC = [20, 25, 30, 35], PANT_SEC = 20;
 /* 책 진도 starts after the warm-ups (1~4번 are in ③ every day) */
@@ -117,5 +119,5 @@ function shiftVowels(text) {
   return { text: out.join(''), chars: out, changed };
 }
 
-window.Practice = { STOP_RULES, GROUPS, ITEMS, BY_ID, ORDER, LEGACY_IDS, HISS_MEMO, PANT_MEMO, HISS_SEC, PANT_SEC, BOOK_FIRST, BOOK_LAST, STEPS, SONG, VOWEL_SUB, CAUTIONS, PRON, CUES, CUE_ONE, V, C, syl, shiftVowels };
+window.Practice = { STOP_RULES, GROUPS, ITEMS, BY_ID, ORDER, LEGACY_IDS, LEGACY_LIGHT, HISS_MEMO, PANT_MEMO, HISS_SEC, PANT_SEC, BOOK_FIRST, BOOK_LAST, STEPS, SONG, VOWEL_SUB, CAUTIONS, PRON, CUES, CUE_ONE, V, C, syl, shiftVowels };
 })();

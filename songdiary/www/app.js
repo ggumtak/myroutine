@@ -1299,10 +1299,14 @@ const RT_MIN = PR.GROUPS.reduce((a, g) => a + g.min, 0);
 function restInfo(date) { const y = S.days[addDays(date, -1)]; return y && y.after != null && y.after <= 5 ? y.after : null; }
 const restDay = date => restInfo(date) != null;
 /* was the routine part of that day (today: the settings; a past day: its own record) */
-const routineOnDay = date => (date === todayStr() ? routineOn() : !!(S.days[date] && Object.keys(S.days[date].drills || {}).some(k => PR.BY_ID[k])));
+const routineOnDay = date => (date === todayStr() ? routineOn() : !!(S.days[date] && Object.keys(S.days[date].drills || {}).some(k => PR.BY_ID[k] || PR.LEGACY_IDS.includes(k))));
+/* a day sung on the lecture's routine (before the update): its own items decide it, the book's don't count yet */
+const legacyDay = date => { const e = S.days[date]; return !!(e && e.drills && Object.keys(e.drills).some(k => PR.LEGACY_IDS.includes(k) && e.drills[k].done > 0)); };
 /* does this item count toward the day's progress and stamp */
 function counts(date, id) {
+  if (PR.BY_ID[id] && legacyDay(date)) return false;
   if (!restDay(date) || !routineOnDay(date)) return true;
+  if (PR.LEGACY_IDS.includes(id)) return PR.LEGACY_LIGHT.includes(id);
   return PR.BY_ID[id] ? isLight(PR.BY_ID[id].g) : id === hissId() || id === pantId();
 }
 /* 히싱: 1주 20초 → 2주 25초 → 3주 30초 → 4주 35초, counted from the day the routine was added */
@@ -1926,7 +1930,7 @@ function openScaleTrainer(o = {}) {
   };
   const drawKeys = () => {
     const st = pat().steps;
-    let lo = Math.max(24, SCALE_LO + Math.min(0, ...st)), hi = Math.min(SCALE_TOP + 12, SCALE_HI + Math.max(0, ...st));
+    let lo = Math.max(24, SCALE_LO + Math.min(0, ...st)), hi = Math.min(SCALE_TOP, Math.max(SCALE_HI + Math.max(0, ...st), T.top || 0));
     while (BLACK_PC.includes(lo % 12)) lo--;
     while (BLACK_PC.includes(hi % 12)) hi++;
     if (kbRange === `${lo}-${hi}`) return;
@@ -1957,7 +1961,7 @@ function openScaleTrainer(o = {}) {
   const up = h('button', { class: 'btn soft', 'aria-label': '시작 음을 반음 올려서 다시', onclick: () => start(base + 1) }, icon('up', 18), '반음');
   /* 꼭대기 음 */
   const topName = h('b', { class: 'sc-top-n', 'aria-live': 'polite' });
-  const setTop = m => { stop(); T.top = Math.max(SCALE_LO + 2, Math.min(SCALE_TOP, m)); touchSettings(); paint(); showRange(T.top - 4, T.top); };
+  const setTop = m => { stop(); T.top = Math.max(SCALE_LO + 2, Math.min(SCALE_TOP, m)); touchSettings(); drawKeys(); paint(); showRange(T.top - 4, T.top); };
   const topDn = h('button', { class: 'btn soft sm sq', 'aria-label': '꼭대기 음 반음 내리기', onclick: () => setTop(ceil() - 1) }, icon('dn', 18));
   const topUp = h('button', { class: 'btn soft sm sq', 'aria-label': '꼭대기 음 반음 올리기', onclick: () => setTop(ceil() + 1) }, icon('up', 18));
   const topHint = h('span', { class: 'hint' });
@@ -2028,7 +2032,7 @@ function openScaleTrainer(o = {}) {
     const dl = o.drillId ? drillList(date).find(d => d.id === o.drillId) : null;
     const canHigh = lastTop != null && lastTop >= HIGH_MIN && lastTop <= HIGH_MAX && !(e && e.high != null && e.high >= lastTop);
     extra.replaceChildren(...[
-      dl ? h('button', { class: 'btn blue sm', 'data-fk': 'sc-drill', disabled: dl.done >= dl.target, onclick: () => { bump(date, dl.id, 1); nextPat(); paint(); } }, dl.done >= dl.target ? [icon('check', 16), `${dl.name} 다 했어요`] : [icon('plus', 16), `${dl.name} 1회 체크 (${dl.done}/${dl.target})`]) : null,
+      dl ? h('button', { class: 'btn blue sm', 'data-fk': 'sc-drill', disabled: dl.done >= dl.target, onclick: () => { if (run) stop(); bump(date, dl.id, 1); nextPat(); paint(); } }, dl.done >= dl.target ? [icon('check', 16), `${dl.name} 다 했어요`] : [icon('plus', 16), `${dl.name} 1회 체크 (${dl.done}/${dl.target})`]) : null,
       canHigh ? h('button', { class: 'btn soft sm', 'data-fk': 'sc-high', onclick: () => {
         const d = ensureDay(date), prev = d.high, v2 = lastTop;
         d.high = v2; touch(date); softRender(); paint();
@@ -2075,8 +2079,13 @@ function openScaleTrainer(o = {}) {
     Synth.stop();
     playing = true; lastTop = null;
     const my = run = T.auto ? { seq: autoSeq(m), i: 0 } : null;
+    const forDrill = !!(o.drillId && PR.BY_ID[o.drillId] && drillPat(date, o.drillId) === curPat);
     const next = () => playRound(my ? my.seq[my.i] : m, fin => {
-      if (!fin || run !== my) return;
+      if (!fin) {
+        if (run === my && playing) { playing = false; run = null; step = -1; pass = ''; root = base; paint(); }
+        return;
+      }
+      if (run !== my) return;
       /* 시작한 날: the first day a whole round of a book exercise was sung (not just tried) */
       const bk = bookOf(curPat), L = bk && S.settings.book.log[bk.no];
       if (bk && date === todayStr() && !(L && L.s)) { S.settings.book.log[bk.no] = Object.assign(L || {}, { s: date }); touchSettings(); drawInfo(); }
@@ -2087,7 +2096,7 @@ function openScaleTrainer(o = {}) {
       }
       playing = false; step = -1; pass = ''; run = null; root = base;
       /* a whole round up and back down is one check of the routine item */
-      if (my && o.drillId) {
+      if (my && forDrill) {
         const dl = drillList(date).find(d => d.id === o.drillId);
         if (dl && dl.done < dl.target) { bump(date, dl.id, 1); nextPat(); }
       }
