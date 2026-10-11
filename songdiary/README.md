@@ -142,6 +142,38 @@ SONGDIARY_STOREPASS=... python3 songdiary/tools/build_apk.py \
 - 먼저 `publish_update.py`로 `www/release.json`을 같은 버전으로 만들어 두세요 (APK 안의 버전 = 앱이 아는 버전)
 - 키 파일(`.p12`)은 저장소에 올리지 말 것
 
+## 새 APK를 구글 드라이브로 (자동)
+
+`main`에서 `www/release.json`이 바뀌면(= `publish_update.py`로 새 버전을 내보내고 합치면) GitHub Actions
+(`.github/workflows/songdiary-apk.yml`)가 그 버전의 APK를 만들어 구글 드라이브 폴더에 올려요.
+같은 이름이 이미 있으면 내용만 바꿔요 (드라이브의 버전 기록에 이전 것이 남음). Actions 탭에서 손으로 돌릴 수도 있어요.
+`tools/drive_apk.py`가 드라이브에서 받고 올리는 일을 해요 (표준 라이브러리만 씀).
+
+처음 한 번 준비:
+
+1. **드라이브**: APK를 받을 폴더를 만들고, 주소 `drive.google.com/drive/folders/<폴더 ID>`의 ID를 적어 둬요.
+   `노래일기-1.0.0.apk`(APK의 안드로이드 부분을 가져올 원본)도 드라이브에 올리고, 공유 링크 `/file/d/<파일 ID>/`의 ID를 적어요.
+2. **구글 로그인 키**: [Google Cloud Console](https://console.cloud.google.com/)에서 프로젝트를 만들고 Google Drive API를 켜요.
+   OAuth 동의 화면(External)을 만든 뒤 **앱 게시(프로덕션)**로 바꿔요. ‘테스트’ 상태로 두면 아래 토큰이 7일 뒤 끊겨요
+   (나만 쓰는 앱이라 확인 절차 없이 ‘확인되지 않은 앱’ 경고만 넘기면 돼요).
+   사용자 인증 정보 → OAuth 클라이언트 ID(웹 애플리케이션), 승인된 리디렉션 URI에 `https://developers.google.com/oauthplayground`.
+3. **refresh token**: [OAuth Playground](https://developers.google.com/oauthplayground) 오른쪽 위 톱니 → *Use your own OAuth credentials*에
+   2의 클라이언트 ID·비밀번호 → 범위에 `https://www.googleapis.com/auth/drive` 입력 → Authorize → *Exchange authorization code for tokens*
+   → Refresh token 복사.
+4. **GitHub 저장소 → Settings → Secrets and variables → Actions**에 넣기:
+
+| 이름 | 값 |
+|---|---|
+| `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET` | 2의 클라이언트 ID·비밀번호 |
+| `GDRIVE_REFRESH_TOKEN` | 3의 refresh token |
+| `SONGDIARY_DRIVE_FOLDER_ID` | 1의 폴더 ID |
+| `SONGDIARY_BASE_APK_ID` | 1의 `노래일기-1.0.0.apk` 파일 ID |
+| `SONGDIARY_KEYSTORE_B64` | `base64 -w0 songdiary-release.p12` 결과 (맥: `base64 -i songdiary-release.p12`) |
+| `SONGDIARY_STOREPASS` | 키스토어 비밀번호 |
+
+- 서명 키는 시크릿으로만 쓰고 작업이 끝나면 지워요. 저장소엔 올라가지 않아요.
+- 버전 이름은 원본과 글자 수가 같아야 해요 (`1.0.0` → `1.5.0`처럼 한 자리씩).
+
 ## 브라우저에서 확인
 
 `www/`를 아무 정적 서버로 열면 됩니다 (예: `npx serve songdiary/www`).

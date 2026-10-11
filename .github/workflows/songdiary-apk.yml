@@ -1,0 +1,72 @@
+# 노래일기: when a new version is published (songdiary/www/release.json changes on main), build its APK and put it
+# in a Google Drive folder. Also runs by hand from the Actions tab. Setup: songdiary/README.md › 새 APK를 구글 드라이브로
+name: 노래일기 APK → Google Drive
+
+on:
+  push:
+    branches: [main]
+    paths: ['songdiary/www/release.json']
+  workflow_dispatch:
+
+concurrency:
+  group: songdiary-apk
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+      GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+      GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install cryptography
+
+      - name: Version from release.json
+        id: v
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import json
+          r = json.load(open('songdiary/www/release.json'))
+          print(f"name={r['version']}")
+          print(f"code={r['code']}")
+          PY
+
+      - name: Base APK and signing key
+        env:
+          SONGDIARY_KEYSTORE_B64: ${{ secrets.SONGDIARY_KEYSTORE_B64 }}
+          SONGDIARY_BASE_APK_ID: ${{ secrets.SONGDIARY_BASE_APK_ID }}
+        run: |
+          test -n "$SONGDIARY_KEYSTORE_B64" || { echo "secret SONGDIARY_KEYSTORE_B64 is missing"; exit 1; }
+          echo "$SONGDIARY_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          python3 songdiary/tools/drive_apk.py download --id "$SONGDIARY_BASE_APK_ID" --out "$RUNNER_TEMP/base.apk"
+
+      - name: Build APK
+        env:
+          SONGDIARY_STOREPASS: ${{ secrets.SONGDIARY_STOREPASS }}
+        run: |
+          python3 songdiary/tools/build_apk.py --base "$RUNNER_TEMP/base.apk" --www songdiary/www \
+            --keystore "$RUNNER_TEMP/release.p12" \
+            --version-name "${{ steps.v.outputs.name }}" --version-code "${{ steps.v.outputs.code }}" \
+            --out "$RUNNER_TEMP/노래일기-${{ steps.v.outputs.name }}.apk"
+
+      - name: Upload to Google Drive
+        env:
+          SONGDIARY_DRIVE_FOLDER_ID: ${{ secrets.SONGDIARY_DRIVE_FOLDER_ID }}
+        run: |
+          python3 songdiary/tools/drive_apk.py upload --file "$RUNNER_TEMP/노래일기-${{ steps.v.outputs.name }}.apk" \
+            --folder "$SONGDIARY_DRIVE_FOLDER_ID"
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.p12" "$RUNNER_TEMP/base.apk"
