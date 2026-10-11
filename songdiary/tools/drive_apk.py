@@ -48,12 +48,31 @@ def http(req, what):
             return e.code, e.headers, b''
         body = e.read().decode('utf-8', 'replace')
         m = re.search(r'<title>(.*?)</title>', body, re.S)
+        if e.code >= 500:
+            raise Busy(f'{what} failed: HTTP {e.code} at {where(req.full_url)}')
         sys.exit(f'{what} failed: HTTP {e.code} at {where(req.full_url)} {(m.group(1).strip() if m else body[:200])!r}')
     except urllib.error.URLError as e:
         sys.exit(f'{what} failed: {e.reason}')
 
 
+class Busy(Exception):
+    pass
+
+
 def call(action, what, **fields):
+    """Google sometimes answers with a passing 'Error' page or a 5xx: try again up to 3 times"""
+    import time
+    for attempt in range(3):
+        try:
+            return call_once(action, what, **fields)
+        except Busy as e:
+            if attempt == 2:
+                sys.exit(str(e))
+            print(f'{what}: Google was busy ({e}), trying again in {15 * (attempt + 1)} s')
+            time.sleep(15 * (attempt + 1))
+
+
+def call_once(action, what, **fields):
     url = env('SONGDIARY_DRIVE_URL')
     if not os.environ.get('SONGDIARY_DRIVE_ANYURL') and not re.fullmatch(r'https://script\.google\.com/(a/macros/[^/]+|macros)/s/[A-Za-z0-9_-]+/exec', url):
         sys.exit(f'{what} failed: SONGDIARY_DRIVE_URL should look like https://script.google.com/macros/s/…/exec '
@@ -73,8 +92,8 @@ def call(action, what, **fields):
         return None
     if answer.lstrip().startswith('<'):
         m = re.search(r'<title>(.*?)</title>', answer, re.S)
-        sys.exit(f'{what} failed: the web app sent a web page ({m.group(1).strip() if m else "no title"!r}) from {where(url)} — '
-                 'check 배포: 실행 = 나, 액세스 = 모든 사용자, and that the code was saved before 배포')
+        raise Busy(f'{what} failed: the web app sent a web page ({m.group(1).strip() if m else "no title"!r}) from {where(url)} — '
+                   'if it keeps happening, check 배포: 실행 = 나, 액세스 = 모든 사용자, and that the code was saved before 배포')
     sys.exit(f'{what} failed: {answer[:300]}')
 
 
