@@ -144,24 +144,25 @@ SONGDIARY_STOREPASS=... python3 songdiary/tools/build_apk.py \
 
 ## 새 APK를 구글 드라이브로 (자동)
 
-ReaderaPlus와 같은 방식이에요. 앱(`www/`)이 바뀐 푸시마다 GitHub Actions(`.github/workflows/songdiary-apk.yml`)가
-APK를 만들어 구글 드라이브 `노래일기` 폴더에 `노래일기-<버전>.apk`로 올리고, 예전 APK는 휴지통으로 보내요
-(30일 동안 되살릴 수 있음). Actions 탭에서 손으로 돌릴 수도 있어요.
+ReaderaPlus와 같은 방식이에요. 앱이 바뀐 푸시마다 GitHub Actions(`.github/workflows/songdiary-apk.yml`)가
+`native/`(Capacitor 8 안드로이드 프로젝트)에 `www/`를 넣어 APK를 빌드하고, 구글 드라이브 `노래일기` 폴더에
+`노래일기-<버전>.apk`로 올려요. 예전 APK는 휴지통으로 가요(30일 동안 되살릴 수 있음). Actions 탭에서 손으로 돌릴 수도 있고,
+그 실행 화면의 Artifacts(`songdiary-apk`)에서도 7일 동안 받을 수 있어요.
 
 처음 한 번 (폰으로도 됨):
 
 1. script.google.com → **새 프로젝트**(ReaderaPlus 것 말고) → Code.gs를 [`tools/gdrive/upload.gs`](tools/gdrive/upload.gs)로 바꾸고,
-   첫 줄 `KEY`를 긴 비밀번호(영문·숫자)로 바꿔 저장 → 배포 → 새 배포 → 웹 앱(실행: 나, 액세스: 모든 사용자)
+   첫 줄 `KEY`를 비밀번호로 바꿔 저장 → 배포 → 새 배포 → 웹 앱(실행: 나, 액세스: 모든 사용자)
    → 권한 승인(고급 → 안전하지 않음으로 이동 → 허용) → 웹 앱 URL(`…/exec`) 복사.
 2. 이 저장소 Settings → Secrets → Actions에 `SONGDIARY_DRIVE_URL`(웹 앱 주소), `SONGDIARY_DRIVE_KEY`(그 비밀번호).
-3. `노래일기-1.0.0.apk`(APK의 안드로이드 부분을 가져올 원본)를 드라이브 아무 곳에나 한 번 올리기.
 
+- `native/`: 앱이 쓰는 플러그인(App, Filesystem, Share, LocalNotifications; HTTP·WebView·SystemBars는 기본 포함)과
+  `SongDiaryPlugin`(화면 켜 두기, 앱 설정 열기, 다른 앱에서 공유한 녹음 받기). 아이콘·스플래시는 `www/icon.svg`로 그렸어요.
 - 서명 키는 첫 빌드 때 만들어 드라이브 `노래일기` 폴더의 `songdiary-signing.json`에 둬요. 지우지 마세요
   (다음 APK가 지금 깔린 앱 위에 설치되려면 같은 키여야 해요). 저장소가 공개라서 Actions 캐시에는 두지 않아요.
-- 지금 폰의 앱이 다른 키로 서명돼 있으면 처음 한 번은 지우고 새로 깔아야 해요. 그 전에 설정 → 계정·동기화나 백업을 확인하세요.
-- 시크릿이 없으면 빌드는 ‘설정 안 됨’만 알리고 끝나요 (실패로 뜨지 않음).
-- 버전 이름은 `www/release.json`의 것을 쓰고, 원본과 글자 수가 같아야 해요 (`1.0.0` → `1.5.0`처럼 한 자리씩).
-- 웹 화면만 바뀐 버전은 APK 없이도 앱 안 업데이트로 받아져요. APK는 새로 깔거나 다른 폰에 깔 때 쓰면 돼요.
+- 예전 APK(다른 키로 서명)가 깔린 폰은 처음 한 번 지우고 새로 깔아야 해요. 그 전에 설정 → 계정·동기화나 백업을 확인하세요.
+- 시크릿이 없으면 빌드는 ‘설정 안 됨’만 알리고 끝나요. 실패하면 로그 마지막 줄이 어느 단계에서 왜 막혔는지 알려 줘요.
+- 버전 이름·번호는 `www/release.json`의 것이에요. 웹 화면만 바뀐 버전은 APK 없이도 앱 안 업데이트로 받아져요.
 
 ## 브라우저에서 확인
 
