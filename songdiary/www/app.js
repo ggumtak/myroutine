@@ -1633,8 +1633,44 @@ function openSongLink(key, onDone) {
 /* ================= scale practice: press a key, hear the exercise start from it ================= */
 const mod12 = n => ((n % 12) + 12) % 12;
 /* piano-like tones on the Web Audio clock; everything scheduled can be stopped at once */
+/* a real grand piano: Salamander Grand Piano V3 (Yamaha C5, Alexander Holm, CC BY 3.0), one recording every
+   3 semitones from 0옥 라 to 5옥 도 in www/piano/p<midi>.mp3; notes in between are the nearest one, retuned */
+const PIANO_KEYS = Array.from({ length: 22 }, (_, i) => 33 + i * 3);
+const Piano = {
+  buf: new Map(), loading: null,
+  load(ctx) {
+    if (!this.loading) {
+      this.loading = Promise.all(PIANO_KEYS.map(async m => {
+        if (this.buf.has(m)) return;
+        const r = await fetch(`piano/p${m}.mp3`);
+        if (!r.ok) throw new Error('piano ' + r.status);
+        const ab = await r.arrayBuffer();
+        this.buf.set(m, await new Promise((res, rej) => { const p = ctx.decodeAudioData(ab, res, rej); if (p && p.catch) p.catch(rej); }));
+      })).catch(e => { this.loading = null; throw e; });
+    }
+    return this.loading;
+  },
+  ready() { return this.buf.size === PIANO_KEYS.length; },
+  near(midi) { return PIANO_KEYS.reduce((a, k) => (Math.abs(k - midi) < Math.abs(a - midi) ? k : a), PIANO_KEYS[0]); }
+};
 const Synth = {
   nodes: [], timers: [], master: null, seq: 0, onAbort: null,
+  /* starts loading the piano so the first note is already the real one */
+  prepare() { const ctx = Sound.get(); if (ctx) Piano.load(ctx).catch(() => {}); },
+  /* a recorded piano note: held for dur, then the damper falls (a short release) */
+  sample(ctx, midi, t, dur, vol) {
+    const k = Piano.near(midi), src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = Piano.buf.get(k);
+    src.playbackRate.value = Math.pow(2, (midi - k) / 12);
+    src.connect(g); g.connect(this.out(ctx));
+    const v = vol * 2.2;
+    g.gain.setValueAtTime(v, t);
+    g.gain.setValueAtTime(v, t + dur);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.3);
+    src.start(t, 0.008); src.stop(t + dur + 0.35);
+    this.nodes.push({ g, os: [src], t, end: t + dur + 0.35 });
+    if (this.nodes.length > 80) this.nodes = this.nodes.filter(n => n.end > ctx.currentTime);
+  },
   out(ctx) {
     if (!this.master || this.master.context !== ctx) {
       const comp = ctx.createDynamicsCompressor();
@@ -1645,6 +1681,7 @@ const Synth = {
     return this.master;
   },
   tone(ctx, midi, t, dur, vol) {
+    if (Piano.ready()) { this.sample(ctx, midi, t, dur, vol); return; }
     const f = 440 * Math.pow(2, (midi - 69) / 12);
     const g = ctx.createGain();
     g.connect(this.out(ctx));
@@ -1676,6 +1713,21 @@ const Synth = {
   },
   /* one tone sliding through notes (the book's 'squeaky door' inflection): midis[i] is reached at times[i] */
   glideTone(ctx, midis, times, end, vol) {
+    if (Piano.ready()) {
+      /* the piano recording itself slides (its speed follows the notes) */
+      const k = Piano.near(midis[0]), src = ctx.createBufferSource(), g = ctx.createGain(), rate = m => Math.pow(2, (m - k) / 12), t0 = times[0];
+      src.buffer = Piano.buf.get(k);
+      src.playbackRate.setValueAtTime(rate(midis[0]), t0);
+      for (let i = 1; i < midis.length; i++) {
+        src.playbackRate.setValueAtTime(rate(midis[i - 1]), times[i - 1] + (times[i] - times[i - 1]) * 0.45);
+        src.playbackRate.exponentialRampToValueAtTime(rate(midis[i]), times[i]);
+      }
+      src.connect(g); g.connect(this.out(ctx));
+      g.gain.setValueAtTime(vol * 2.2, t0); g.gain.setValueAtTime(vol * 2.2, end); g.gain.exponentialRampToValueAtTime(0.0001, end + 0.3);
+      src.start(t0, 0.008); src.stop(end + 0.35);
+      this.nodes.push({ g, os: [src], t: t0, end: end + 0.35 });
+      return;
+    }
     const hz = m => 440 * Math.pow(2, (m - 69) / 12);
     const g = ctx.createGain(), t = times[0];
     g.connect(this.out(ctx));
@@ -1711,6 +1763,9 @@ const Synth = {
     if (!ctx) return false;
     if (ctx.state !== 'running') { try { await ctx.resume(); } catch (e) { /* ignore */ } }
     if (my !== this.seq) return false; /* stopped or replaced while the audio was waking up */
+    /* the first time, wait a moment for the piano recordings (the plain tone plays if they take too long) */
+    if (!Piano.ready()) { try { await Promise.race([Piano.load(ctx), new Promise(r => setTimeout(r, 2500))]); } catch (e) { /* plain tone */ } }
+    if (my !== this.seq) return false;
     const beat = 60 / bpm;
     const lat = ctx.outputLatency || ctx.baseLatency || 0; /* highlights follow what is heard, not what is scheduled */
     const at = t => Math.max(0, (t + lat - ctx.currentTime) * 1000);
@@ -2139,6 +2194,7 @@ function openScaleTrainer(o = {}) {
   function stop() { run = null; Synth.stop(); playing = false; step = -1; pass = ''; root = base; paint(); }
   const onVis = () => { if (document.visibilityState === 'hidden') { stop(); if (Tuner.on()) { Tuner.stop(); setSwitch(false); sung = null; drawTune(); } } };
   document.addEventListener('visibilitychange', onVis);
+  Synth.prepare();
   drawChips(); drawInfo(); drawSteps(); drawKeys(); paint();
   openSheet({
     title: '스케일 연습',
@@ -2162,6 +2218,7 @@ function openScaleTrainer(o = {}) {
 }
 /* your own exercise, built from the notes as sung from 도 */
 function openScaleBuilder(existing, onDone) {
+  Synth.prepare();
   const T = S.settings.scale;
   if (!existing && T.custom.length >= 30) { toast('내 스케일은 30개까지 만들 수 있어요. 안 쓰는 걸 지우고 만들어 주세요.'); return; }
   let steps = existing ? existing.steps.slice() : [], saved = false, previewing = false;
@@ -5055,7 +5112,7 @@ function openSettings() {
         Native.isNative ? h('p', { class: 'hint', style: 'margin-top:8px' }, '저장 위치: 내 파일 > 내장 저장공간 > Documents > 노래일기 > 백업. ‘백업 보내기’로 구글 드라이브나 카카오톡 나에게 보내 두면 더 안전해요.') : null,
         Native.isNative ? ToggleRow('매일 자동 백업 (글만)', S.settings.autoBackup, v => { S.settings.autoBackup = v; touchSettings(); if (v) autoBackup(true); }, '앱을 닫을 때 모든 글 기록을 Documents > 노래일기 > 자동백업에 저장해요. 하루 한 파일씩 최근 14개를 남기고, 녹음은 빠져요.', 'save') : null),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '저장 공간')), StorageBlock()),
-      h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '앱 정보')), UpdateRow(), h('p', { class: 'hint', style: 'margin-top:8px' }, '이전 노래일기(웹)에서 ‘백업 파일 저장’으로 받은 파일도 ‘백업 불러오기’로 옮길 수 있어요. 그때 녹음은 파일이 옮겨지지 않아서 ‘보내기’로 받은 파일을 따로 불러와야 해요.'))),
+      h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '앱 정보')), UpdateRow(), h('p', { class: 'hint', style: 'margin-top:8px' }, '피아노 소리: Salamander Grand Piano V3 (야마하 C5 그랜드, Alexander Holm, CC BY 3.0). 연습: Seth Riggs, Singing for the Stars.'), h('p', { class: 'hint', style: 'margin-top:8px' }, '이전 노래일기(웹)에서 ‘백업 파일 저장’으로 받은 파일도 ‘백업 불러오기’로 옮길 수 있어요. 그때 녹음은 파일이 옮겨지지 않아서 ‘보내기’로 받은 파일을 따로 불러와야 해요.'))),
     onClose: () => render()
   });
 }
