@@ -179,7 +179,10 @@ function normScale(x) {
   const pat = typeof x.pat === 'string' && (SK.BOOK.concat(SK.PRESETS).some(p => p.id === x.pat) || custom.some(c => c.id === x.pat)) ? x.pat : 'b01';
   /* auto: one press goes up a semitone at a time to top (꼭대기 음, the exercise's highest note) and back down */
   const top = x.top == null ? null : clampInt(x.top, SCALE_LO + 2, SCALE_TOP, 67);
-  return { pat, bpm: clampInt(x.bpm, 40, 220, 100), chord: x.chord !== false, echo: !!x.echo, root: clampInt(x.root, SCALE_LO, SCALE_HI, 60), auto: x.auto !== false, top, custom };
+  /* starts: the 시작 음 you chose per exercise; without one a book exercise starts where the book has a tenor start */
+  const starts = {};
+  if (x.starts && typeof x.starts === 'object') for (const k in x.starts) if (/^[\w-]{1,40}$/.test(k) && Object.keys(starts).length < 80) starts[k] = clampInt(x.starts[k], SCALE_LO, SCALE_HI, 48);
+  return { pat, bpm: clampInt(x.bpm, 40, 220, 100), chord: x.chord !== false, echo: !!x.echo, root: clampInt(x.root, SCALE_LO, SCALE_HI, 48), auto: x.auto !== false, top, voice: 'tenor', starts, custom };
 }
 /* 책 진도: the book exercise you are on, and its practice log (시작한 날 s / 해낸 날 a) per exercise number */
 function normBook(b) {
@@ -1843,7 +1846,10 @@ function openScaleTrainer(o = {}) {
   const date = o.date && o.date <= todayStr() ? o.date : todayStr();
   /* a routine item opens on its own exercise without changing the one you picked last */
   let curPat = o.pat && scalePats().some(p => p.id === o.pat) ? o.pat : T.pat;
-  let base = T.root, root = base, step = -1, pass = '', playing = false, lastTop = null, sung = null, vi = 0;
+  /* 시작 음: yours for this exercise, else the book's tenor start, else the last key you pressed */
+  const bookStart = id => { const b = bookOf(id); return b ? b.t : null; };
+  const startFor = id => (T.starts[id] != null ? T.starts[id] : bookStart(id) != null ? bookStart(id) : T.root);
+  let base = startFor(curPat), root = base, step = -1, pass = '', playing = false, lastTop = null, sung = null, vi = 0;
   let run = null; /* 자동 오르내리기: { seq: the 도 of each round, i: the round playing } */
   const stepAt = [];
   const pat = () => scalePats().find(p => p.id === curPat) || SK.BOOK[0];
@@ -1893,7 +1899,7 @@ function openScaleTrainer(o = {}) {
       h('p', { class: 'sc-how' }, bk.how),
       vs,
       h('details', { class: 'sc-more' }, h('summary', null, '방법 더 보기'),
-        h('ul', null, bk.text.map(t => h('li', null, t)), h('li', null, SK.START[bk.start]), bk.no <= 4 ? h('li', null, '공기를 너무 쓰거나 높은 음을 미리 걱정하면 입술·혀가 멈춰요. 그럴 땐 높은 음에 다가갈 때 몸을 앞으로 숙였다가 끝나면 일어서요.') : null)),
+        h('ul', null, bk.text.map(t => h('li', null, t)), h('li', null, `${SK.START[bk.start]} — 책의 테너 시작 음: ${noteName(bk.t)} (${noteSci(bk.t)})`), bk.no <= 4 ? h('li', null, '공기를 너무 쓰거나 높은 음을 미리 걱정하면 입술·혀가 멈춰요. 그럴 땐 높은 음에 다가갈 때 몸을 앞으로 숙였다가 끝나면 일어서요.') : null)),
       h('div', { class: 'sc-log' }, h('span', { class: 'hint' }, `시작한 날 ${L.s ? fmtMD(L.s) : '—'} · 해낸 날 ${L.a ? fmtMD(L.a) : '—'}`), act)].filter(Boolean));
   };
   /* the exercise as 계이름; the note being heard lights up */
@@ -1966,6 +1972,13 @@ function openScaleTrainer(o = {}) {
   const topUp = h('button', { class: 'btn soft sm sq', 'aria-label': '꼭대기 음 반음 올리기', onclick: () => setTop(ceil() + 1) }, icon('up', 18));
   const topHint = h('span', { class: 'hint' });
   const topRow = h('div', { class: 'sc-top' }, h('span', { class: 'lbl' }, '꼭대기 음'), topDn, topName, topUp, topHint);
+  /* 시작 음 without playing: go lower (or higher) than the book's start whenever you like */
+  const startName = h('b', { class: 'sc-top-n', 'aria-live': 'polite' });
+  const moveStart = m => { stop(); setStart(Math.max(SCALE_LO, Math.min(SCALE_HI, m))); drawInfo(); paint(); showRange(base, base + span()); };
+  const startDn = h('button', { class: 'btn soft sm sq', 'aria-label': '시작 음 반음 내리기', onclick: () => moveStart(base - 1) }, icon('dn', 18));
+  const startUp = h('button', { class: 'btn soft sm sq', 'aria-label': '시작 음 반음 올리기', onclick: () => moveStart(base + 1) }, icon('up', 18));
+  const startHint = h('span', { class: 'hint' });
+  const startRow = h('div', { class: 'sc-top' }, h('span', { class: 'lbl' }, '시작 음'), startDn, startName, startUp, startHint);
   const extra = h('div', { class: 'sc-extra' });
   const tempo = h('div', { class: 'seg', role: 'group', 'aria-label': '빠르기' },
     TEMPOS.map(([l, v]) => segBtn(l, T.bpm === v, ev => { T.bpm = v; touchSettings(); $$('button', tempo).forEach(b => b.setAttribute('aria-pressed', String(b === ev.currentTarget))); })));
@@ -2019,6 +2032,10 @@ function openScaleTrainer(o = {}) {
       nowBox.replaceChildren(...[h('b', null, noteName(base)), h('span', null, ` (${noteSci(base)})에서 시작`), say,
         h('span', { class: 'hint' }, T.auto && seq.length > 1 ? ` · 반음씩 ${topRoot - base}번 올라갔다 내려와요 (${seq.length}번)` : ` · 가장 높은 음 ${noteName(base + span())}`)].filter(Boolean));
     }
+    const bs = bookStart(curPat);
+    startName.textContent = `${noteName(base)} (${noteSci(base)})`;
+    startDn.disabled = base <= SCALE_LO; startUp.disabled = base >= SCALE_HI;
+    startHint.replaceChildren(...(bs == null ? [] : base === bs ? ['책의 테너 시작 음이에요'] : [`책(테너): ${noteName(bs)} `, h('button', { class: 'link', onclick: () => moveStart(bs) }, '책대로')]));
     const c = ceil();
     topRow.hidden = !T.auto;
     topName.textContent = `${noteName(c)} (${noteSci(c)})`;
@@ -2043,16 +2060,17 @@ function openScaleTrainer(o = {}) {
   };
   const choose = id => {
     if (curPat === id) return;
-    curPat = id; vi = 0;
+    curPat = id; vi = 0; base = root = startFor(id);
     if (T.pat !== id) { T.pat = id; touchSettings(); } /* only a pick you made is kept for next time */
     stop();
     chipEls.forEach((b, k) => b.setAttribute('aria-pressed', String(k === id)));
     drawInfo(); drawSteps(); drawKeys(); paint();
+    requestAnimationFrame(centerRoot);
   };
   /* a routine item's next check may be another exercise (립롤 1번 → 3번) */
   const nextPat = () => {
     const nx = o.drillId ? drillPat(date, o.drillId) : null;
-    if (nx && nx !== curPat) { curPat = nx; vi = 0; chipEls.forEach((b, k) => b.setAttribute('aria-pressed', String(k === nx))); drawInfo(); drawSteps(); drawKeys(); showChip(); }
+    if (nx && nx !== curPat) { curPat = nx; vi = 0; base = root = startFor(nx); chipEls.forEach((b, k) => b.setAttribute('aria-pressed', String(k === nx))); drawInfo(); drawSteps(); drawKeys(); showChip(); }
   };
   const afterBuild = () => { curPat = T.pat; drawChips(); drawInfo(); drawSteps(); drawKeys(); paint(); };
   /* one round from r: the exercise once, with 도 = r */
@@ -2073,8 +2091,7 @@ function openScaleTrainer(o = {}) {
   async function start(m) {
     if (m < SCALE_LO || m > SCALE_HI) return;
     resumeQuiet();
-    base = m;
-    if (T.root !== m) { T.root = m; touchSettings(); }
+    setStart(m);
     Player.stopAll();
     Synth.stop();
     playing = true; lastTop = null;
@@ -2104,6 +2121,14 @@ function openScaleTrainer(o = {}) {
     });
     next();
   }
+  /* a key or ▲▼ sets this exercise's 시작 음 (the book's own start isn't stored, so it can still change) */
+  function setStart(m) {
+    base = root = m;
+    if (bookStart(curPat) != null && bookStart(curPat) === m) delete T.starts[curPat];
+    else T.starts[curPat] = m;
+    if (bookStart(curPat) == null) T.root = m;
+    touchSettings();
+  }
   function stop() { run = null; Synth.stop(); playing = false; step = -1; pass = ''; root = base; paint(); }
   const onVis = () => { if (document.visibilityState === 'hidden') { stop(); if (Tuner.on()) { Tuner.stop(); setSwitch(false); sung = null; drawTune(); } } };
   document.addEventListener('visibilitychange', onVis);
@@ -2113,6 +2138,7 @@ function openScaleTrainer(o = {}) {
     body: h('div', { class: 'scale' },
       chipBox, infoBox, stepsBox, nowBox, kbWrap, tuneBox,
       h('div', { class: 'sc-ctrl' }, down, again, up),
+      startRow,
       topRow,
       extra,
       ToggleRow('자동으로 오르내리기', T.auto, v => { stop(); T.auto = v; touchSettings(); paint(); }, '누른 음에서 시작해 반음씩 꼭대기 음까지 올라갔다가 다시 반음씩 내려와요. 루틴 항목에서 열면 한 번 다 오르내릴 때 1회 체크돼요.', 'repeat'),
@@ -2120,7 +2146,7 @@ function openScaleTrainer(o = {}) {
       ToggleRow('시작 전에 기준 화음', T.chord, v => { T.chord = v; touchSettings(); }, '스케일 전에 첫 음의 화음을 들려줘요', 'music'),
       ToggleRow('따라 부르기 박자', T.echo, v => { T.echo = v; touchSettings(); }, '피아노가 끝나면 같은 박자를 한 번 더 짚어 줘요. 들은 다음 따라 부르는 연습이에요.', 'repeat'),
       tuneRow,
-      h('p', { class: 'hint', style: 'margin-top:8px' }, '건반을 누르면 그 음을 ‘도’로 삼아 시작해요. 책: 피아노 끝까지 올라갈 필요 없어요. 힘이 들어가거나 연결이 끊기면 바로 멈추세요.', bestM != null ? ' 빨간 점은 지금까지 낸 최고음이에요.' : '')),
+      h('p', { class: 'hint', style: 'margin-top:8px' }, '책 스케일은 책의 테너 시작 음에서 열려요. 건반을 누르거나 시작 음 ▼로 더 낮게(0옥 도까지) 시작할 수 있고, 연습마다 기억해요. 책: 피아노 끝까지 올라갈 필요 없어요. 힘이 들어가거나 연결이 끊기면 바로 멈추세요.', bestM != null ? ' 빨간 점은 지금까지 낸 최고음이에요.' : '')),
     onClose: () => { run = null; Synth.stop(); Tuner.stop(); document.removeEventListener('visibilitychange', onVis); }
   });
   requestAnimationFrame(() => { centerRoot(); showChip(); });

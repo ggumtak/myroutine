@@ -30,6 +30,10 @@ const CRY = [['a', '멈', 'mum'], ['b', '거', 'guh'], ['c', '고', 'go'], ['d',
 const VOW5 = [['a', '우', 'Oo'], ['b', '오', 'Oh'], ['c', '어', 'Uh'], ['d', '이', 'Ee'], ['e', '아', 'Ah']];
 const WEE = [['a', '위', 'Wee'], ['b', '기', 'Gee']];
 const MM = [['', '음 (입 다물고)', 'Mm']];
+/* the book's 'Approximate starting pitch' for a tenor, as the 도 of the first round (MIDI: 48 = 1옥 도 C3).
+   12·21·25 are written 8va (an octave lower than sung); 14 has none printed: just below the break */
+const TENOR = { 1: 48, 2: 48, 3: 48, 4: 48, 5: 55, 6: 48, 7: 55, 8: 48, 9: 48, 10: 55, 11: 55, 12: 56, 13: 48,
+  14: 60, 15: 48, 16: 48, 17: 48, 18: 48, 19: 55, 20: 55, 21: 56, 22: 55, 23: 55, 24: 55, 25: 67, 26: 48 };
 const BOOK = [
   { no: 1, name: '립롤', sound: '입술 떨기 “어”', steps: ONE5, d: EIGHTHS12, start: 'low',
     how: '손끝으로 볼을 입술 쪽으로 살짝 받치고, “어(UH)” 소리로 입술을 느슨하고 고르게 떨어요.',
@@ -103,16 +107,16 @@ const BOOK = [
   { no: 26, name: '모음 하나씩', sound: '모음마다 음역 전체', v: [['a', '아', 'Ah'], ['b', '에이', 'Ay'], ['c', '이', 'Ee'], ['d', '오', 'Oh'], ['e', '애', 'A'], ['f', '우', 'Oo'], ['g', '우(풋)', 'Oo(foot)']], steps: ONE5, d: EIGHTHS12, start: 'low',
     how: '모음 하나씩 음역 전체를 오르내리며, 가장 적은 힘으로 가장 많은 소리가 날 때까지 해요.',
     text: ['말할 때와 똑같이 발음해요. 목이나 입에서 아무것도 달라지면 안 돼요. 그래야 스피치 레벨이에요.'] }
-].map(b => Object.assign({ id: 'b' + String(b.no).padStart(2, '0'), part: b.no <= 13 ? 1 : 2 }, b));
+].map(b => Object.assign({ id: 'b' + String(b.no).padStart(2, '0'), part: b.no <= 13 ? 1 : 2, t: TENOR[b.no] }, b));
 const PARTS = [
   { no: 1, name: '1부 자신감 쌓기', range: '1~13번', text: '흉성에서 두성까지 끊기지 않고 이어지는 걸 경험해요. 1~4번은 워밍업으로 계속 쓰고, 5~11번은 연결되면 그만, 12·13번은 연결이 안 될 때만.' },
   { no: 2, name: '2부 스피치 레벨', range: '14~26번', text: '작은 ‘엣지’ 소리로 말하는 높이(스피치 레벨)에서 소리를 잡고, 엣지를 빼 가며 모음으로 옮겨요.' },
   { no: 3, name: '3부 노래에 적용', range: '27~30번', text: '연습곡에서 막히는 음에 숙이기·울먹임·모음 바꾸기·키 올리기를 써요.' }
 ];
 const START = {
-  low: '편한 낮은 음에서 시작 (책: 남성 1옥 도·0옥 솔, 여성 1옥 솔~시 근처)',
-  mid: '중간 음에서 시작',
-  high: '성구 전환(목소리가 바뀌는 곳) 근처에서 시작'
+  low: '낮은 음에서 시작해요',
+  mid: '중간 음에서 시작해요',
+  high: '성구 전환(목소리가 바뀌는 곳) 근처에서 시작해요'
 };
 const SOLFA = ['도', '도#', '레', '미♭', '미', '파', '파#', '솔', '솔#', '라', '시♭', '시'];
 /* a step as sung from 도: 0 → 도, 7 → 솔, 12 → 높은도, -1 → 낮은시 */
