@@ -978,7 +978,7 @@ function render(opts = {}) {
   document.body.dataset.tab = S.tab;
   main.replaceChildren(node);
   window.scrollTo(0, opts.top ? 0 : y);
-  if (opts.focus) { const el = main.querySelector(`[data-fk="${opts.focus}"]`); if (el) el.focus({ preventScroll: true }); }
+  if (opts.focus) { const el = main.querySelector(`[data-fk="${opts.focus}"]`); if (el) { revealPart(el); el.focus({ preventScroll: true }); } }
   else if (keep) {
     const find = k => $$('button,[role="slider"],select,.tg-t', main).find(x => ctlKey(x) === k && !x.disabled);
     const dm = /^dr-(.+)-(plus|staff|minus|fold|unfold|timer|keys|pron|rec)$/.exec(keep);
@@ -996,7 +996,7 @@ function go(tab) { S.tab = tab; render({ top: true }); }
 function goSection(id) {
   if (S.date !== todayStr()) { S.date = todayStr(); S.follow = true; }
   go('today');
-  requestAnimationFrame(() => { const el = document.getElementById(id); if (el) scrollToEl(el); });
+  requestAnimationFrame(() => { const el = document.getElementById(id); if (el) { revealPart(el); scrollToEl(el); } });
 }
 /* where the sticky bars end: the top bar, and on 오늘 the bar of its four parts */
 function stickyBottom() {
@@ -1004,37 +1004,50 @@ function stickyBottom() {
   return (tb ? tb.getBoundingClientRect().bottom : 54) + (nav ? nav.offsetHeight : 0);
 }
 function scrollToEl(el, gap = 10) { window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - stickyBottom() - gap), behavior: smooth() }); }
-/* 오늘's section bar: the part in view is marked (aria-current) */
-let navLock = null, spyQ = 0;
+/* 오늘 shows one of its four parts at a time; the bar above them picks which */
+function curPart(date) {
+  const u = lsGet(LS_UI, {});
+  if (u.part && u.part.d === date && TGROUPS.some(g => g.k === u.part.k)) return u.part.k;
+  const tm = lsGet(LS_TIMER, null), e = S.days[date];
+  if (tm && tm.date <= date && date === todayStr()) return 'practice';
+  if (e && (e.after != null || e.stop)) return 'after';
+  return 'before';
+}
+/* show part k without drawing again (what is typed and the scroll stay) */
+function showPart(k) {
+  uiSet('part', { d: S.date, k });
+  $$('.tgrp').forEach(g => { g.hidden = g.dataset.g !== k; });
+  spyNav();
+}
+/* the part that holds el, if it is hidden: so a jump to a field in another part works */
+function revealPart(el) {
+  const g = el && el.closest && el.closest('.tgrp[hidden]');
+  if (g) showPart(g.dataset.g);
+}
+let spyQ = 0;
 function spyNav() {
   const nav = $('.tnav');
   if (!nav) return;
-  const gs = $$('.tgrp');
-  if (!gs.length) return;
-  const line = stickyBottom() + Math.min(140, window.innerHeight * 0.22);
-  let cur = gs[0].dataset.g;
-  for (const g of gs) if (g.getBoundingClientRect().top <= line) cur = g.dataset.g;
-  if (window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 6) cur = gs[gs.length - 1].dataset.g;
-  if (navLock && Date.now() < navLock.until) cur = navLock.g;
-  $$('button', nav).forEach(b => { if (b.dataset.g === cur) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); });
+  const k = curPart(S.date);
+  $$('button', nav).forEach(b => b.setAttribute('aria-selected', String(b.dataset.g === k)));
   const tb = $('.topbar');
   nav.classList.toggle('stuck', window.scrollY > 0 && !!tb && nav.getBoundingClientRect().top <= tb.getBoundingClientRect().bottom + 0.5);
 }
 window.addEventListener('scroll', () => { if (!spyQ) spyQ = requestAnimationFrame(() => { spyQ = 0; spyNav(); }); }, { passive: true });
-window.addEventListener('scrollend', () => { if (navLock) { navLock = null; spyNav(); } });
 function TodayNav() {
-  return h('nav', { class: 'tnav jump', 'aria-label': '오늘 기록 바로가기' },
-    h('div', { class: 'tnav-in' }, TGROUPS.map(g => h('button', { 'data-g': g.k, 'data-fk': `nav-${g.k}`, onclick: () => jumpPart(g.k) }, g.l.split('·').flatMap((w, i) => (i ? ['·', h('wbr'), w] : [w]))))));
+  const k = curPart(S.date);
+  return h('nav', { class: 'tnav jump', 'aria-label': '오늘 기록' },
+    h('div', { class: 'tnav-in', role: 'tablist' }, TGROUPS.map(g => h('button', { role: 'tab', id: `tab-${g.k}`, 'aria-controls': `g-${g.k}`, 'aria-selected': String(g.k === k), 'data-g': g.k, 'data-fk': `nav-${g.k}`, onclick: () => jumpPart(g.k, false) }, g.l.split('·').flatMap((w, i) => (i ? ['·', h('wbr'), w] : [w]))))));
 }
-/* to one part of 오늘: its heading just under the bars, focus on it (TalkBack goes on from there) */
-function jumpPart(k) {
+/* to one part of 오늘: shown from its top, just under the bars; focus on its heading when asked (TalkBack goes on from there) */
+function jumpPart(k, focus = true) {
   const el = document.getElementById(`g-${k}`);
   if (!el) return;
-  navLock = { g: k, until: Date.now() + 1200 };
-  spyNav();
-  scrollToEl(el, 8);
+  showPart(k);
+  const nav = $('.tnav');
+  if (nav && nav.classList.contains('stuck')) scrollToEl(el, 8);
   const t = $('.tg-t', el);
-  if (t) t.focus({ preventScroll: true });
+  if (focus && t) t.focus({ preventScroll: true });
 }
 function goDate(d) {
   if (d > todayStr()) return;
@@ -2027,9 +2040,14 @@ function TodayView() {
     routineOn() ? null : h('button', { class: 'btn soft sm', style: 'margin-top:10px', onclick: openRoutineInsert }, '강의 노래 전 루틴 넣기')) : null;
   const memo = isToday ? MemorySec(date) : null;
   /* one part of the day: a heading on the page, its sections on one card */
-  const part = (k, sub, ...secs) => h('section', { class: 'tgrp', id: `g-${k}`, 'data-g': k, 'aria-labelledby': `gh-${k}` },
-    h('div', { class: 'tg-head' }, h('h2', { class: 'tg-t', id: `gh-${k}`, 'data-fk': `gh-${k}`, tabindex: '-1' }, TGROUPS.find(g => g.k === k).name), h('p', { class: 'tg-sub' }, sub)),
-    h('div', { class: 'page tg-card' }, secs));
+  const cur = curPart(date);
+  const part = (k, sub, ...secs) => {
+    const i = TGROUPS.findIndex(g => g.k === k), nx = TGROUPS[i + 1];
+    return h('section', { class: 'tgrp', id: `g-${k}`, 'data-g': k, role: 'tabpanel', 'aria-labelledby': `gh-${k}`, hidden: k !== cur },
+      h('div', { class: 'tg-head' }, h('h2', { class: 'tg-t', id: `gh-${k}`, 'data-fk': `gh-${k}`, tabindex: '-1' }, TGROUPS[i].name), h('p', { class: 'tg-sub' }, sub)),
+      h('div', { class: 'page tg-card' }, secs),
+      nx ? h('button', { class: 'tg-next', 'data-fk': `next-${nx.k}`, onclick: () => jumpPart(nx.k) }, h('span', null, '다음 ', h('b', null, nx.name)), icon('right', 18)) : null);
+  };
   return h('div', { class: 'v-today' }, isToday ? (UpdateBanner() || WhatsNew() || BackupNudge()) : null, head,
     TodayNav(),
     /* the practice clock and the stop rules belong to the whole day, so they come before its parts */
@@ -2043,8 +2061,7 @@ function TodayView() {
       h('div', { class: 'sec today-foot' },
         h('div', { class: 'foot-btns' },
           h('button', { class: 'btn soft', onclick: () => copySummary(date) }, icon('copy', 18), '요약 복사'),
-          h('button', { class: 'btn soft', onclick: () => shareSummary(date) }, icon('send', 18), '요약 보내기')),
-        h('p', { class: 'hint' }, '선생님께 카톡으로 보내거나 메모장에 붙여 넣을 수 있어요'))),
+          h('button', { class: 'btn soft', onclick: () => shareSummary(date) }, icon('send', 18), '요약 보내기')))),
     memo ? h('div', { class: 't-memory' }, memo) : null);
 }
 /* 오늘, in the order a practice day goes (the bar's labels are short; headings say it in full) */
@@ -2101,8 +2118,8 @@ function focusField(fk) {
   if (fk === 'cue-0' && lsGet(LS_UI, {}).cueOpen) fk = 'cue-row-0'; /* the list is open instead of the chips */
   render({ focus: fk });
   let el = $(`[data-fk="${fk}"]`);
-  if (!el) { el = $('[data-fk="goal"]'); if (el) el.focus({ preventScroll: true }); }
-  if (el) el.scrollIntoView({ block: 'center', behavior: smooth() });
+  if (!el) { el = $('[data-fk="goal"]'); if (el) { revealPart(el); el.focus({ preventScroll: true }); } }
+  if (el) { revealPart(el); el.scrollIntoView({ block: 'center', behavior: smooth() }); }
 }
 /* ---------- ⛔ 멈춤 규칙 ---------- */
 function StopCard(date) {
@@ -2132,7 +2149,7 @@ function StopCard(date) {
   const ent = soreSince(date);
   if (ent && !(u.entSnooze > now)) Object.assign(R[3], { on: true, st: `${ent.what.length ? `${ent.what.join('·')}${eulReul(ent.what[ent.what.length - 1])} 적은 날` : '목이 아팠던 날'}이 ${fmtMD(ent.since)}부터 이어지고 있어요 (기록 ${ent.n}일). 이비인후과(음성 전문)에 가 보세요.`, act: h('button', { class: 'btn soft sm', 'data-fk': 'stop-ent', onclick: () => { uiSet('entSnooze', Date.now() + 7 * 86400000); render({ focus: 'stop-fold' }); } }, '알겠어요') });
   const onN = R.filter(r => r.on).length;
-  const folded = typeof u.stopFold === 'boolean' ? u.stopFold : onN === 0 && u.stopDays > 3;
+  const folded = onN ? u.stopFold === true : u.stopFold !== false;
   const shown = folded ? R.filter(r => r.on || r.hintAct) : R;
   return h('div', { class: 'sec stop-card' + (onN ? ' alert' : ''), id: 'sec-stop' },
     h('button', { class: 'stop-h', 'data-fk': 'stop-fold', 'aria-expanded': String(!folded), 'aria-label': `멈춤 규칙 4가지${onN ? `, 지금 해당 ${onN}개` : ''}, ${folded ? '펼치기' : '접기'}`, onclick: () => { uiSet('stopFold', !folded); render({ focus: 'stop-fold' }); } },
@@ -2293,8 +2310,7 @@ function GoalSec(date, e) {
     h('div', { class: 'cue-box' },
       h('div', { class: 'cue-h' }, h('span', { class: 'lbl' }, '노래할 때 기억할 것'), h('span', { class: 'sp' }),
         open ? null : h('button', { class: 'link', 'data-fk': 'cue-all', 'aria-label': '노래할 때 기억할 것 모두 펼치기', onclick: () => toggle(true) }, '모두 보기')),
-      cues,
-      past ? null : h('p', { class: 'hint cue-one' }, '한 번에 하나만: 눌러서 오늘 집중할 것으로 정해요')));
+      cues));
 }
 function DrillSec(date) {
   const list = drillList(date);
@@ -2488,7 +2504,7 @@ function addSong(date, raw, pick, typing) {
 }
 function RecSec(date, e) {
   const recs = e ? e.recs : [];
-  const note = recs.length ? null : '바로 녹음하거나, 폰에 있는 녹음 파일(삼성 음성 녹음 m4a, mp3 등)을 불러오세요. 여러 개를 한 번에 골라도 돼요. 녹음 앱에서 ‘공유 > 노래일기’로 보내도 들어와요.';
+  const note = recs.length ? null : '폰의 녹음 파일(m4a, mp3)도 여러 개 한 번에 불러올 수 있어요.';
   return h('div', { class: 'sec', id: 'sec-recs' },
     h('div', { class: 'sec-h' }, h('h3', null, '녹음'), recs.length ? h('span', { class: 'sec-note' }, `${recs.length}개`) : null),
     h('div', { class: 'rec-actions' },
@@ -2517,15 +2533,14 @@ function RecordCard(date, e) {
   const n = rows.filter(r => r[2]).length;
   return h('div', { class: 'rec-card' },
     h('div', { class: 'lbl-row' }, h('span', { class: 'lbl' }, date === todayStr() ? '오늘의 기록' : '이 날의 기록'), h('span', { class: 'sp' }), h('span', { class: 'hint' }, `${n}/${rows.length}`)),
-    h('div', { class: 'chips' }, rows.map(([k, l, ok, fn]) => h('button', { class: 'chip sm rc' + (ok ? ' ok' : ''), 'data-fk': `rec-${k}`, 'aria-label': `${l}, ${ok ? '적었어요' : '아직 안 적었어요'}`, onclick: fn }, ok ? icon('check', 14) : null, l))),
-    h('p', { class: 'hint' }, '빈칸을 누르면 바로 적는 곳으로 가요. 적은 내용은 아래 목록과 요약에 들어가요.'));
+    h('div', { class: 'chips' }, rows.map(([k, l, ok, fn]) => h('button', { class: 'chip sm rc' + (ok ? ' ok' : ''), 'data-fk': `rec-${k}`, 'aria-label': `${l}, ${ok ? '적었어요' : '아직 안 적었어요'}`, onclick: fn }, ok ? icon('check', 14) : null, l))));
 }
 function AfterSec(date, e) {
   const a = e ? e.after : null;
   return h('div', { class: 'sec after-sec', id: 'sec-after' },
     h('div', { class: 'sec-h' }, h('h3', null, '끝난 후 목 상태'), h('span', { class: 'sec-note' }, '1~10'), h('span', { class: 'sp' }), a != null ? h('span', { class: 'after-val' + (a <= 5 ? ' low' : '') }, `${a}점`) : null),
     AfterGrid(date, (v, n) => render({ focus: `after-${n}` })),
-    a != null && a <= 5 ? h('p', { class: 'hint warn' }, afterLow(date)) : h('p', { class: 'hint' }, '1 나쁨 · 10 아주 좋음. 노래를 끝낸 뒤의 목 상태예요.'),
+    a != null && a <= 5 ? h('p', { class: 'hint warn' }, afterLow(date)) : h('p', { class: 'hint' }, '1 나쁨 · 10 아주 좋음'),
     RatingRow(date, e));
 }
 function ReflectSec(date, e) {
@@ -2539,10 +2554,9 @@ function NotesSec(date, e) {
   return h('div', { class: 'sec notes-sec', id: 'sec-notes' },
     h('div', { class: 'sec-h' }, h('h3', null, h('label', { for: 'ta-memo' }, '메모')), h('span', { class: 'sp' }),
       h('button', { class: 'btn ghost sm', onclick: () => openWriter(date, 'memo', '메모') }, icon('expand', 16), '크게 쓰기')),
-    autoTA({ id: 'ta-memo', class: 'input lined', placeholder: '오늘 연습하며 느낀 것을 자유롭게 적어 보세요. 레슨에서 들은 말, 몸 상태, 떠오른 생각 무엇이든요.', value: e ? e.memo : '', 'data-fk': 'memo', 'data-day': date, oninput: ev => { ensureDay(date).memo = ev.target.value; touch(date); } }, 122),
-    h('div', { class: 'field next-field' }, h('label', { class: 'lbl', for: 'ta-next' }, '다음 연습 때 할 것'),
-      autoTA({ id: 'ta-next', class: 'input lined', placeholder: '예: 히싱 20초 넘기기, 2절 브릿지 숨 위치 바꾸기', value: e ? e.next : '', 'data-fk': 'next', 'data-day': date, oninput: ev => { ensureDay(date).next = ev.target.value; touch(date); } }, 66),
-      h('span', { class: 'hint' }, '다음에 일기를 열면 ‘시작 전’ 맨 위에 보여 줘요.')));
+    autoTA({ id: 'ta-memo', class: 'input lined', placeholder: '레슨에서 들은 말, 몸 상태, 떠오른 생각', value: e ? e.memo : '', 'data-fk': 'memo', 'data-day': date, oninput: ev => { ensureDay(date).memo = ev.target.value; touch(date); } }, 122),
+    h('div', { class: 'field next-field' }, h('label', { class: 'lbl', for: 'ta-next' }, '다음 연습 때 할 것', h('span', { class: 'lbl-note' }, ' · 다음에 열면 맨 위에 보여요')),
+      autoTA({ id: 'ta-next', class: 'input lined', placeholder: '예: 히싱 20초 넘기기, 2절 브릿지 숨 위치 바꾸기', value: e ? e.next : '', 'data-fk': 'next', 'data-day': date, oninput: ev => { ensureDay(date).next = ev.target.value; touch(date); } }, 66)));
 }
 function ItemList(date, e, kind) {
   const items = e ? e[kind] : [];
@@ -5173,7 +5187,7 @@ function openLogin() {
       };
       bindEnter(inp, verify);
       body.replaceChildren(h('p', { class: 'lead' }, `${email} 주소로 보낸 메일의 번호를 넣어 주세요. 안 보이면 스팸함도 확인해 주세요.`), field('번호', inp),
-        h('p', { class: 'hint' }, '메일에 번호 없이 ‘Log In’ 링크만 있으면, 링크를 길게 눌러 복사한 뒤 여기에 붙여 넣어도 로그인돼요.'), msg,
+        h('p', { class: 'hint' }, '메일에 번호 없이 링크(Sign in)만 있으면, 링크를 누르지 말고 길게 눌러 복사해서 여기에 붙여 넣어도 돼요. 한 번 누른 링크는 다시 못 써요.'), msg,
         h('button', { class: 'btn ink wide', style: 'margin-top:10px', onclick: verify }, '로그인'),
         h('div', { class: 'btn-row', style: 'margin-top:6px' },
           h('button', { class: 'btn ghost sm', onclick: async () => { if (busy) return; busy = true; msg.textContent = '다시 보내는 중…'; try { await Cloud.sendCode(email); msg.textContent = '다시 보냈어요.'; } catch (e) { msg.textContent = cloudErrText(e); } busy = false; } }, '번호 다시 받기'),
