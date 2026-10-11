@@ -148,7 +148,8 @@ const THEMES = [['auto', '폰 설정 따라'], ['light', '밝게'], ['dark', '�
 const { Store, makeZip, readZip, Files, App: Native, Net, safeName } = window.SD;
 const SS = window.SongSearch;
 const SK = window.ScaleKit;
-const SCALE_LO = 48, SCALE_HI = 72; /* 1옥 도 … 3옥 도 */
+const SCALE_LO = 36, SCALE_HI = 72; /* 0옥 도 … 3옥 도: keys you can start a scale from */
+const SCALE_TOP = 96; /* the highest note an exercise may reach (꼭대기 음) */
 const PR = window.Practice;
 const SORE = ['쉰 소리', '따가움', '긁힘'];
 const TAG_FLIP = '뒤집힘', TAG_TIGHT = '조임';
@@ -168,15 +169,31 @@ const S = {
 };
 
 function defaultSettings() {
-  return { v: 2, title: '껌딱의 노래일기', drills: DEFAULT_DRILLS.map(d => ({ ...d })), tags: DEFAULT_TAGS.slice(), sound: true, haptic: true, theme: 'auto', reminder: { on: false, h: 20, m: 0 }, autoBackup: true, songSearch: true, scale: normScale(null), routine: null, songs: [], updatedAt: 0 };
+  return { v: 2, title: '껌딱의 노래일기', drills: DEFAULT_DRILLS.map(d => ({ ...d })), tags: DEFAULT_TAGS.slice(), sound: true, haptic: true, theme: 'auto', reminder: { on: false, h: 20, m: 0 }, autoBackup: true, songSearch: true, scale: normScale(null), routine: null, book: normBook(null), songs: [], updatedAt: 0 };
 }
 /* scale practice: chosen exercise, speed, starting chord, last key pressed, your own exercises */
 function normScale(x) {
   x = x && typeof x === 'object' ? x : {};
   const custom = Array.isArray(x.custom) ? x.custom.filter(c => c && c.id && Array.isArray(c.steps) && c.steps.length >= 2).slice(0, 30)
     .map(c => ({ id: String(c.id), name: String(c.name || '내 스케일').slice(0, 20), steps: c.steps.slice(0, 40).map(n => clampInt(n, -12, 24, 0)) })) : [];
-  const pat = typeof x.pat === 'string' && (SK.PRESETS.some(p => p.id === x.pat) || custom.some(c => c.id === x.pat)) ? x.pat : 'five';
-  return { pat, bpm: clampInt(x.bpm, 40, 220, 100), chord: x.chord !== false, echo: !!x.echo, root: clampInt(x.root, SCALE_LO, SCALE_HI, 60), custom };
+  const pat = typeof x.pat === 'string' && (SK.BOOK.concat(SK.PRESETS).some(p => p.id === x.pat) || custom.some(c => c.id === x.pat)) ? x.pat : 'b01';
+  /* auto: one press goes up a semitone at a time to top (꼭대기 음, the exercise's highest note) and back down */
+  const top = x.top == null ? null : clampInt(x.top, SCALE_LO + 2, SCALE_TOP, 67);
+  return { pat, bpm: clampInt(x.bpm, 40, 220, 100), chord: x.chord !== false, echo: !!x.echo, root: clampInt(x.root, SCALE_LO, SCALE_HI, 60), auto: x.auto !== false, top, custom };
+}
+/* 책 진도: the book exercise you are on, and its practice log (시작한 날 s / 해낸 날 a) per exercise number */
+function normBook(b) {
+  b = b && typeof b === 'object' ? b : {};
+  const log = {};
+  if (b.log && typeof b.log === 'object') for (const k in b.log) {
+    const no = +k, L = b.log[k];
+    if (!(no >= 1 && no <= PR.BOOK_LAST) || !L || typeof L !== 'object') continue;
+    const o = {};
+    if (isDateKey(L.s)) o.s = L.s;
+    if (isDateKey(L.a)) o.a = L.a;
+    if (o.s || o.a) log[no] = o;
+  }
+  return { cur: clampInt(b.cur, 1, PR.BOOK_LAST, PR.BOOK_FIRST), log };
 }
 /* 노래 전 루틴: start = 히싱 1주차 첫날; hiss / pant = the user's own 히싱·개호흡 items that joined ② 호흡 */
 function normRoutine(r) {
@@ -215,6 +232,7 @@ function normSettings(s) {
     songSearch: s.songSearch !== false,
     scale: normScale(s.scale),
     routine: normRoutine(s.routine),
+    book: normBook(s.book),
     songs: Array.isArray(s.songs) ? s.songs.filter(x => x && typeof x.k === 'string').map(x => ({ ...x, k: x.k, artist: String(x.artist || ''), memo: String(x.memo || ''), status: SONG_STATUS.includes(x.status) ? x.status : '', cat: normCat(x.cat) })) : [],
     updatedAt: +s.updatedAt || 0
   };
@@ -327,7 +345,7 @@ async function loadAll() {
     await Cloud.restore();
     await Sync.load();
     S.mode = 'ready';
-    if (!meta) { queueWrite('@s', 50); S.firstRun = true; const u = lsGet(LS_UI, {}); u.seen11 = 1; u.seen12 = 1; u.seen13 = 1; lsSet(LS_UI, u); }
+    if (!meta) { queueWrite('@s', 50); S.firstRun = true; const u = lsGet(LS_UI, {}); u.seen11 = 1; u.seen12 = 1; u.seen13 = 1; u.seen15 = 1; lsSet(LS_UI, u); }
   } catch (err) {
     console.error(err);
     S.mode = 'error'; S.loadErr = err;
@@ -958,6 +976,7 @@ document.addEventListener('focusout', () => setTimeout(() => { if (deferred && !
 /* identity of a control across redraws: its data-fk, else its label */
 const ctlKey = el => el && (el.dataset.fk || (el.getAttribute('aria-label') ? 'l:' + el.getAttribute('aria-label') : el.tagName === 'BUTTON' ? 't:' + el.textContent.trim() : ''));
 function render(opts = {}) {
+  if (S.mode === 'ready' && !Sync.applying) migrateRoutine();
   const main = $('#view');
   const y = window.scrollY;
   const act = document.activeElement;
@@ -1074,14 +1093,15 @@ function BackupNudge() {
 /* one-time note about what this version added */
 function WhatsNew() {
   const u = lsGet(LS_UI, {});
-  if (u.seen13 || S.firstRun || !entryDates().length) return null;
-  const close = () => { const v = lsGet(LS_UI, {}); v.seen11 = 1; v.seen12 = 1; v.seen13 = 1; lsSet(LS_UI, v); };
+  if (u.seen15 || S.firstRun || !entryDates().length) return null;
+  const close = () => { const v = lsGet(LS_UI, {}); v.seen11 = 1; v.seen12 = 1; v.seen13 = 1; v.seen15 = 1; lsSet(LS_UI, v); };
   const box = h('div', { class: 'banner news' },
     h('b', null, '새로워졌어요'),
     h('ul', null,
-      h('li', null, '강의에서 정리한 노래 전 루틴(약 28분)과 발음 찾기를 ‘기초 연습’에 단계별로 넣을 수 있어요.'),
-      h('li', null, '맨 위 ‘멈춤 규칙’이 목 상태와 연습 시간을 보고 알려 줘요. 20~25분 부르면 쉬라고 알려 줘요.'),
-      h('li', null, '연습을 끝내면 ‘끝난 후 목 상태’(1~10)를 물어봐요. 5점 이하면 다음 날은 루틴 ①~③단계만 해요.'),
+      h('li', null, '노래 전 루틴을 Singing for the Stars(세스 릭스) 책으로 새로 짰어요. 히싱·개호흡은 그대로예요.'),
+      h('li', null, '책의 스케일 26개가 건반에 들어 있어요. 시작을 한 번 누르면 꼭대기 음까지 반음씩 올라갔다가 다시 내려와요.'),
+      h('li', null, '건반이 0옥 도부터 있어요. 책 진도(시작한 날·해낸 날)도 적혀요.'),
+      !u.seen13 ? h('li', null, '맨 위 ‘멈춤 규칙’이 목 상태와 연습 시간을 보고 알려 줘요. 20~25분 부르면 쉬라고 알려 줘요.') : null,
       !u.seen12 ? h('li', null, '‘기초 연습’의 건반(🎹)으로 스케일 연습을 할 수 있어요.') : null,
       !u.seen11 ? h('li', null, '노래 제목을 몇 글자만 쳐도 실제 노래를 찾아 주고, ‘모아보기’ 탭에 일지가 모여요.') : null),
     h('div', { class: 'btn-row', style: 'margin-top:8px' },
@@ -1271,7 +1291,10 @@ function grpOf(id) {
   if (!routineOn()) return null;
   return id === hissId() || id === pantId() ? 'r2' : 'rx';
 }
-const isLight = g => g === 'r1' || g === 'r2' || g === 'r3';
+const isLight = g => !!(PR.GROUPS.find(x => x.k === g) || {}).light;
+/* ①~③ = 준비·호흡·립롤·혀 트릴: what a light day (멈춤 규칙 2) still does */
+const LIGHT_NAMES = PR.GROUPS.filter(g => g.light).map(g => g.name).join('·');
+const RT_MIN = PR.GROUPS.reduce((a, g) => a + g.min, 0);
 /* 멈춤 규칙 2: the day before ended with 목 상태 5 or lower → only steps ①~③ today (returns that score) */
 function restInfo(date) { const y = S.days[addDays(date, -1)]; return y && y.after != null && y.after <= 5 ? y.after : null; }
 const restDay = date => restInfo(date) != null;
@@ -1644,10 +1667,37 @@ const Synth = {
     o.start(t); o.stop(t + 0.06);
     this.nodes.push({ g, os: [o], t, end: t + 0.06 });
   },
+  /* one tone sliding through notes (the book's 'squeaky door' inflection): midis[i] is reached at times[i] */
+  glideTone(ctx, midis, times, end, vol) {
+    const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+    const g = ctx.createGain(), t = times[0];
+    g.connect(this.out(ctx));
+    const L = Math.max(0, Math.min(1, (67 - midis[0]) / 19));
+    const os = [['triangle', 1, 1], ['sine', 2, 0.25 + 0.4 * L], ['sine', 3, 0.05 + 0.3 * L]].map(([type, mul, lv]) => {
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = type; og.gain.value = lv;
+      o.frequency.setValueAtTime(hz(midis[0]) * mul, t);
+      /* hold each note for the first half of its time, then slide to the next */
+      for (let i = 1; i < midis.length; i++) {
+        o.frequency.setValueAtTime(hz(midis[i - 1]) * mul, times[i - 1] + (times[i] - times[i - 1]) * 0.45);
+        o.frequency.exponentialRampToValueAtTime(hz(midis[i]) * mul, times[i]);
+      }
+      o.connect(og); og.connect(g);
+      o.start(t); o.stop(end + 0.2);
+      return o;
+    });
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(vol * 0.6, t + 0.3);
+    g.gain.setValueAtTime(vol * 0.6, end);
+    g.gain.exponentialRampToValueAtTime(0.0001, end + 0.15);
+    this.nodes.push({ g, os, t, end: end + 0.2 });
+  },
   one(midi) { const ctx = Sound.get(); if (ctx) this.tone(ctx, midi, ctx.currentTime + 0.02, 0.5, 0.25); },
   /* steps: semitones above root. onStep(i, pass) as each note is heard — pass 'play' for the piano, 'sing' for
-     the sing-back beats (echo); onEnd() after the last one, or when the playback is cut off. Resolves false if no sound. */
-  async play(root, steps, { bpm, chord, echo, onStep, onEnd }) {
+     the sing-back beats (echo); onEnd(finished) after the last one (true), or when the playback is cut off (false).
+     d / tie / st / glide: a book exercise's rhythm (see scales.js); without d every note is a beat. Resolves false if no sound. */
+  async play(root, steps, { bpm, chord, echo, onStep, onEnd, d, tie, st, glide }) {
     this.stop();
     const my = ++this.seq;
     const ctx = Sound.get();
@@ -1663,19 +1713,31 @@ const Synth = {
       [0, minor ? 3 : 4, 7].forEach(o => this.tone(ctx, root + o, t0, beat * 1.7, 0.13));
       t0 += beat * 2.2;
     }
+    /* when each note starts and how many beats it lasts */
+    const len = i => (d && d[i] > 0 ? d[i] : i === steps.length - 1 ? 1.8 : 1);
+    const starts = [];
+    let pos = 0;
+    steps.forEach((off, i) => { starts.push(pos); pos += len(i); });
+    const held = i => !!(tie && tie.includes(i)); /* goes on from the note before: no new strike */
+    if (glide) this.glideTone(ctx, steps.map(x => root + x), starts.map(b => t0 + b * beat), t0 + (pos - 0.2) * beat, 0.24);
     steps.forEach((off, i) => {
-      const t = t0 + i * beat;
-      this.tone(ctx, root + off, t, i === steps.length - 1 ? beat * 1.8 : beat * 0.9, 0.27);
+      const t = t0 + starts[i] * beat;
+      if (!glide && !held(i)) {
+        let sound = len(i);
+        for (let j = i + 1; held(j); j++) sound += len(j);
+        const dur = !d ? (i === steps.length - 1 ? 1.8 : 0.9) : st && st.includes(i) ? Math.min(sound, 1) * 0.45 : sound * 0.94;
+        this.tone(ctx, root + off, t, dur * beat, 0.27);
+      }
       this.timers.push(setTimeout(() => onStep && onStep(i, 'play'), at(t)));
     });
-    let end = t0 + (steps.length - 1) * beat + beat * 1.8;
+    let end = t0 + (d ? pos : (steps.length - 1) + 1.8) * beat;
     if (echo) {
       const s0 = end + beat * 0.6;
-      steps.forEach((off, i) => { const t = s0 + i * beat; this.tick(ctx, t); this.timers.push(setTimeout(() => onStep && onStep(i, 'sing'), at(t))); });
-      end = s0 + (steps.length - 1) * beat + beat * 1.5;
+      steps.forEach((off, i) => { const t = s0 + starts[i] * beat; if (!held(i)) this.tick(ctx, t); this.timers.push(setTimeout(() => onStep && onStep(i, 'sing'), at(t))); });
+      end = s0 + (d ? pos - 0.3 : (steps.length - 1) + 1.5) * beat;
     }
-    this.onAbort = onEnd || null;
-    this.timers.push(setTimeout(() => { this.timers = []; this.onAbort = null; if (onEnd) onEnd(); }, at(end)));
+    this.onAbort = onEnd ? () => onEnd(false) : null;
+    this.timers.push(setTimeout(() => { this.timers = []; this.onAbort = null; if (onEnd) onEnd(true); }, at(end)));
     return true;
   },
   stop() {
@@ -1748,27 +1810,87 @@ const Tuner = {
 };
 const TEMPOS = [['아주 느리게', 60], ['느리게', 80], ['보통', 100], ['빠르게', 130]];
 const BLACK_PC = [1, 3, 6, 8, 10];
-const scalePats = () => SK.PRESETS.concat(S.settings.scale.custom);
+const scalePats = () => SK.BOOK.concat(SK.PRESETS, S.settings.scale.custom);
+const bookOf = id => SK.BOOK.find(b => b.id === id) || null;
+const bookNow = () => SK.BOOK[S.settings.book.cur - 1] || SK.BOOK[PR.BOOK_FIRST - 1];
+/* the exercise a routine item plays now: 책 진도 → the one you are on; 립롤 / 혀 트릴 → the one for the next check */
+function drillPat(date, id) {
+  const rt = PR.BY_ID[id];
+  if (!rt) return null;
+  if (rt.book) return bookNow().id;
+  if (!rt.pats) return null;
+  const d = drillList(date).find(x => x.id === id), done = d ? d.done : 0;
+  let before = 0;
+  for (let i = 0; i < rt.ph.length; i++) { before += rt.ph[i][1]; if (done < before) return rt.pats[i]; }
+  return rt.pats[rt.pats.length - 1];
+}
+/* 해낸 날: the book's practice log; the one you are on moves to the next exercise */
+function bookDone(no, date) {
+  const B = S.settings.book, before = clone(B);
+  const L = B.log[no] || (B.log[no] = {});
+  if (!L.s) L.s = date;
+  L.a = date;
+  if (B.cur === no && no < PR.BOOK_LAST) B.cur = no + 1;
+  touchSettings(); softRender();
+  return () => { S.settings.book = before; touchSettings(); softRender(); };
+}
 function openScaleTrainer(o = {}) {
   const T = S.settings.scale;
   const date = o.date && o.date <= todayStr() ? o.date : todayStr();
-  /* 루틴 (빨대 5음, 모음 찾기) opens on 5음 스케일 without changing the exercise you picked last */
+  /* a routine item opens on its own exercise without changing the one you picked last */
   let curPat = o.pat && scalePats().some(p => p.id === o.pat) ? o.pat : T.pat;
-  let root = T.root, step = -1, pass = '', playing = false, lastTop = null, sung = null;
+  let base = T.root, root = base, step = -1, pass = '', playing = false, lastTop = null, sung = null, vi = 0;
+  let run = null; /* 자동 오르내리기: { seq: the 도 of each round, i: the round playing } */
   const stepAt = [];
-  const pat = () => scalePats().find(p => p.id === curPat) || SK.PRESETS[0];
+  const pat = () => scalePats().find(p => p.id === curPat) || SK.BOOK[0];
+  const span = () => Math.max(...pat().steps);
   const best = bestHigh(), bestM = best ? best.m : null;
-  /* exercise chips: the name, and what is sung */
-  const chips = h('div', { class: 'chips scroll sc-pats', role: 'group', 'aria-label': '스케일 고르기' });
+  /* 꼭대기 음: the highest note the exercise goes up to before coming back down (yours, or a fifth above the first round) */
+  const ceil = () => (T.top != null ? T.top : Math.min(SCALE_TOP, bestM != null && bestM > base + span() ? bestM : base + span() + 7));
+  const autoSeq = b => {
+    const lim = Math.min(SCALE_HI, ceil() - span()), ups = [b];
+    while (ups[ups.length - 1] < lim && ups.length < 25) ups.push(ups[ups.length - 1] + 1);
+    return ups.concat(ups.slice(0, -1).reverse());
+  };
+  /* exercise chips in rows: the book's two parts, then the basic ones and yours */
+  const chipBox = h('div', { class: 'sc-rows' });
   const chipEls = new Map();
+  const chip = (p, label) => {
+    const sung2 = p.steps.map(SK.degName).join(' ');
+    const b = h('button', { class: 'chip sc-chip', 'aria-pressed': String(curPat === p.id), 'aria-label': `${label}: ${sung2}`, onclick: () => choose(p.id) }, h('b', null, label), h('small', { 'aria-hidden': 'true' }, sung2));
+    chipEls.set(p.id, b);
+    return b;
+  };
+  const row = (title, kids) => h('div', { class: 'sc-row' }, h('span', { class: 'sc-row-t' }, title), h('div', { class: 'chips scroll sc-pats', role: 'group', 'aria-label': title }, kids));
   const drawChips = () => {
     chipEls.clear();
-    chips.replaceChildren(...scalePats().map(p => {
-      const sung2 = p.steps.map(SK.degName).join(' ');
-      const b = h('button', { class: 'chip sc-chip', 'aria-pressed': String(curPat === p.id), 'aria-label': `${p.name}: ${sung2}`, onclick: () => choose(p.id) }, h('b', null, p.name), h('small', { 'aria-hidden': 'true' }, sung2));
-      chipEls.set(p.id, b);
-      return b;
-    }), h('button', { class: 'chip sc-chip again', onclick: () => { stop(); openScaleBuilder(null, afterBuild); } }, icon('plus', 15), '만들기'));
+    chipBox.replaceChildren(
+      ...[1, 2].map(n => row(`${SK.PARTS[n - 1].name} (${SK.PARTS[n - 1].range})`, SK.BOOK.filter(b => b.part === n).map(b => chip(b, `${b.no} ${b.name}`)))),
+      row('기본 · 내 스케일', SK.PRESETS.concat(T.custom).map(p => chip(p, p.name)).concat(h('button', { class: 'chip sc-chip again', onclick: () => { stop(); openScaleBuilder(null, afterBuild); } }, icon('plus', 15), '만들기'))));
+  };
+  const showChip = () => { const b = chipEls.get(curPat); if (b && b.parentNode) b.parentNode.scrollLeft = Math.max(0, b.offsetLeft - 24); };
+  /* the book's instructions, what to sing, and its practice log */
+  const infoBox = h('div', { class: 'sc-info' });
+  const drawInfo = () => {
+    const bk = bookOf(curPat);
+    if (!bk) { infoBox.hidden = true; infoBox.replaceChildren(); return; }
+    infoBox.hidden = false;
+    const B = S.settings.book, L = B.log[bk.no] || {}, isCur = B.cur === bk.no;
+    const vs = bk.v && bk.v.length > 1 ? h('div', { class: 'chips sc-vs', role: 'group', 'aria-label': '부를 소리' }, bk.v.map((v, i) => h('button', { class: 'chip sm', 'aria-pressed': String(i === vi), onclick: () => { vi = i; drawInfo(); paint(); } }, `${v[0] ? `(${v[0]}) ` : ''}${v[1]}`, h('small', null, ` ${v[2]}`)))) : null;
+    const act = isCur
+      ? h('button', { class: 'btn blue sm', 'data-fk': 'sc-bookdone', onclick: () => {
+        const undo = bookDone(bk.no, todayStr()), nx = S.settings.book.cur;
+        toast(nx !== bk.no ? `${bk.no}번 해냈어요! 다음 진도는 ${nx}번 ${SK.BOOK[nx - 1].name}` : `${bk.no}번 해냈어요! 책의 스케일을 모두 마쳤어요`, { action: '되돌리기', onAction: () => { undo(); drawInfo(); } });
+        drawInfo();
+      } }, icon('check', 16), bk.no < PR.BOOK_LAST ? `해냈어요 → ${bk.no + 1}번으로` : '해냈어요')
+      : h('button', { class: 'btn soft sm', 'data-fk': 'sc-bookcur', onclick: () => { B.cur = bk.no; touchSettings(); softRender(); drawInfo(); toast(`책 진도를 ${bk.no}번 ${bk.name}(으)로 정했어요`); } }, '이 연습을 지금 진도로');
+    infoBox.replaceChildren(...[
+      h('div', { class: 'sc-info-h' }, h('b', null, `${bk.no}번 ${bk.name}`), h('span', { class: 'hint' }, ` · ${bk.sound}`), isCur ? h('span', { class: 'pill' }, '지금 진도') : null),
+      h('p', { class: 'sc-how' }, bk.how),
+      vs,
+      h('details', { class: 'sc-more' }, h('summary', null, '방법 더 보기'),
+        h('ul', null, bk.text.map(t => h('li', null, t)), h('li', null, SK.START[bk.start]), bk.no <= 4 ? h('li', null, '공기를 너무 쓰거나 높은 음을 미리 걱정하면 입술·혀가 멈춰요. 그럴 땐 높은 음에 다가갈 때 몸을 앞으로 숙였다가 끝나면 일어서요.') : null)),
+      h('div', { class: 'sc-log' }, h('span', { class: 'hint' }, `시작한 날 ${L.s ? fmtMD(L.s) : '—'} · 해낸 날 ${L.a ? fmtMD(L.a) : '—'}`), act)].filter(Boolean));
   };
   /* the exercise as 계이름; the note being heard lights up */
   const stepsBox = h('div', { class: 'sc-steps' });
@@ -1785,7 +1907,7 @@ function openScaleTrainer(o = {}) {
     if (turn && turn.textContent !== txt) turn.textContent = txt;
   };
   const nowBox = h('div', { class: 'sc-now' });
-  /* keyboard: 1옥 도 … 3옥 도 to press, plus dimmed keys where the chosen exercise goes past them */
+  /* keyboard: 0옥 도 … 3옥 도 to press, plus dimmed keys where the chosen exercise goes past them */
   const W = 44, B = 28, keys = new Map();
   const kb = h('div', { class: 'kb' });
   const kbWrap = h('div', { class: 'kb-wrap' }, kb);
@@ -1804,7 +1926,7 @@ function openScaleTrainer(o = {}) {
   };
   const drawKeys = () => {
     const st = pat().steps;
-    let lo = Math.max(36, SCALE_LO + Math.min(0, ...st)), hi = Math.min(96, SCALE_HI + Math.max(0, ...st));
+    let lo = Math.max(24, SCALE_LO + Math.min(0, ...st)), hi = Math.min(SCALE_TOP + 12, SCALE_HI + Math.max(0, ...st));
     while (BLACK_PC.includes(lo % 12)) lo--;
     while (BLACK_PC.includes(hi % 12)) hi++;
     if (kbRange === `${lo}-${hi}`) return;
@@ -1827,12 +1949,19 @@ function openScaleTrainer(o = {}) {
     requestAnimationFrame(centerRoot);
   };
   const paintKeys = () => {
-    const cur = step >= 0 ? root + pat().steps[step] : null, s = sung != null ? Math.round(sung) : null;
-    keys.forEach((k, m) => { k.classList.toggle('root', m === root); k.classList.toggle('on', m === cur); k.classList.toggle('sing', m === s); });
+    const cur = step >= 0 ? root + pat().steps[step] : null, s = sung != null ? Math.round(sung) : null, top = T.auto ? ceil() : null;
+    keys.forEach((k, m) => { k.classList.toggle('root', m === root); k.classList.toggle('on', m === cur); k.classList.toggle('sing', m === s); k.classList.toggle('top', m === top); });
   };
-  const down = h('button', { class: 'btn soft', 'aria-label': '반음 내려서 다시', onclick: () => start(root - 1) }, icon('dn', 18), '반음');
-  const again = h('button', { class: 'btn ink sc-play', onclick: () => (playing ? stop() : start(root)) });
-  const up = h('button', { class: 'btn soft', 'aria-label': '반음 올려서 다시', onclick: () => start(root + 1) }, icon('up', 18), '반음');
+  const down = h('button', { class: 'btn soft', 'aria-label': '시작 음을 반음 내려서 다시', onclick: () => start(base - 1) }, icon('dn', 18), '반음');
+  const again = h('button', { class: 'btn ink sc-play', onclick: () => (playing ? stop() : start(base)) });
+  const up = h('button', { class: 'btn soft', 'aria-label': '시작 음을 반음 올려서 다시', onclick: () => start(base + 1) }, icon('up', 18), '반음');
+  /* 꼭대기 음 */
+  const topName = h('b', { class: 'sc-top-n', 'aria-live': 'polite' });
+  const setTop = m => { stop(); T.top = Math.max(SCALE_LO + 2, Math.min(SCALE_TOP, m)); touchSettings(); paint(); showRange(T.top - 4, T.top); };
+  const topDn = h('button', { class: 'btn soft sm sq', 'aria-label': '꼭대기 음 반음 내리기', onclick: () => setTop(ceil() - 1) }, icon('dn', 18));
+  const topUp = h('button', { class: 'btn soft sm sq', 'aria-label': '꼭대기 음 반음 올리기', onclick: () => setTop(ceil() + 1) }, icon('up', 18));
+  const topHint = h('span', { class: 'hint' });
+  const topRow = h('div', { class: 'sc-top' }, h('span', { class: 'lbl' }, '꼭대기 음'), topDn, topName, topUp, topHint);
   const extra = h('div', { class: 'sc-extra' });
   const tempo = h('div', { class: 'seg', role: 'group', 'aria-label': '빠르기' },
     TEMPOS.map(([l, v]) => segBtn(l, T.bpm === v, ev => { T.bpm = v; touchSettings(); $$('button', tempo).forEach(b => b.setAttribute('aria-pressed', String(b === ev.currentTarget))); })));
@@ -1875,71 +2004,117 @@ function openScaleTrainer(o = {}) {
     }
   }, '부르는 음을 건반에 초록색으로, 맞는지는 아래 막대로 보여 줘요. 이어폰을 끼면 더 정확해요.', 'mic');
   const paint = () => {
-    const p = pat(), top = root + Math.max(...p.steps);
-    nowBox.replaceChildren(h('b', null, noteName(root)), h('span', null, ` (${noteSci(root)})에서 시작`), h('span', { class: 'hint' }, ` · 가장 높은 음 ${noteName(top)}`));
-    again.replaceChildren(...(playing ? [icon('stop', 18), '멈추기'] : [icon('play', 18), lastTop != null ? '다시' : '듣기']));
-    down.disabled = root <= SCALE_LO; up.disabled = root >= SCALE_HI;
+    const p = pat(), bk = bookOf(p.id), v = bk && bk.v ? bk.v[Math.min(vi, bk.v.length - 1)] : null;
+    const say = v ? h('span', { class: 'sc-say' }, ` · ${v[1]}${v[2] && v[2] !== v[1] ? ` (${v[2]})` : ''}`) : null;
+    if (run) {
+      const n = run.seq.length, i = Math.min(run.i, n - 1), upN = (n + 1) / 2;
+      const dir = n === 1 ? '' : i < upN - 1 ? '▲ 올라가요' : i === upN - 1 ? '꼭대기' : '▼ 내려와요';
+      nowBox.replaceChildren(...[h('b', null, noteName(root)), h('span', null, '에서'), say, h('span', { class: 'hint' }, ` · ${dir ? `${dir} ` : ''}${i + 1}/${n}번째`)].filter(Boolean));
+    } else {
+      const seq = T.auto ? autoSeq(base) : [base], topRoot = Math.max(...seq);
+      nowBox.replaceChildren(...[h('b', null, noteName(base)), h('span', null, ` (${noteSci(base)})에서 시작`), say,
+        h('span', { class: 'hint' }, T.auto && seq.length > 1 ? ` · 반음씩 ${topRoot - base}번 올라갔다 내려와요 (${seq.length}번)` : ` · 가장 높은 음 ${noteName(base + span())}`)].filter(Boolean));
+    }
+    const c = ceil();
+    topRow.hidden = !T.auto;
+    topName.textContent = `${noteName(c)} (${noteSci(c)})`;
+    topDn.disabled = c <= SCALE_LO + 2; topUp.disabled = c >= SCALE_TOP;
+    topHint.textContent = base + span() > c ? '첫 번째 음보다 낮아서 한 번만 나와요' : T.top == null ? (bestM != null && bestM > base + span() ? '내 최고음까지 (바꿀 수 있어요)' : '처음보다 5음 위까지 (바꿀 수 있어요)') : '';
+    again.replaceChildren(...(playing ? [icon('stop', 18), '멈추기'] : [icon('play', 18), T.auto ? '시작' : lastTop != null ? '다시' : '듣기']));
+    down.disabled = base <= SCALE_LO; up.disabled = base >= SCALE_HI;
     /* buttons that change what they do keep the focus */
     const a = document.activeElement, fk = a && extra.contains(a) ? a.dataset.fk : null;
     const e = S.days[date];
     const dl = o.drillId ? drillList(date).find(d => d.id === o.drillId) : null;
     const canHigh = lastTop != null && lastTop >= HIGH_MIN && lastTop <= HIGH_MAX && !(e && e.high != null && e.high >= lastTop);
     extra.replaceChildren(...[
-      dl ? h('button', { class: 'btn blue sm', 'data-fk': 'sc-drill', disabled: dl.done >= dl.target, onclick: () => { bump(date, dl.id, 1); paint(); } }, dl.done >= dl.target ? [icon('check', 16), `${dl.name} 다 했어요`] : [icon('plus', 16), `${dl.name} 1회 체크 (${dl.done}/${dl.target})`]) : null,
+      dl ? h('button', { class: 'btn blue sm', 'data-fk': 'sc-drill', disabled: dl.done >= dl.target, onclick: () => { bump(date, dl.id, 1); nextPat(); paint(); } }, dl.done >= dl.target ? [icon('check', 16), `${dl.name} 다 했어요`] : [icon('plus', 16), `${dl.name} 1회 체크 (${dl.done}/${dl.target})`]) : null,
       canHigh ? h('button', { class: 'btn soft sm', 'data-fk': 'sc-high', onclick: () => {
-        const d = ensureDay(date), prev = d.high, v = lastTop;
-        d.high = v; touch(date); softRender(); paint();
-        toast(`${fmtMD(date)} 최고음: ${noteName(v)}`, { action: '되돌리기', onAction: () => { const d2 = ensureDay(date); d2.high = prev; touch(date); softRender(); paint(); } });
+        const d = ensureDay(date), prev = d.high, v2 = lastTop;
+        d.high = v2; touch(date); softRender(); paint();
+        toast(`${fmtMD(date)} 최고음: ${noteName(v2)}`, { action: '되돌리기', onAction: () => { const d2 = ensureDay(date); d2.high = prev; touch(date); softRender(); paint(); } });
       } }, icon('flag', 16), `최고음으로 적기: ${noteName(lastTop)}`) : null].filter(Boolean));
     if (fk) { const el = $(`[data-fk="${fk}"]`, extra); (el && !el.disabled ? el : again).focus({ preventScroll: true }); }
     paintSteps(); paintKeys(); drawTune();
   };
   const choose = id => {
     if (curPat === id) return;
-    curPat = id;
+    curPat = id; vi = 0;
     if (T.pat !== id) { T.pat = id; touchSettings(); } /* only a pick you made is kept for next time */
     stop();
     chipEls.forEach((b, k) => b.setAttribute('aria-pressed', String(k === id)));
-    drawSteps(); drawKeys(); paint();
+    drawInfo(); drawSteps(); drawKeys(); paint();
   };
-  const afterBuild = () => { curPat = T.pat; drawChips(); drawSteps(); drawKeys(); paint(); };
+  /* a routine item's next check may be another exercise (립롤 1번 → 3번) */
+  const nextPat = () => {
+    const nx = o.drillId ? drillPat(date, o.drillId) : null;
+    if (nx && nx !== curPat) { curPat = nx; vi = 0; chipEls.forEach((b, k) => b.setAttribute('aria-pressed', String(k === nx))); drawInfo(); drawSteps(); drawKeys(); showChip(); }
+  };
+  const afterBuild = () => { curPat = T.pat; drawChips(); drawInfo(); drawSteps(); drawKeys(); paint(); };
+  /* one round from r: the exercise once, with 도 = r */
+  async function playRound(r, onDone) {
+    const p = pat(), bk = bookOf(p.id);
+    root = r;
+    step = -1; pass = '';
+    lastTop = Math.max(lastTop != null && run ? lastTop : -1, root + span());
+    paint();
+    showRange(root + Math.min(0, ...p.steps), root + span());
+    const ok = await Synth.play(root, p.steps, {
+      bpm: T.bpm, chord: T.chord, echo: T.echo, d: bk && bk.d, tie: bk && bk.tie, st: bk && bk.st, glide: bk && bk.glide,
+      onStep: (i, ps) => { step = i; pass = ps; stepAt[i] = performance.now(); paintSteps(); paintKeys(); drawTune(); },
+      onEnd: fin => onDone(fin)
+    });
+    if (!ok && playing && root === r && !Sound.get()) { playing = false; run = null; root = base; paint(); toast('이 폰에서는 소리를 낼 수 없어요'); }
+  }
   async function start(m) {
     if (m < SCALE_LO || m > SCALE_HI) return;
     resumeQuiet();
-    root = m;
+    base = m;
     if (T.root !== m) { T.root = m; touchSettings(); }
     Player.stopAll();
-    const p = pat();
-    step = -1; pass = '';
-    lastTop = root + Math.max(...p.steps);
-    playing = true;
-    paint();
-    showRange(root + Math.min(0, ...p.steps), lastTop);
-    const ok = await Synth.play(root, p.steps, {
-      bpm: T.bpm, chord: T.chord, echo: T.echo,
-      onStep: (i, ps) => { step = i; pass = ps; stepAt[i] = performance.now(); paintSteps(); paintKeys(); drawTune(); },
-      onEnd: () => { playing = false; step = -1; pass = ''; paint(); }
+    Synth.stop();
+    playing = true; lastTop = null;
+    const my = run = T.auto ? { seq: autoSeq(m), i: 0 } : null;
+    const next = () => playRound(my ? my.seq[my.i] : m, fin => {
+      if (!fin || run !== my) return;
+      /* 시작한 날: the first day a whole round of a book exercise was sung (not just tried) */
+      const bk = bookOf(curPat), L = bk && S.settings.book.log[bk.no];
+      if (bk && date === todayStr() && !(L && L.s)) { S.settings.book.log[bk.no] = Object.assign(L || {}, { s: date }); touchSettings(); drawInfo(); }
+      if (my && ++my.i < my.seq.length) {
+        /* a short breath between rounds (the chord, when on, leads into the next one) */
+        setTimeout(() => { if (run === my && playing) next(); }, T.chord ? 350 : Math.round(60000 / T.bpm));
+        return;
+      }
+      playing = false; step = -1; pass = ''; run = null; root = base;
+      /* a whole round up and back down is one check of the routine item */
+      if (my && o.drillId) {
+        const dl = drillList(date).find(d => d.id === o.drillId);
+        if (dl && dl.done < dl.target) { bump(date, dl.id, 1); nextPat(); }
+      }
+      paint();
     });
-    if (!ok && playing && root === m && !Sound.get()) { playing = false; paint(); toast('이 폰에서는 소리를 낼 수 없어요'); }
+    next();
   }
-  function stop() { Synth.stop(); playing = false; step = -1; pass = ''; paint(); }
+  function stop() { run = null; Synth.stop(); playing = false; step = -1; pass = ''; root = base; paint(); }
   const onVis = () => { if (document.visibilityState === 'hidden') { stop(); if (Tuner.on()) { Tuner.stop(); setSwitch(false); sung = null; drawTune(); } } };
   document.addEventListener('visibilitychange', onVis);
-  drawChips(); drawSteps(); drawKeys(); paint();
+  drawChips(); drawInfo(); drawSteps(); drawKeys(); paint();
   openSheet({
     title: '스케일 연습',
     body: h('div', { class: 'scale' },
-      chips, stepsBox, nowBox, kbWrap, tuneBox,
+      chipBox, infoBox, stepsBox, nowBox, kbWrap, tuneBox,
       h('div', { class: 'sc-ctrl' }, down, again, up),
+      topRow,
       extra,
+      ToggleRow('자동으로 오르내리기', T.auto, v => { stop(); T.auto = v; touchSettings(); paint(); }, '누른 음에서 시작해 반음씩 꼭대기 음까지 올라갔다가 다시 반음씩 내려와요. 루틴 항목에서 열면 한 번 다 오르내릴 때 1회 체크돼요.', 'repeat'),
       h('div', { class: 'field', style: 'margin:16px 0 4px' }, h('span', { class: 'lbl' }, '빠르기'), tempo),
       ToggleRow('시작 전에 기준 화음', T.chord, v => { T.chord = v; touchSettings(); }, '스케일 전에 첫 음의 화음을 들려줘요', 'music'),
       ToggleRow('따라 부르기 박자', T.echo, v => { T.echo = v; touchSettings(); }, '피아노가 끝나면 같은 박자를 한 번 더 짚어 줘요. 들은 다음 따라 부르는 연습이에요.', 'repeat'),
       tuneRow,
-      h('p', { class: 'hint', style: 'margin-top:8px' }, '건반을 누르면 그 음을 ‘도’로 삼아 스케일이 한 번 나와요. 따라 부른 다음 ‘반음’ 버튼으로 반음씩 올리거나 내려 보세요.', bestM != null ? ' 빨간 점은 지금까지 낸 최고음이에요.' : '')),
-    onClose: () => { Synth.stop(); Tuner.stop(); document.removeEventListener('visibilitychange', onVis); }
+      h('p', { class: 'hint', style: 'margin-top:8px' }, '건반을 누르면 그 음을 ‘도’로 삼아 시작해요. 책: 피아노 끝까지 올라갈 필요 없어요. 힘이 들어가거나 연결이 끊기면 바로 멈추세요.', bestM != null ? ' 빨간 점은 지금까지 낸 최고음이에요.' : '')),
+    onClose: () => { run = null; Synth.stop(); Tuner.stop(); document.removeEventListener('visibilitychange', onVis); }
   });
-  requestAnimationFrame(centerRoot);
+  requestAnimationFrame(() => { centerRoot(); showChip(); });
 }
 /* your own exercise, built from the notes as sung from 도 */
 function openScaleBuilder(existing, onDone) {
@@ -2136,8 +2311,8 @@ function StopCard(date) {
   else R[0].inline = h('button', { class: 'link danger', 'data-fk': 'stop-1', 'aria-label': '지금 목이 긁히거나 따끔해요, 오늘은 끝내기', onclick: () => markStop(date, true) }, '지금 그래요');
   /* 2: 끝난 후 목 상태 5점 이하 → 다음 날 ①~③단계만 */
   const rest = restInfo(date), yd = addDays(date, -1), y = S.days[yd];
-  R[1].hint = '①~③단계 = 몸 풀기·호흡·빨대 발성';
-  const steps13 = '①~③단계(몸 풀기·호흡·빨대 발성)만';
+  R[1].hint = `①~③단계 = ${LIGHT_NAMES}`;
+  const steps13 = `①~③단계(${LIGHT_NAMES})만`;
   const guideLink = routineOn() ? null : link('stop-steps', '루틴 보기', openGuide);
   if (rest != null) Object.assign(R[1], { on: true, st: `어제 끝난 후 목 상태 ${rest}점 → 오늘은 ${steps13} 해요`, act: [link('stop-yday', '어제 기록', () => goDate(yd)), guideLink] });
   else if (e && e.after != null && e.after <= 5) Object.assign(R[1], { on: true, st: `오늘 끝난 후 목 상태 ${e.after}점 → 내일은 ${steps13} 해요`, act: guideLink });
@@ -2191,7 +2366,7 @@ function AfterGrid(date, onPick) {
 /* 5점 이하 → the next day only steps ①~③; said from the point of view of today */
 function afterLow(date) {
   const t = todayStr(), when = date === t ? '내일은' : date === addDays(t, -1) ? '오늘은' : '다음 날은';
-  return `5점 이하예요. ${when} ①~③단계만 해요 (몸 풀기·호흡·빨대 발성).`;
+  return `5점 이하예요. ${when} ①~③단계만 해요 (${LIGHT_NAMES}).`;
 }
 function openAfterSheet(date) {
   const body = h('div', { class: 'after-sheet' });
@@ -2325,7 +2500,7 @@ function DrillSec(date) {
   const hints = [];
   if (rOn) {
     if (rest != null) hints.push(h('p', { class: 'drill-hint warn' }, isToday ? `오늘은 ①~③단계만 해요 (어제 끝난 후 목 상태 ${rest}점)` : `이 날은 ①~③단계만 한 날 (전날 끝난 후 목 상태 ${rest}점)`));
-    else hints.push(h('p', { class: 'drill-hint' }, '노래 전 루틴 약 28분 · 발음 찾기 5분 ', h('button', { class: 'link', 'data-fk': 'drills-guide', onclick: openGuide }, '전체 보기')));
+    else hints.push(h('p', { class: 'drill-hint' }, `노래 전 루틴 약 ${RT_MIN}분 · Singing for the Stars `, h('button', { class: 'link', 'data-fk': 'drills-guide', onclick: openGuide }, '전체 보기')));
   }
   if (e && e.stop) hints.push(h('p', { class: 'drill-hint warn' }, '목이 긁히거나 따끔해서 끝낸 날이에요'));
   let body;
@@ -2361,7 +2536,7 @@ function DrillSec(date) {
     hints,
     all ? Stamp(S.justDone === date) : null,
     body,
-    !rOn && isToday ? h('button', { class: 'link rt-insert', 'data-fk': 'rt-insert', onclick: openRoutineInsert }, '강의에서 정리한 노래 전 루틴 넣기 (약 28분) ›') : null);
+    !rOn && isToday ? h('button', { class: 'link rt-insert', 'data-fk': 'rt-insert', onclick: openRoutineInsert }, `책(Singing for the Stars)으로 짠 노래 전 루틴 넣기 (약 ${RT_MIN}분) ›`) : null);
 }
 function DrillRow(date, d) {
   const complete = d.done >= d.target;
@@ -2382,6 +2557,7 @@ function DrillRow(date, d) {
   const goalSec = rOn && d.id === hissId() ? hissSec(date) : rOn && d.id === pantId() ? PR.PANT_SEC : null;
   const goalTxt = goalSec == null ? null : d.id === hissId() ? `${date === todayStr() ? '이번 주' : '그 주'} 목표 ${goalSec}초` : `목표 ${goalSec}초`;
   const pronTab = rt && rt.pron ? rt.pron : (!rt && /발음/.test(d.name) ? 'A' : null);
+  const bk = rt && rt.book ? bookNow() : null, bkLog = bk ? S.settings.book.log[bk.no] : null;
   const keys = hasKeys(d);
   const isToday = date === todayStr();
   return h('div', { class: 'drill' + (complete ? ' done' : '') + (rOn && grpOf(d.id) && grpOf(d.id) !== 'rx' ? ' rt' : '') },
@@ -2394,11 +2570,14 @@ function DrillRow(date, d) {
     h('div', { class: 'drill-bottom' },
       h('span', { class: 'drill-rec' },
         ph ? h('span', { class: 'ph' }, `지금: ${ph.label}${ph.n > 1 ? ` (${ph.i}/${ph.n})` : ''}`) : null,
+        bk ? h('span', { class: 'ph' }, `지금: ${bk.no}번 ${bk.name}`) : null,
+        bk && bkLog && bkLog.s ? h('span', null, `${fmtMD(bkLog.s)}부터`) : null,
         goalTxt ? h('span', { class: 'goal' }, goalTxt) : null,
         todayBest != null ? h('span', null, `오늘 최고 ${fmtSec(todayBest)}`) : null, best ? h('span', null, `최고 기록 ${fmtSec(best.sec)}`) : null),
       h('div', { class: 'drill-acts' },
         h('button', { class: 'btn soft sm sq', 'data-fk': `dr-${d.id}-minus`, 'aria-label': `${d.name} 체크 하나 지우기`, disabled: d.done === 0, onclick: () => bump(date, d.id, -1) }, icon('minus', 18)),
-        keys ? h('button', { class: 'btn soft sm' + (d.timed || pronTab ? ' sq' : ''), 'data-fk': `dr-${d.id}-keys`, 'aria-label': `${d.name} 건반으로 연습`, onclick: () => openScaleTrainer({ date, drillId: rt && rt.pron ? undefined : d.id, pat: rt ? 'five' : undefined }) }, icon('piano', 18), d.timed || pronTab ? null : '건반') : null,
+        keys ? h('button', { class: 'btn soft sm' + (d.timed || pronTab ? ' sq' : ''), 'data-fk': `dr-${d.id}-keys`, 'aria-label': `${d.name} 건반으로 연습`, onclick: () => openScaleTrainer({ date, drillId: rt && rt.pron ? undefined : d.id, pat: rt ? drillPat(date, d.id) || undefined : undefined }) }, icon('piano', 18), d.timed || pronTab ? null : '건반') : null,
+        rt && rt.song ? h('button', { class: 'btn soft sm', 'data-fk': `dr-${d.id}-song`, 'aria-label': '노래에 적용하는 방법 (27~30번) 보기', onclick: openSongTips }, '방법') : null,
         pronTab ? h('button', { class: 'btn soft sm', 'data-fk': `dr-${d.id}-pron`, 'aria-label': `${d.name}: 발음 찾기 열기`, onclick: () => openPron(date, pronTab) }, pronTab === 'C' ? '가사 바꾸기' : rt ? '고르기' : '발음 찾기') : null,
         rt && rt.rec && isToday ? h('button', { class: 'btn soft sm', 'data-fk': `dr-${d.id}-rec`, 'aria-label': '마지막 1회 녹음하기', onclick: () => openRecorder(date) }, h('span', { class: 'dot red' }), '녹음') : null,
         d.timed ? h('button', { class: 'btn soft sm', 'data-fk': `dr-${d.id}-timer`, 'aria-label': `${d.name} 시간 재기${goalSec ? `, 목표 ${goalSec}초` : ''}`, onclick: () => openStopwatch(date, d.id) }, icon('timer', 18), '재기') : null,
@@ -3598,7 +3777,7 @@ function lyricOf(t) {
   m = /[‘'“"]([^’'”"]+)[’'”"]/.exec(t);
   return m ? m[1].trim() : t;
 }
-/* 노래 전 루틴 안내: everything from the lecture in one place */
+/* 노래 전 루틴 안내: the book's routine, cautions and practice log in one place */
 function openGuide() {
   const rOn = routineOn(), wk = hissWeek(todayStr());
   const sec = (title, ...kids) => h('section', { class: 'guide-sec' }, h('h3', null, title), kids);
@@ -3613,22 +3792,42 @@ function openGuide() {
       toast(`히싱 ${i + 1}주차 · 목표 ${sec2}초`);
     }, `guide-wk-${i + 1}`))),
     h('span', { class: 'hint' }, '루틴을 넣은 날부터 7일마다 한 주씩 올라가요. 4주차부터는 35초예요.')) : null;
-  const P = PR.PRON;
   let s = null;
+  /* the book's practice log: every exercise, when it was started and accomplished; a row opens it on the keys */
+  const logList = () => {
+    const B = S.settings.book;
+    return h('ul', { class: 'book-log' }, SK.BOOK.map(bk => {
+      const L = B.log[bk.no] || {}, cur = B.cur === bk.no;
+      const d = L.a ? `해낸 날 ${fmtMD(L.a)}` : L.s ? `${fmtMD(L.s)} 시작` : cur ? '지금 진도' : '';
+      return h('li', { class: (cur ? 'cur' : '') + (L.a ? ' ok' : '') },
+        h('button', { 'aria-label': `${bk.no}번 ${bk.name}${cur ? ', 지금 진도' : ''}${d ? `, ${d}` : ''}, 건반으로 열기`, onclick: () => { closeSheet(s, true); openScaleTrainer({ pat: bk.id }); } },
+          h('span', { class: 'n' }, bk.no), h('span', { class: 't' }, bk.name, h('small', { class: 'hint' }, ` ${bk.sound}`)), h('span', { class: 'd' }, d)));
+    }));
+  };
   const body = h('div', { class: 'guide' },
+    h('p', { class: 'hint' }, 'Singing for the Stars (세스 릭스, Seth Riggs)의 연습으로 짰어요. 히싱·개호흡은 원래 하던 그대로예요.'),
     sec('⛔ 멈춤 규칙', h('ul', null, PR.STOP_RULES.map(t => h('li', null, t)))),
-    sec('노래 전 루틴 (약 28분)', steps, h('p', { class: 'hint' }, '①~③단계 = 몸 풀기 · 호흡 · 빨대 발성 (멈춤 규칙 2번)'), weekSeg),
-    sec('발음 찾기 (루틴 4단계 뒤에 5분)',
-      h('ul', null, P.table.map(([k, j, n]) => h('li', null, `${k}: `, h('b', null, j), n ? ` (${n})` : ''))),
-      h('p', null, h('b', null, `${P.A.title}: `), P.A.lead), h('ul', null, h('li', null, P.A.back), h('li', null, P.A.front), h('li', null, P.A.pick)),
-      h('p', null, h('b', null, `${P.B.title}: `), P.B.lead), h('ul', null, h('li', null, P.B.back), h('li', null, P.B.front), h('li', null, P.B.pick)),
-      h('p', null, h('b', null, `${P.C.title}: `), P.C.lead),
-      h('button', { class: 'btn soft sm', onclick: () => openPron(todayStr(), 'A') }, '발음 찾기 열기')),
+    sec('책의 주의 사항', h('ul', null, PR.CAUTIONS.map(t => h('li', null, t)))),
+    sec(`노래 전 루틴 (약 ${RT_MIN}분)`, steps, h('p', { class: 'hint' }, `①~③단계 = ${LIGHT_NAMES} (멈춤 규칙 2번)`), weekSeg),
+    sec('책의 순서', h('ul', null, SK.PARTS.map(p => h('li', null, h('b', null, `${p.name} (${p.range})`), ' ', p.text)))),
+    sec(`책 진도 (지금 ${S.settings.book.cur}번)`, h('p', { class: 'hint' }, '번호를 누르면 건반에서 열려요. 바르게 되면 건반 화면에서 ‘해냈어요’를 눌러 다음 번호로 넘어가요.'), logList()),
+    sec('3부 노래에 적용 (27~30번)', SongTips()),
     sec('노래할 때 기억할 것', h('ul', null, PR.CUES.map(c => h('li', null, h('b', null, c[0]), ' ', c[1])), h('li', null, PR.CUE_ONE))),
     sec('오늘의 기록', h('p', { class: 'hint' }, '따로 쓰지 않아도 이 자리에 모여요. ‘돌아보기’의 ‘오늘의 기록’에서 빈칸을 바로 채울 수 있어요.'),
       h('ul', null, REC_FIELDS.map(([k, w]) => h('li', null, h('b', null, k), ` → ${w}`)))));
   s = openSheet({ title: '노래 전 루틴 안내', body, full: true, onClose: () => softRender(), foot: rOn ? null : [h('button', { class: 'btn ink', onclick: () => { closeSheet(s, true); openRoutineInsert(); } }, '노래 전 루틴 넣기')] });
 }
+/* 3부: 27~30번, and 29번's vowel table */
+function SongTips() {
+  return h('div', { class: 'song-tips' },
+    h('ol', { class: 'guide-steps' }, PR.SONG.map(t => h('li', null, h('b', null, `${t.no}번 ${t.name}`), h('p', null, t.text)))),
+    h('p', { class: 'lbl', style: 'margin-top:10px' }, '29번 모음 바꾸기 표'),
+    h('div', { role: 'table', 'aria-label': '막히는 모음과 바꿔 볼 모음' },
+      h('div', { class: 'vs-row', role: 'row' }, h('b', { role: 'columnheader' }, '막히는 모음'), h('span', { 'aria-hidden': 'true' }), h('b', { role: 'columnheader' }, '이걸로 시작')),
+      PR.VOWEL_SUB.map(([a, b]) => h('div', { class: 'vs-row', role: 'row' }, h('span', { role: 'cell' }, a), h('span', { 'aria-hidden': 'true' }, '→'), h('span', { role: 'cell' }, b)))),
+    h('p', { class: 'hint' }, '바꾼 모음으로 그 음을 시작한 뒤, 같은 자리에서 원래 모음으로 바꿔요.'));
+}
+function openSongTips() { openSheet({ title: '노래에 적용 (27~30번)', body: SongTips() }); }
 /* ④ 오늘의 기록 → where each line lives in the app */
 const REC_FIELDS = [
   ['날짜 / 연습 시간', '맨 위 ‘연습 시작·끝’'],
@@ -3663,13 +3862,13 @@ function openRoutineInsert() {
   const hiss = findOwn('hiss', /히싱|hiss/i), pant0 = findOwn('pant', /개호흡|pant/i), pant = pant0 !== hiss ? pant0 : null;
   const opts = { hiss5: true, pant2: true, dropOverlap: false, memo: true };
   const oldMemo = [hiss && hiss.memo && hiss.memo !== PR.HISS_MEMO ? `${hiss.name}: ${hiss.memo}` : '', pant && pant.memo && pant.memo !== PR.PANT_MEMO ? `${pant.name}: ${pant.memo}` : ''].filter(Boolean);
-  const overlap = S.settings.drills.filter(d => d.id === 'dr_scale' || d.id === 'dr_diction');
+  const overlap = S.settings.drills.filter(d => d.id === 'dr_scale');
   const newN = PR.ITEMS.length + (hiss ? 0 : 1) + (pant ? 0 : 1);
   let s = null;
   const body = h('div', { class: 'rt-insert-sheet' },
-    h('p', { class: 'lead' }, '강의에서 정리한 노래 전 루틴(약 28분)과 발음 찾기(5분)를 ‘기초 연습’에 단계별로 넣어요.'),
+    h('p', { class: 'lead' }, `Singing for the Stars(세스 릭스)의 연습으로 짠 노래 전 루틴(약 ${RT_MIN}분)을 ‘기초 연습’에 단계별로 넣어요.`),
     h('ul', { class: 'rt-bul' },
-      h('li', null, `① 몸 풀기부터 ⑥ 노래로 옮기기까지, 발음 찾기는 ④ 뒤에 — 새 항목 ${newN}개`),
+      h('li', null, `① 준비부터 ⑤ 노래에 적용까지 — 새 항목 ${newN}개. 책의 스케일 26개는 건반에서 자동으로 오르내려요.`),
       h('li', null, hiss || pant ? `지금 있는 ${[hiss && `‘${hiss.name}’`, pant && `‘${pant.name}’`].filter(Boolean).join('·')} 항목은 그대로 ② 호흡에 들어가요. 최고 기록도 이어져요.` : '‘히싱’·‘개호흡’ 항목도 새로 만들어요.'),
       h('li', null, '피드백 주제에 ‘뒤집힘’·‘조임’을 더해요.'),
       h('li', null, '‘참 잘했어요’ 도장은 루틴을 모두 해야 찍혀요. 끝난 후 목 상태가 5점 이하인 다음 날은 ①~③단계만 하면 돼요.'),
@@ -3677,13 +3876,13 @@ function openRoutineInsert() {
     hiss && hiss.target !== 5 ? ToggleRow('히싱 목표를 5회로', true, v => { opts.hiss5 = v; }, `지금 ${hiss.target}회 · 강의: ×5`) : null,
     pant && pant.target !== 2 ? ToggleRow('개호흡 목표를 2회로', true, v => { opts.pant2 = v; }, `지금 ${pant.target}회 · 강의: 20초×2`) : null,
     oldMemo.length ? ToggleRow('방법 메모를 강의 내용으로', true, v => { opts.memo = v; }, `지금: ${oldMemo.join(' / ')}`) : null,
-    overlap.length ? ToggleRow(`겹치는 ${overlap.map(d => `‘${d.name}’`).join('·')} 빼기`, false, v => { opts.dropOverlap = v; }, '루틴의 빨대 5음·발음 찾기와 겹쳐요. 빼도 지난 기록은 남아요.') : null);
+    overlap.length ? ToggleRow(`겹치는 ${overlap.map(d => `‘${d.name}’`).join('·')} 빼기`, false, v => { opts.dropOverlap = v; }, '루틴의 립롤·책 진도 스케일과 겹쳐요. 빼도 지난 기록은 남아요.') : null);
   const ok = h('button', { class: 'btn ink', onclick: () => {
     closeSheet(s, true);
     const undo = insertRoutine(opts);
     goSection('sec-drills');
     render({ focus: 'grp-r1' });
-    toast('노래 전 루틴을 넣었어요. ① 몸 풀기부터 시작해요', { action: '되돌리기', onAction: undo });
+    toast('노래 전 루틴을 넣었어요. ① 준비부터 시작해요', { action: '되돌리기', onAction: undo });
   } }, '넣기');
   s = openSheet({ title: '노래 전 루틴 넣기', body, foot: [ok] });
 }
@@ -3705,7 +3904,7 @@ function insertRoutine(opts = {}) {
   const added = PR.ITEMS.filter(p => !ds.some(d => d.id === p.id)).map(p => ({ id: p.id, name: p.name, target: p.target, timed: false, memo: p.memo }));
   const rt = PR.ORDER.map(k => (k === '@hiss' ? hiss : k === '@pant' ? pant : ds.find(d => d.id === k) || added.find(d => d.id === k)));
   let others = ds.filter(d => !rt.includes(d));
-  if (opts.dropOverlap) { others.filter(d => d.id === 'dr_scale' || d.id === 'dr_diction').forEach(d => dropToday(d.id)); others = others.filter(d => d.id !== 'dr_scale' && d.id !== 'dr_diction'); }
+  if (opts.dropOverlap) { others.filter(d => d.id === 'dr_scale').forEach(d => dropToday(d.id)); others = others.filter(d => d.id !== 'dr_scale'); }
   S.settings.drills = rt.concat(others);
   const old = S.settings.routine && S.settings.routine.start;
   const usedLately = !!old && Object.keys(S.days).some(d => d >= addDays(today, -14) && Object.keys(S.days[d].drills || {}).some(id => PR.BY_ID[id] && S.days[d].drills[id].done > 0));
@@ -3729,6 +3928,18 @@ function insertRoutine(opts = {}) {
     touchSettings(); S.openGroups.clear(); render();
     toast('노래 전 루틴 넣기를 되돌렸어요');
   };
+}
+/* the lecture's routine (rt_*) was replaced by the book's: swap its items once. 히싱·개호흡 keep their names, counts,
+   memos, records and 히싱 주차; today's unused old items go, ones already done stay counted as finished */
+function migrateRoutine() {
+  const ds = S.settings.drills;
+  if (!ds.some(d => PR.LEGACY_IDS.includes(d.id))) return;
+  const start = S.settings.routine && S.settings.routine.start;
+  ds.forEach(d => { if (PR.LEGACY_IDS.includes(d.id)) dropToday(d.id); });
+  S.settings.drills = ds.filter(d => !PR.LEGACY_IDS.includes(d.id));
+  insertRoutine({ hiss5: false, pant2: false, memo: false });
+  if (start && S.settings.routine) { S.settings.routine.start = start; touchSettings(); }
+  setTimeout(() => toast('노래 전 루틴을 Singing for the Stars 책으로 바꿨어요. 히싱·개호흡은 그대로예요', { action: '보기', onAction: openGuide }), 700);
 }
 function removeRoutine(onDone) {
   const items = S.settings.drills.filter(d => PR.BY_ID[d.id]);
@@ -4495,6 +4706,15 @@ function mergeSettings(cur, inc) {
   inc.scale.custom.forEach(c => { if (!out.scale.custom.some(x => x.id === c.id)) out.scale.custom.push(clone(c)); });
   if (!out.routine && inc.routine) out.routine = clone(inc.routine);
   else if (out.routine && inc.routine) for (const k of ['start', 'hiss', 'pant']) if (!out.routine[k] && inc.routine[k]) out.routine[k] = inc.routine[k];
+  /* 책 진도: the practice log from both (the earlier 시작한 날, the earlier 해낸 날) */
+  if (inc.book && inc.book.log) {
+    out.book = out.book && typeof out.book === 'object' ? out.book : { cur: inc.book.cur, log: {} };
+    out.book.log = out.book.log && typeof out.book.log === 'object' ? out.book.log : {};
+    for (const k in inc.book.log) {
+      const a = out.book.log[k] || (out.book.log[k] = {}), b = inc.book.log[k] || {};
+      for (const f of ['s', 'a']) if (b[f] && (!a[f] || b[f] < a[f])) a[f] = b[f];
+    }
+  }
   inc.songs.forEach(m => {
     const o = out.songs.find(x => x.k === m.k);
     if (!o) out.songs.push(clone(m));
