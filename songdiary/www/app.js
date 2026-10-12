@@ -2512,7 +2512,54 @@ function QuickActions(date) {
   return h('div', { class: 'quick-actions', role: 'group', 'aria-label': '자주 쓰는 기능' },
     h('button', { class: 'quick-action', 'data-fk': 'quick-scale', onclick: () => openScaleTrainer({ date }) }, icon('piano', 23), h('span', null, '스케일'), h('small', null, '바로 연습')),
     h('button', { class: 'quick-action', 'data-fk': 'quick-record', onclick: () => openRecorder(date) }, icon('mic', 23), h('span', null, '녹음'), h('small', null, '내 소리 듣기')),
-    h('button', { class: 'quick-action', 'data-fk': 'quick-note', onclick: () => focusField('memo') }, icon('edit', 23), h('span', null, '오늘 메모'), h('small', null, '느낌 남기기')));
+    h('button', { class: 'quick-action', 'data-fk': 'quick-note', onclick: () => focusField('memo') }, icon('edit', 23), h('span', null, '오늘 메모'), h('small', null, '느낌 남기기')),
+    window.LyricNote ? h('button', { class: 'quick-action', 'data-fk': 'quick-lyrics', onclick: openLyricPicker }, icon('lyrics', 23), h('span', null, '가사 노트'), h('small', null, '기교 표시')) : null);
+}
+/* 가사 노트 from the home screen: start a note for any song (no practice record is made), or reopen one */
+function openLyricPicker() {
+  if (!window.LyricNote) return;
+  const lib = songLib();
+  const metas = S.settings.songs;
+  const metaOf = k => metas.find(x => x.k === k);
+  const titleOf = k => { const m = metaOf(k), L = lib.get(k); return (m && m.title) || (L && L.title) || k; };
+  const artistOf = k => { const m = metaOf(k), L = lib.get(k); return (m && m.artist) || (L && L.artist) || ''; };
+  let sh = null;
+  const start = (rawTitle, pick, forceKey) => {
+    const typed = String(rawTitle || '').trim().slice(0, 60);
+    if (!typed) return;
+    const L = forceKey ? lib.get(forceKey) : findSong(typed, lib);
+    const title = L ? L.title : typed;
+    const key = forceKey || (L ? L.key : normKey(typed));
+    if (!key) return;
+    const m = window.SDUI.songMeta(key);
+    if (!m.title) m.title = title;
+    if (pick && pick.artist && !m.artist) m.artist = pick.artist;
+    if (pick && pick.cat && !m.cat) m.cat = normCat(pick.cat);
+    touchSettings();
+    const artist = m.artist || (L && L.artist) || '';
+    closeSheet(sh);
+    window.LyricNote.open({ key, title, artist });
+  };
+  const inp = h('input', { class: 'input', 'data-autofocus': '', 'data-fk': 'ly-new', placeholder: '노래 제목 (초성도 돼요)', enterkeyhint: 'go', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': '가사 노트를 시작할 노래 제목', maxlength: 60 });
+  const sugg = SongSuggest(inp, { free: true, onPick: p => start(p.title, p), onFree: t => start(t) });
+  bindEnter(inp, () => { if (!inp.isConnected || sugg.takeActive()) return; sugg.cancel(); start(inp.value); });
+  const row = (k, sub, count) => h('button', { class: 'ly-pick-row', 'data-fk': 'lyp-' + k, onclick: () => start(titleOf(k), null, k) },
+    h('span', { class: 'lpr-t' }, titleOf(k)),
+    sub ? h('span', { class: 'lpr-a' }, sub) : null,
+    count != null ? h('span', { class: 'lpr-n' }, `표시 ${count}개`) : null);
+  const mine = metas.filter(m => m.ly && m.ly.text).sort((a, b) => (b.ly.at || 0) - (a.ly.at || 0));
+  const mineKeys = new Set(mine.map(m => m.k));
+  const sung = Array.from(lib.values()).filter(L => !mineKeys.has(L.key)).sort((a, b) => b.last.localeCompare(a.last)).slice(0, 15);
+  const body = h('div', { class: 'ly-pick' },
+    h('div', { class: 'field' }, h('label', { class: 'lbl', for: 'ly-new-i' }, '새 노래로 시작'), inp, sugg,
+      h('p', { class: 'hint' }, '연습 기록에는 올라가지 않아요.')),
+    mine.length ? h('div', { class: 'field' }, h('span', { class: 'lbl' }, '내 가사 노트'),
+      h('div', { class: 'ly-pick-list' }, mine.map(m => row(m.k, artistOf(m.k), window.LyricNote.count ? window.LyricNote.count(m.ly) : 0)))) : null,
+    sung.length ? h('div', { class: 'field' }, h('span', { class: 'lbl' }, '부른 노래'),
+      h('div', { class: 'ly-pick-list' }, sung.map(L => row(L.key, artistOf(L.key), null)))) : null,
+    !mine.length && !sung.length ? h('p', { class: 'hint ly-pick-empty' }, '아직 가사 노트가 없어요. 위에 노래 제목을 적으면 바로 시작할 수 있어요.') : null);
+  inp.id = 'ly-new-i';
+  sh = openSheet({ title: '가사 노트', body });
 }
 /* the day's one main action, right under the date: walk through today's routine */
 function SessionCTA(date) {
