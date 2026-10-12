@@ -727,14 +727,15 @@ body::before{content:"";position:fixed;top:0;left:0;right:0;height:var(--sat);ba
 .sc-instructions{margin-top:18px;border-top:1px solid var(--rule-2);padding-top:14px}
 .sc-instructions>summary{cursor:pointer;min-height:44px;font-weight:600;color:var(--blue)}
 .sc-now b{font-family:var(--font-hand);font-size:24px;line-height:1}
-.kb-wrap{overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:0 -20px;padding:0 20px 4px}
+.kb-wrap{scroll-behavior:auto;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:0 -20px;padding:0 20px 4px}
 .kb-wrap::-webkit-scrollbar{display:none}
 .kb-wrap:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
 .kb{position:relative;height:150px}
 .kw,.kbk{position:absolute;top:0;border:0;padding:0;touch-action:manipulation;-webkit-user-select:none;user-select:none}
-.kw{width:44px;bottom:0;background:linear-gradient(to bottom,var(--key-w) 80%,var(--key-w2));border:1px solid var(--key-line);border-radius:0 0 9px 9px;color:#1C2330;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:0;padding-bottom:8px;font-weight:700;font-size:13px}
+.kw{width:var(--kw,44px);bottom:0;background:linear-gradient(to bottom,var(--key-w) 80%,var(--key-w2));border:1px solid var(--key-line);border-radius:0 0 9px 9px;color:#1C2330;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:0;padding-bottom:8px;font-weight:700;font-size:13px}
 .kw small{font-size:10.5px;font-weight:600;color:#525C70}
-.kbk{width:28px;height:92px;background:var(--key-b);border-radius:0 0 6px 6px;z-index:2;box-shadow:0 2px 3px rgba(0,0,0,.25)}
+.kbk{width:var(--kbw,28px);height:92px;background:var(--key-b);border-radius:0 0 6px 6px;z-index:2;box-shadow:0 2px 3px rgba(0,0,0,.25)}
+.kw.zone{background:linear-gradient(to bottom,var(--key-w) 35%,color-mix(in srgb,var(--key-w) 78%,#8E7BB8))}
 .kw.root{background:linear-gradient(to bottom,var(--key-w) 55%,#C9D6F6)}
 .kbk.root{background:#2E3D66}
 .kw.ext{background:var(--key-w2);opacity:.55}
@@ -1105,3 +1106,11 @@ body.kb .tnav{position:relative;top:auto}
 .book-grp{margin-top:10px}
 .book-grp > .hint{margin:0 0 2px}
 .book-log button .t small{display:block}
+/* 오늘의 강도 and each step's plan line */
+.lv-row{display:grid;gap:4px;margin:0 0 10px}
+.lv-row .lv-hint{margin:0}
+.ses-line{margin:0;font-size:14px;line-height:1.5;color:var(--ink-2);overflow-wrap:anywhere}
+.ses-plan .ses-line{display:block}
+.ses-say{font-size:15px}
+.drill-rec .nudge{flex-basis:100%;overflow-wrap:anywhere}
+.drow-2 .drow-b{flex:1 1 0;min-width:0;line-height:1.35}
