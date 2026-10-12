@@ -15,7 +15,8 @@ const PRESETS = [
   { id: 'minor', name: '단조 5음', steps: [0, 2, 3, 5, 7, 5, 3, 2, 0] }
 ];
 /* ---------- Singing for the Stars (Seth Riggs): every scale in exercises 1~26 ----------
-   The book writes each exercise from C (= 도) and only goes up a semitone at a time; going back down is ours.
+   The book writes each exercise from C (= 도) and mostly goes up a semitone at a time (going back down is ours);
+   dir 'down': the book repeats it a semitone lower each time (12, 25), so auto play only goes down.
    d: length of each note in beats (a quarter note = 1 beat, 3/4 time), tie: notes held on from the one before
    (the vowel changes, the piano doesn't strike again), st: short, detached notes, glide: one sliding tone.
    v: what is sung, as [mark, 한글, book]. start: where the book starts it — low / mid / high (the break) */
@@ -31,8 +32,9 @@ const VOW5 = [['a', '우', 'Oo'], ['b', '오', 'Oh'], ['c', '어', 'Uh'], ['d', 
 const WEE = [['a', '위', 'Wee'], ['b', '기', 'Gee']];
 const MM = [['', '음 (입 다물고)', 'Mm']];
 /* the book's 'Approximate starting pitch' for a tenor, as the 도 of the first round (MIDI: 48 = 1옥 도 C3).
-   12·21·25 are written 8va (an octave lower than sung); 14 has none printed: just below the break */
-const TENOR = { 1: 48, 2: 48, 3: 48, 4: 48, 5: 55, 6: 48, 7: 55, 8: 48, 9: 48, 10: 55, 11: 55, 12: 56, 13: 48,
+   12·21·25 are written 8va (an octave lower than sung; 12 starts on C♯′ = 도+12, so its 도 is C♯4);
+   14 has none printed: just below the break */
+const TENOR = { 1: 48, 2: 48, 3: 48, 4: 48, 5: 55, 6: 48, 7: 55, 8: 48, 9: 48, 10: 55, 11: 55, 12: 61, 13: 48,
   14: 60, 15: 48, 16: 48, 17: 48, 18: 48, 19: 55, 20: 55, 21: 56, 22: 55, 23: 55, 24: 55, 25: 67, 26: 48 };
 const BOOK = [
   { no: 1, good: ['입술·얼굴·목에 들어간 쓸데없는 힘을 빼 줘요', '숨을 너무 세지도 약하지도 않게, 알맞게 쓰는 감각이 생겨요', '낮은 음에서 높은 음까지 끊기지 않고 이어 부르는 길을 닦아요 (매일 몸풀기로 최고)'], name: '입술 떨기 (쭉 이어서)', sound: '“어~” 하며 입술 부르르', steps: ONE5, d: EIGHTHS12, start: 'low',
@@ -56,15 +58,15 @@ const BOOK = [
     text: ['(a) 멈: 올라가도 “맘”으로 입이 벌어지지 않게 끝까지 “멈”. 입천장 뒤쪽은 편히 두고, 높아질수록 소리가 그 뒤로 가게.', '(b)~(e) 거·고·기·쿠는 혀가 움직여서 더 어려워요. “멈”만큼 높이 가지 말고 편한 데까지만.', '이 울먹임은 잠깐 쓰는 도구예요. 나중 단계(“끼익” 소리 연습부터)에서는 버려요. 울대는 억지로 올리지도 내리지도 않는 게 최종 목표예요.'] },
   { no: 8, good: ['울먹이며 “멈”의 효과를 더 넓은 음역에서'], name: '울먹이며 쭉 이어서', sound: '울 것 같은 목소리로', v: CRY, steps: ONE5, d: EIGHTHS12, start: 'low',
     how: '울먹이는 “멈”은 똑같고, 음이 도미솔~ 쭉 이어서 1옥타브 반을 올라갔다 내려와요.', text: [] },
-  { no: 9, good: ['진짜 모음(우·오·어·이·아)으로 고음까지 이어 가는 첫 연습이에요', '고음에서 소리가 “꽥” 하고 넓게 퍼지는 걸 막아 줘요'], name: '부엉이 “후~”', sound: '목 안을 살짝 내린 둥근 소리', v: VOW5, steps: ONE5, d: EIGHTHS12, start: 'low',
-    how: '하품이 막 시작될 때처럼 목 안이 살짝 내려간 상태로 우·오·어·이·아를 불러요. 올라갈수록 부엉이 “후~”처럼 속이 빈 둥근 소리로.',
+  { no: 9, good: ['진짜 모음(우·오·어·이·아)으로 고음까지 이어 가는 첫 연습이에요', '고음에서 소리가 “꽥” 하고 넓게 퍼지는 걸 막아 줘요'], name: '부엉이 “후~”', sound: '살짝 울먹이는 둥근 소리', v: VOW5, steps: ONE5, d: EIGHTHS12, start: 'low',
+    how: '7번에서처럼 살짝 울먹이는 목소리로 우·오·어·이·아를 불러요. 울먹임은 울대가 따라 올라가지 않을 만큼만 아주 조금. 올라갈수록 부엉이 “후~”처럼 속이 빈 둥근 소리로.',
     text: ['높은 음이 바람 새는 소리처럼 약해져도 괜찮아요. 처음부터 끝까지 끊기지 않는 게 중요해요.', '모음은 말할 때 발음 그대로. “오”는 입술을 “우”처럼 작게 모으고 불러야 높은 데서 “와”로 퍼지지 않아요.', '높은 데서는 턱을 아주 살짝만 내려 공간을 줘요. 턱에 힘줘서 붙잡지는 말기.'] },
-  { no: 10, good: ['높은 음을 길게 끌면서도 가슴소리-머리소리 연결을 지키는 힘이 생겨요'], name: '“후~” 꼭대기 길게', sound: '목 안을 살짝 내린 둥근 소리', v: VOW5, steps: [0, 4, 7, 12, 7, 4, 0], d: [1, 1, 1, 4, 1, 1, 3], start: 'mid',
+  { no: 10, good: ['높은 음을 길게 끌면서도 가슴소리-머리소리 연결을 지키는 힘이 생겨요'], name: '“후~” 꼭대기 길게', sound: '살짝 울먹이는 둥근 소리', v: VOW5, steps: [0, 4, 7, 12, 7, 4, 0], d: [1, 1, 1, 4, 1, 1, 3], start: 'mid',
     how: '부엉이 “후~” 소리는 똑같고, 맨 꼭대기 음을 길게 끌어요.', text: [] },
   { no: 11, good: ['고음에서 힘을 “놓는” 감각이 생겨요 (꽉 쥐면 다음 음이 안 맞아요)', '음이 크게 뛰는 노래 부분에 대비가 돼요'], name: '“후~” 건너뛰며', sound: '바람 섞인 둥근 소리', v: VOW5, steps: JUMP2, d: EIGHTHS12, start: 'mid',
     how: '부엉이 “후~”처럼 바람 섞인 소리로, 음을 하나씩 건너뛰며 불러요: 도 → 솔 → 미 → 높은도…',
     text: ['뛸 때마다 앞 음에 준 힘을 “탁” 놓아야 다음 음에 맞출 수 있어요.', '다만 너무 놓아서 가성(힘 빠진 여린 소리)으로 끊기지는 않게, 가슴소리가 머리소리로 이어지게 해요.', '이어지는 느낌을 알면 이 연습들은 그만해요. 입술 떨기·혀 굴리기는 계속 몸풀기로 써요.'] },
-  { no: 12, good: ['목이 너무 굳어서 연결이 안 되는 사람용이에요', '가성으로 높은 데의 편안함을 먼저 느끼고, 그걸 가슴소리에 이어 붙여요'], name: '가성에서 내려오기', sound: '여린 가성으로 “위~”', v: WEE, steps: [12, 7, 4, 0], d: [1, 1, 1, 3], start: 'high',
+  { no: 12, good: ['목이 너무 굳어서 연결이 안 되는 사람용이에요', '가성으로 높은 데의 편안함을 먼저 느끼고, 그걸 가슴소리에 이어 붙여요'], name: '가성에서 내려오기', sound: '여린 가성으로 “위~”', v: WEE, steps: [12, 7, 4, 0], d: [1, 1, 1, 3], start: 'high', dir: 'down',
     how: '가성(남자가 여자 목소리 흉내 낼 때 나는 가늘고 힘 빠진 소리)으로 “위”를 시작해서, 내려오며 가슴소리로 넘어가요. “쿵” 떨어지듯 넘어가지 말고 부드럽게.',
     text: ['할 때마다 가슴소리가 조금 더 또렷이 들어오게 해요. 가슴소리가 들어오는 순간 당황해서 움켜쥐지 말고 가볍게.', '(b) “기”는 혀 때문에 “위”만큼 높이 시작하기 어려워요.', '책은 한 번 하고 반음 내려 반복해요. 가슴소리↔머리소리가 이미 매끄럽게 이어지면 이 연습은 건너뛰어도 돼요.'] },
   { no: 13, good: ['가슴소리↔머리소리를 오가는 길을 닦아서 노래 중 목소리가 뒤집히는 걸 줄여요'], name: '가슴↔머리 오가기', sound: '말소리로 “위~” 시작', v: WEE, steps: ONE5, d: EIGHTHS12, start: 'low',
@@ -101,7 +103,7 @@ const BOOK = [
     text: ['모음을 과장해서 크게 만들지 않기.'] },
   { no: 24, good: ['더 어렵게: 모음 셋을 바꿔도 목 자세 유지하기'], name: '한 음에 모음 셋', sound: '한 음 끄며 모음 셋', v: [['a', '우 → 오 → 아', 'Oo → Oh → Ah'], ['b', '이 → 우 → 어', 'Ee → Oo → Uh'], ['c', '우(풋) → 어 → 아', 'Oo(foot) → Uh → Ah']], steps: [0, 4, 7, 12, 12, 12, 7, 4, 0], d: [1, 1, 1, 3, 3, 4, 1, 1, 3], tie: [4, 5], start: 'mid',
     how: '한 음을 끄는 동안 모음을 세 번 바꿔요(우→오→아 등). 입 안 모양은 그대로, 혀와 입술만 살짝.', text: [] },
-  { no: 25, good: ['가장 뒤집히기 쉬운 음에서 바로 시작해도 안 무너지게 돼요', '노래에서 그 음이 갑자기 나와도 편하게 낼 수 있어요'], name: '뒤집히는 곳에서', sound: '전환 지점에서 바로 시작', v: [['a', '우 → 어', 'Oo → Uh'], ['b', '우 → 오', 'Oo → Oh'], ['c', '이 → 에이', 'Ee → Ay']], steps: [0, 0, -1, -1, -2, -2], d: [3, 3, 3, 3, 3, 3], tie: [1, 3, 5], start: 'high',
+  { no: 25, good: ['가장 뒤집히기 쉬운 음에서 바로 시작해도 안 무너지게 돼요', '노래에서 그 음이 갑자기 나와도 편하게 낼 수 있어요'], name: '뒤집히는 곳에서', sound: '전환 지점에서 바로 시작', v: [['a', '우 → 어', 'Oo → Uh'], ['b', '우 → 오', 'Oo → Oh'], ['c', '이 → 에이', 'Ee → Ay']], steps: [0, 0, -1, -1, -2, -2], d: [3, 3, 3, 3, 3, 3], tie: [1, 3, 5], start: 'high', dir: 'down',
     how: '목소리가 가장 잘 뒤집히는 곳(테너는 보통 2옥 레~솔) 한가운데서 바로 시작해요. 시작하기 가장 어려운 자리예요.',
     text: ['소리가 반은 입 앞, 반은 입천장 뒤에서 울리는 걸 받아들여요.', '머리소리 쪽으로 얇게 시작하고, 가슴소리는 조금씩 섞여 들어오게. 갑자기 가슴소리로 “쿵” 떨어지지 않게.', '턱 밑이 조금 움직여도 괜찮아요. 익숙해지면 풀려요. 책은 한 번에 반음씩 내려가며 해요.'] },
   { no: 26, good: ['모음마다 약한 곳을 찾아 고르게 다듬는 마무리 점검이에요'], name: '모음 하나씩 끝까지', sound: '모음마다 낮은 데부터 높은 데까지', v: [['a', '아', 'Ah'], ['b', '에이', 'Ay'], ['c', '이', 'Ee'], ['d', '오', 'Oh'], ['e', '애', 'A'], ['f', '우', 'Oo'], ['g', '우(풋)', 'Oo(foot)']], steps: ONE5, d: EIGHTHS12, start: 'low',
@@ -183,5 +185,11 @@ function roundSequence(base, ceiling, direction = 'updown', current = null, retu
   const up = path(from, ceiling);
   return up.concat(path(ceiling, base).slice(1));
 }
-window.ScaleKit = { PRESETS, BOOK, PARTS, WORDS, START, SOLFA, degName, BUILD_KEYS, detectPitch, midiOf, roundSequence };
+/* an exercise the book repeats lower (dir 'down'): from the start a semitone down each round, never below lo */
+function downSequence(start, lo, rounds = 5) {
+  const out = [];
+  for (let r = start; out.length < rounds && r >= lo; r--) out.push(r);
+  return out.length ? out : [start];
+}
+window.ScaleKit = { PRESETS, BOOK, PARTS, WORDS, START, SOLFA, degName, BUILD_KEYS, detectPitch, midiOf, roundSequence, downSequence };
 })();

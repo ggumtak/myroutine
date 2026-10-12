@@ -27,7 +27,7 @@ const ITEMS = [
   { id: 'rs_ready', g: 'r1', name: '자세·긴장 풀기', target: 1, memo: '머리·가슴·골반 한 줄로 · 심호흡·스트레칭 · 조용한 곳' },
   { id: 'rs_lip', g: 'r3', name: '입술 떨기 (립롤)', target: 2, memo: '입술을 “부르르” 떨면서 피아노 따라 부르기 · 2가지 1번씩', ph: [['도미솔~ 쭉 이어서 오르내리기', 1], ['도·솔·미·높은도 건너뛰며 오르내리기', 1]], pats: ['b01', 'b03'], keys: true },
   { id: 'rs_trill', g: 'r3', name: '혀 굴리기 (트릴)', target: 2, memo: '혀를 “드르르” 굴리면서 피아노 따라 부르기 · 2가지 1번씩', ph: [['도미솔~ 쭉 이어서 오르내리기', 1], ['도·솔·미·높은도 건너뛰며 오르내리기', 1]], pats: ['b02', 'b04'], keys: true },
-  { id: 'rs_book', g: 'r4', name: '오늘의 단계 연습', target: 3, memo: '앱이 골라 준 연습 하나를 피아노 따라 3번', book: true, keys: true },
+  { id: 'rs_book', g: 'r4', name: '오늘의 단계 연습', target: 3, memo: '앱이 골라 준 연습을 피아노 따라 (강도에 따라 횟수·복습이 바뀌어요)', book: true, keys: true },
   { id: 'rs_song', g: 'r5', name: '연습곡 고음에 적용', target: 4, memo: '노래에서 막히는 고음 한 곳을 4가지 방법으로 한 번씩', ph: [['몸 숙이며 부르기', 1], ['살짝 울먹이며 부르기', 1], ['모음 바꿔서 부르기', 1], ['키 올려서 부르기', 1]], song: true }
 ];
 const BY_ID = {};
@@ -47,8 +47,8 @@ const BOOK_FIRST = 5, BOOK_LAST = 26;
 const STEPS = [
   { name: '준비', min: 2, text: '바르게 서기: 머리·가슴·골반이 한 줄로, 짝다리·구부정 X / 숨을 크게 세 번 / 목·어깨 천천히 돌리기', why: '몸에 힘이 들어가 있으면 그 힘이 목으로 가요. 긴장을 풀고 시작해야 나머지 연습이 제대로 돼요.' },
   { name: '호흡', min: 6, text: '히싱 “스—” 30~50% 힘으로 ×5 (1주 20초→2주 25초→3주 30초→4주 35초) / 개호흡 20초×2 (어지러우면 중단)', why: '숨을 고르고 길게 내보내는 힘을 길러요. 원래 하던 그대로예요.' },
-  { name: '입술 떨기·혀 굴리기', min: 6, text: '입술 떨기(립롤): 도미솔~ 쭉 이어서 한 번, 건너뛰며 한 번 / 혀 굴리기(트릴): 똑같이 두 가지를 한 번씩 / 피아노가 한 바퀴마다 반음씩 올라갔다가 다시 내려와요', why: '목에 힘을 안 주고 낮은 음부터 높은 음까지 이어 부르는 몸풀기예요. 책에서도 매일 하라고 해요.' },
-  { name: '단계 연습', min: 8, text: '앱이 골라 준 연습 1개를 피아노 따라 ×3 / 편해지면 ‘이제 잘 돼요’ → 다음 연습으로', why: '책에 나오는 연습을 쉬운 것부터 하나씩 익혀요. 매일 앱이 골라 주는 하나만 하면 돼요.' },
+  { name: '입술 떨기·혀 굴리기', min: 6, text: '입술 떨기(립롤): 도미솔~ 쭉 이어서 한 번, 건너뛰며 한 번 / 혀 굴리기(트릴): 똑같이 두 가지를 한 번씩 / 피아노가 한 바퀴마다 반음씩 올라갔다가 다시 내려와요', why: '목에 힘을 안 주고 낮은 음부터 높은 음까지 이어 부르는 몸풀기예요. 책도 1~4번은 계속 써도 좋은 몸풀기라고 해요.' },
+  { name: '단계 연습', min: 8, text: '앱이 골라 준 연습 1개를 피아노 따라 ×3 (오늘의 강도에 따라 2~4번) / 기본·도전이면 이미 잘 되는 연습 하나씩 복습 ×1 / 편해지면 ‘이제 잘 돼요’ → 다음 연습으로', why: '책에 나오는 연습을 쉬운 것부터 하나씩 익혀요. 매일 앱이 골라 주는 하나만 하면 돼요.' },
   { name: '노래에 적용', min: 5, text: '연습곡에서 막히는 음 한 곳 / 몸 숙이기 → 살짝 울먹이기 → 모음 바꾸기 → 키 올려 부르기 (책 27~30번)', why: '연습에서 익힌 걸 실제 노래에 옮겨요.' }
 ];
 /* how to practise, in plain words (루틴 안내 맨 위, 따라 하기 첫 화면) */
@@ -57,6 +57,7 @@ const PLAN = [
   '책에는 1~30번이 있지만 매일 다 하지 않아요. 매일 하는 건 ① 몸풀기 1~4번, ② 앱이 골라 주는 단계 연습 1개, ③ 노래에 적용(27~30번)이에요.',
   '단계 연습은 5번부터 26번까지 쉬운 것부터 하나씩이에요. 지금 연습이 편해지면(목에 힘 안 들어가고, 처음부터 끝까지 소리가 안 끊기면) ‘이제 잘 돼요’를 눌러 다음 번호로 넘어가요. 하루 만에 넘어가도, 1~2주 걸려도 괜찮아요.',
   '처음 몇 단계는 가슴소리와 머리소리가 “이어지는 느낌”을 익히는 연습이에요. 이미 고음이 끊기거나 뒤집히지 않고 이어지면 ‘고음이 이미 잘 이어져요’를 눌러 건너뛰어도 돼요.',
+  '오늘의 강도(가볍게·기본·도전)로 단계 연습 횟수와 복습 수를 정해요. 복습은 ‘잘 돼요’ 한 연습 중 가장 오래 안 한 것부터 골고루 돌아가요. 목 상태가 낮았던 다음 날은 저절로 가볍게예요.',
   '힘들거나 목이 조금이라도 아프면 바로 멈춰요. 크게 부를 필요 없어요.'
 ];
 /* 단계 연습 in groups, so it's clear where you are */
@@ -67,6 +68,51 @@ const STAGES = [
   { from: 19, to: 22, name: '끼익 빼고 진짜 소리로', text: '도움 소리를 빼고 실제 모음으로 불러요' },
   { from: 23, to: 26, name: '모음 바꾸며 다듬기', text: '가사처럼 모음이 바뀌어도 흔들리지 않게 다듬어요' }
 ];
+
+/* 오늘의 강도: reps = ④ 단계 연습's count when the item keeps the routine's own 3 (a count changed in 편집 moves with it),
+   review = how many 잘 돼요 exercises follow it once each. ④'s minutes come from its count (REP_MIN each) */
+const LEVELS = [
+  { k: 'light', name: '가볍게', reps: 2, review: 0, text: '단계 연습 2번만, 짧게' },
+  { k: 'base', name: '기본', reps: 3, review: 1, text: '단계 연습 3번 + 복습 최대 1개' },
+  { k: 'push', name: '도전', reps: 4, review: 2, text: '단계 연습 4번 + 복습 최대 2개' }
+];
+const LEVEL = {};
+LEVELS.forEach(l => { LEVEL[l.k] = l; });
+/* a level by its key (only the three above; 'constructor' and the like are not levels) */
+const levelOf = k => LEVELS.find(l => l.k === k) || null;
+const REP_MIN = 2;
+/* 골고루: 유지 (after 26번) rotates among KEEP_FROM~26; 5~13 come back for review after OLD_DAYS away;
+   NUDGE_DAYS on 5~11 suggests moving on to the “끼익” stage */
+const KEEP_FROM = 17, OLD_DAYS = 14, NUDGE_DAYS = 10, SKIP_TO = 14;
+const dayNo = s => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 864e5;
+/* the last day before `date` an exercise was sung ('' if never): its rounds (R: last, and prev = the day before that),
+   else the book log's 시작한 날 / 해낸 날. today's own rounds don't count, so today's picks don't move while you sing */
+function sungBefore(L, R, date) {
+  let t = '';
+  const take = v => { if (typeof v === 'string' && v < date && v > t) t = v; };
+  if (R) take(R.last && R.last < date ? R.last : R.prev);
+  if (L) { take(L.a); take(L.s); }
+  return t;
+}
+const byOld = (log, rounds, date) => (x, y) => sungBefore(log[x], rounds[x], date).localeCompare(sungBefore(log[y], rounds[y], date)) || x - y;
+/* 복습: exercises marked 잘 돼요 before today, other than today's, least recently sung first.
+   5~13 only come back when nothing from 14 on is mastered yet, or after OLD_DAYS away */
+function reviewPicks(log, rounds, main, date, count) {
+  if (!(count > 0) || !log) return [];
+  rounds = rounds || {};
+  const done = [];
+  for (let no = BOOK_FIRST; no <= BOOK_LAST; no++) if (no !== main && log[no] && log[no].a && log[no].a < date) done.push(no);
+  const late = done.some(no => no >= SKIP_TO);
+  const away = no => { const t = sungBefore(log[no], rounds[no], date); return !t || dayNo(date) - dayNo(t) >= OLD_DAYS; };
+  return done.filter(no => no >= SKIP_TO || !late || away(no)).sort(byOld(log, rounds, date)).slice(0, count);
+}
+/* 유지: the last exercise is done too, so today's one rotates among KEEP_FROM~26, least recently sung first */
+const keeping = book => !!(book && book.cur === BOOK_LAST && book.log && book.log[BOOK_LAST] && book.log[BOOK_LAST].a);
+function keepPick(log, rounds, date) {
+  const all = [];
+  for (let no = KEEP_FROM; no <= BOOK_LAST; no++) all.push(no);
+  return all.sort(byOld(log || {}, rounds || {}, date))[0];
+}
 
 /* 3부 기술 유지: the book's ways to keep speech-level singing inside a song */
 const SONG = [
@@ -135,5 +181,5 @@ function shiftVowels(text) {
   return { text: out.join(''), chars: out, changed };
 }
 
-window.Practice = { STOP_RULES, GROUPS, ITEMS, BY_ID, ORDER, LEGACY_IDS, LEGACY_LIGHT, HISS_MEMO, PANT_MEMO, HISS_SEC, PANT_SEC, BOOK_FIRST, BOOK_LAST, STEPS, PLAN, STAGES, SONG, VOWEL_SUB, CAUTIONS, PRON, CUES, CUE_ONE, V, C, syl, shiftVowels };
+window.Practice = { STOP_RULES, GROUPS, ITEMS, BY_ID, ORDER, LEGACY_IDS, LEGACY_LIGHT, HISS_MEMO, PANT_MEMO, HISS_SEC, PANT_SEC, BOOK_FIRST, BOOK_LAST, STEPS, PLAN, STAGES, LEVELS, LEVEL, levelOf, REP_MIN, KEEP_FROM, OLD_DAYS, NUDGE_DAYS, SKIP_TO, sungBefore, reviewPicks, keeping, keepPick, SONG, VOWEL_SUB, CAUTIONS, PRON, CUES, CUE_ONE, V, C, syl, shiftVowels };
 })();

@@ -1105,3 +1105,11 @@ body.kb .tnav{position:relative;top:auto}
 .book-grp{margin-top:10px}
 .book-grp > .hint{margin:0 0 2px}
 .book-log button .t small{display:block}
+/* 오늘의 강도 and each step's plan line */
+.lv-row{display:grid;gap:4px;margin:0 0 10px}
+.lv-row .lv-hint{margin:0}
+.ses-line{margin:0;font-size:14px;line-height:1.5;color:var(--ink-2);overflow-wrap:anywhere}
+.ses-plan .ses-line{display:block}
+.ses-say{font-size:15px}
+.drill-rec .nudge{flex-basis:100%;overflow-wrap:anywhere}
+.drow-2 .drow-b{flex:1 1 0;min-width:0;line-height:1.35}

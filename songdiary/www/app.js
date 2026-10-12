@@ -174,7 +174,7 @@ const S = {
 };
 
 function defaultSettings() {
-  return { v: 2, title: '나의 소리일기', drills: DEFAULT_DRILLS.map(d => ({ ...d })), tags: DEFAULT_TAGS.slice(), sound: true, haptic: true, theme: 'auto', reminder: { on: false, h: 20, m: 0 }, autoBackup: true, songSearch: true, scale: normScale(null), routine: null, book: normBook(null), songs: [], updatedAt: 0 };
+  return { v: 2, title: '나의 소리일기', drills: DEFAULT_DRILLS.map(d => ({ ...d })), tags: DEFAULT_TAGS.slice(), sound: true, haptic: true, theme: 'auto', reminder: { on: false, h: 20, m: 0 }, autoBackup: true, songSearch: true, scale: normScale(null), routine: null, book: normBook(null), rounds: {}, plan: normPlan(null), songs: [], updatedAt: 0 };
 }
 /* scale practice: chosen exercise, speed, starting chord, last key pressed, your own exercises */
 function normScale(x) {
@@ -202,6 +202,48 @@ function normBook(b) {
     if (o.s || o.a) log[no] = o;
   }
   return { cur: clampInt(b.cur, 1, PR.BOOK_LAST, PR.BOOK_FIRST), log };
+}
+/* 골고루: per exercise (5~26) the last day a whole round was sung, the day before that (prev) and how many rounds (n).
+   its own key, since older apps rebuild book.log and would drop these */
+const ownKey = (o, k) => !!o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
+/* two notes of one exercise as one (also two phones): the most rounds, the latest day, and the latest day before it */
+function joinRound(a, b) {
+  const ds = [], o = {};
+  let n = 0;
+  for (const x of [a, b]) {
+    if (!x || typeof x !== 'object') continue;
+    for (const f of ['last', 'prev']) if (ownKey(x, f) && isDateKey(x[f])) ds.push(x[f]);
+    if (ownKey(x, 'n') && +x.n > 0) n = Math.max(n, clampInt(x.n, 0, 9999, 0));
+  }
+  ds.sort();
+  const top = ds.pop(), pv = ds.filter(d => d < top).pop();
+  if (top) o.last = top;
+  if (pv) o.prev = pv;
+  if (n) o.n = n;
+  return o.last || o.n ? o : null;
+}
+function normRounds(r, book) {
+  const out = {};
+  const add = (k, x) => {
+    const no = +k;
+    if (!(Number.isInteger(no) && no >= PR.BOOK_FIRST && no <= PR.BOOK_LAST)) return;
+    const j = joinRound(out[no], x);
+    if (j) out[no] = j;
+  };
+  if (r && typeof r === 'object' && !Array.isArray(r)) for (const k in r) if (ownKey(r, k)) add(k, r[k]);
+  /* once: what an earlier build of this version kept in book.log */
+  const log = book && typeof book === 'object' && book.log;
+  if (log && typeof log === 'object') for (const k in log) if (ownKey(log, k) && log[k] && typeof log[k] === 'object') add(k, { last: log[k].last, n: log[k].n });
+  return out;
+}
+/* 오늘의 강도 (practice.js LEVELS); at: when it was picked, so phones keep the latest pick. other keys a newer app adds stay */
+function normPlan(p) {
+  p = p && typeof p === 'object' && !Array.isArray(p) ? p : {};
+  const o = {};
+  for (const k in p) if (k !== 'level' && k !== 'at') o[k] = p[k];
+  o.level = PR.levelOf(p.level) ? p.level : 'base';
+  o.at = Number.isFinite(+p.at) && +p.at > 0 ? +p.at : 0;
+  return o;
 }
 /* 노래 전 루틴: start = 히싱 1주차 첫날; hiss / pant = the user's own 히싱·개호흡 items that joined ② 호흡 */
 function normRoutine(r) {
@@ -241,6 +283,8 @@ function normSettings(s) {
     scale: normScale(s.scale),
     routine: normRoutine(s.routine),
     book: normBook(s.book),
+    rounds: normRounds(s.rounds, s.book),
+    plan: normPlan(s.plan),
     songs: Array.isArray(s.songs) ? s.songs.filter(x => x && typeof x.k === 'string').map(x => ({ ...x, k: x.k, artist: String(x.artist || ''), memo: String(x.memo || ''), status: SONG_STATUS.includes(x.status) ? x.status : '', cat: normCat(x.cat) })) : [],
     updatedAt: +s.updatedAt || 0
   };
@@ -1248,7 +1292,7 @@ function editMinutes(date, suggested, note, onCancel) {
 function snapshotDrills(e) {
   if (e.drills && Object.keys(e.drills).length) return;
   e.drills = {};
-  S.settings.drills.forEach(t => { e.drills[t.id] = { name: t.name, target: t.target, done: 0, times: [] }; });
+  S.settings.drills.forEach(t => { e.drills[t.id] = { name: t.name, target: dayTarget(t, e.date || todayStr()), done: 0, times: [] }; });
 }
 function drillList(date) {
   const e = S.days[date];
@@ -1263,7 +1307,7 @@ function drillList(date) {
   }
   const list = S.settings.drills.map(t => {
     const s = snap[t.id];
-    const target = s ? s.target : t.target;
+    const target = s ? s.target : dayTarget(t, date);
     return { id: t.id, name: t.name, memo: t.memo, timed: t.timed, target, done: s ? Math.min(s.done || 0, target) : 0, times: (s && s.times) || [] };
   });
   for (const id in snap) {
@@ -1829,22 +1873,140 @@ const stageOf = no => PR.STAGES.find(g => no >= g.from && no <= g.to) || null;
 function drillPat(date, id) {
   const rt = PR.BY_ID[id];
   if (!rt) return null;
-  if (rt.book) return bookNow().id;
+  if (rt.book) {
+    const d = drillList(date).find(x => x.id === id), plan = bookPlan(date), sl = bookSlots(plan, d ? d.target : plan.target);
+    return SK.BOOK[sl[Math.min(d ? d.done : 0, sl.length - 1)] - 1].id;
+  }
   if (!rt.pats) return null;
   const d = drillList(date).find(x => x.id === id), done = d ? d.done : 0;
   let before = 0;
   for (let i = 0; i < rt.ph.length; i++) { before += rt.ph[i][1]; if (done < before) return rt.pats[i]; }
   return rt.pats[rt.pats.length - 1];
 }
+/* ---------- 오늘의 강도 and 골고루 (practice.js LEVELS, reviewPicks) ---------- */
+const BOOK_RT = PR.ITEMS.find(x => x.book);
+const bookItem = () => S.settings.drills.find(d => d.id === BOOK_RT.id) || null;
+/* a day after a sore throat (멈춤 규칙 2) is 가볍게 without changing the setting */
+const planLevel = date => (restDay(date) ? PR.LEVEL.light : PR.levelOf(S.settings.plan.level) || PR.LEVEL.base);
+/* ④ for a day: its exercise (the one you are on; in 유지 the least recently sung of 17~26), how many times,
+   and the 잘 돼요 exercises reviewed once each after it */
+function bookPlan(date) {
+  const B = S.settings.book, lv = planLevel(date), t = bookItem();
+  const keep = PR.keeping(B), main = keep ? PR.keepPick(B.log, S.settings.rounds, date) : bookNow().no;
+  const reps = Math.max(1, Math.min(99, (t ? t.target : BOOK_RT.target) + lv.reps - BOOK_RT.target));
+  const reviews = PR.reviewPicks(B.log, S.settings.rounds, main, date, lv.review);
+  return { lv, keep, main, reps, reviews, target: Math.min(99, reps + reviews.length) };
+}
+/* the exercise of each ④ check in order; a day's count (fixed once the day starts) trims or pads it */
+function bookSlots(plan, target) {
+  const seq = Array(plan.reps).fill(plan.main).concat(plan.reviews);
+  while (seq.length < target) seq.push(plan.main);
+  return seq.slice(0, Math.max(1, target));
+}
+/* a new day record's count for an item: ④ follows 오늘의 강도 */
+const dayTarget = (t, date) => (t.id === BOOK_RT.id ? bookPlan(date).target : t.target);
+/* ④'s count that day: the record's once it has one */
+function bookTarget(date) {
+  const e = S.days[date], x = e && e.drills && e.drills[BOOK_RT.id];
+  return x ? x.target : bookPlan(date).target;
+}
+/* minutes per step: ④ from its count, the rest as practice.js has them */
+const stepMin = (date, g) => (g.k === 'r4' ? Math.max(PR.REP_MIN, PR.REP_MIN * bookTarget(date)) : g.min);
+const routineMin = date => PR.GROUPS.filter(g => !restDay(date) || g.light).reduce((a, g) => a + stepMin(date, g), 0);
+/* the sound to sing next: each whole round moves on, so a day covers (a)(b)(c) and the next day carries on */
+function vowelAt(bk) {
+  if (!bk || !bk.v || bk.v.length < 2) return 0;
+  const R = S.settings.rounds[bk.no];
+  return ((R && R.n) || 0) % bk.v.length;
+}
+const vowelTxt = bk => (bk && bk.v && bk.v.length > 1 ? ` (${bk.v[vowelAt(bk)][0]}) ${bk.v[vowelAt(bk)][1]}` : '');
+const exTxt = (no, reps) => { const bk = SK.BOOK[no - 1]; return `${no}번${vowelTxt(bk)} ×${reps}${bk.dir === 'down' ? ' ▼' : ''}`; };
+/* '20번 (b) 음 → 오 ×3 + 복습 17번 ×1' */
+function bookLine(date, target) {
+  const plan = bookPlan(date), sl = bookSlots(plan, target);
+  const mainN = sl.filter(n => n === plan.main).length, rev = sl.filter(n => n !== plan.main);
+  return (plan.keep ? '유지 ' : '') + exTxt(plan.main, mainN) + rev.map(n => ` + 복습 ${exTxt(n, 1)}`).join('');
+}
+/* the piano's way through the warm-ups and ④: ▲ up and back / ▼ down only, to the 꼭대기 음 */
+const autoTxt = () => { const T = S.settings.scale; return T.auto ? ` · ${T.direction === 'down' ? '▼' : '▲'} 꼭대기 ${noteName(T.top)}` : ''; };
+/* one line per step: '③ 6분 · 1번 ×1 → 3번 ×1 · 2번 ×1 → 4번 ×1 · ▲ 꼭대기 2옥 도' */
+function stepLine(date, g) {
+  const t = id => S.settings.drills.find(d => d.id === id);
+  const parts = [];
+  if (g.k === 'r1') parts.push(...PR.ITEMS.filter(x => x.g === 'r1' && t(x.id)).map(x => x.name));
+  else if (g.k === 'r2') parts.push(...[hissId(), pantId()].map(t).filter(Boolean).map(d => `${d.name} ×${d.target}`));
+  else if (g.k === 'r3') parts.push(...PR.ITEMS.filter(x => x.g === 'r3' && x.pats && t(x.id)).map(x => x.pats.map((p, i) => exTxt(bookOf(p).no, x.ph[i][1])).join(' → ')));
+  else if (g.k === 'r4' && bookItem()) parts.push(bookLine(date, bookTarget(date)));
+  else if (g.k === 'r5') parts.push(...PR.ITEMS.filter(x => x.g === 'r5' && t(x.id)).map(x => `${x.name} · 27~30번 ×1씩`));
+  const keys = g.k === 'r3' || g.k === 'r4' ? autoTxt() : '';
+  return `${g.n} ${stepMin(date, g)}분${parts.length ? ` · ${parts.join(' · ')}` : ''}${keys}`;
+}
+/* 골고루: the last day a whole round of an exercise was sung (the day before that moves to prev), and how many */
+function bookRound(no, date, undo) {
+  if (!(no >= PR.BOOK_FIRST && no <= PR.BOOK_LAST)) return;
+  const R = S.settings.rounds[no] || (S.settings.rounds[no] = {});
+  if (undo) R.n = Math.max(0, (R.n || 0) - 1); /* a check taken back: the day stays */
+  else {
+    if (!R.last || R.last < date) { if (R.last) R.prev = R.last; R.last = date; }
+    R.n = Math.min(9999, (R.n || 0) + 1);
+  }
+  touchSettings();
+}
+/* days ④ was done since 5~11 began, while you're still there (for the nudge to the “끼익” stage); cached, render runs often */
+let stageMemo = { k: '', v: 0 };
+function stageDays() {
+  const B = S.settings.book, id = BOOK_RT.id, to = PR.STAGES[0].to;
+  if (!(B.cur >= PR.BOOK_FIRST && B.cur <= to)) return 0;
+  let from = '';
+  for (let no = PR.BOOK_FIRST; no <= to; no++) {
+    const L = B.log[no], R = S.settings.rounds[no], f = (L && L.s) || (R && (R.prev || R.last));
+    if (f && (!from || f < from)) from = f;
+  }
+  if (!from) return 0;
+  const dates = Object.keys(S.days), te = S.days[todayStr()];
+  const k = `${from}|${dates.length}|${todayStr()}|${!!(te && te.drills && te.drills[id] && te.drills[id].done > 0)}`;
+  if (stageMemo.k !== k) stageMemo = { k, v: dates.filter(d => d >= from && S.days[d].drills && S.days[d].drills[id] && S.days[d].drills[id].done > 0).length };
+  return stageMemo.v;
+}
+function setLevel(k, after) {
+  if (S.settings.plan.level === k || !PR.levelOf(k)) return;
+  S.settings.plan = Object.assign({}, S.settings.plan, { level: k, at: Date.now() });
+  const t = bookItem();
+  if (t) applyTargetToday(t.id, dayTarget(t, todayStr()));
+  touchSettings(); softRender(); /* the page keeps focus on the pressed button; under a sheet it waits */
+  if (after) after();
+}
+/* 오늘의 강도: 가볍게 / 기본 / 도전 */
+function LevelSeg(date, after) {
+  const rest = restDay(date), lv = planLevel(date);
+  return h('div', { class: 'lv-row' }, h('span', { class: 'lbl' }, '오늘의 강도'),
+    h('div', { class: 'seg lv-seg', role: 'group', 'aria-label': '오늘의 강도' }, PR.LEVELS.map(l => segBtn(l.name, l.k === S.settings.plan.level, () => setLevel(l.k, after), `lv-${l.k}`))),
+    h('p', { class: 'hint lv-hint' + (rest ? ' warn' : '') }, rest ? '목 상태가 낮았던 다음 날이라 오늘은 저절로 가볍게예요 (설정은 그대로)' : lv.text));
+}
+/* 고음이 이미 잘 이어져요: from 5~13 straight to the “끼익” stage (14번) */
+function skipTo14() {
+  const B = S.settings.book, was = B.cur;
+  B.cur = PR.SKIP_TO; touchSettings(); softRender();
+  toast('“끼익” 소리 단계부터 할게요. 고음이 끊기면 언제든 앞 연습으로 돌아와도 돼요', { action: '되돌리기', onAction: () => { S.settings.book.cur = was; touchSettings(); softRender(); } });
+}
 /* 해낸 날: the book's practice log; the one you are on moves to the next exercise */
 function bookDone(no, date) {
-  const B = S.settings.book, before = clone(B);
+  const B = S.settings.book, cur = B.cur, had = B.log[no] ? { ...B.log[no] } : null;
   const L = B.log[no] || (B.log[no] = {});
   if (!L.s) L.s = date;
   L.a = date;
   if (B.cur === no && no < PR.BOOK_LAST) B.cur = no + 1;
   touchSettings(); softRender();
-  return () => { S.settings.book = before; touchSettings(); softRender(); };
+  /* undo puts back only what this changed (rounds sung since stay) */
+  return () => {
+    const B2 = S.settings.book, L2 = B2.log[no];
+    B2.cur = cur;
+    if (L2) {
+      for (const f of ['s', 'a']) { if (had && had[f]) L2[f] = had[f]; else delete L2[f]; }
+      if (!L2.s && !L2.a) delete B2.log[no];
+    }
+    touchSettings(); softRender();
+  };
 }
 function openScaleTrainer(o = {}) {
   const T = S.settings.scale;
@@ -1854,7 +2016,8 @@ function openScaleTrainer(o = {}) {
   /* 시작 음: yours for this exercise, else the book's tenor start, else the last key you pressed */
   const bookStart = id => { const b = bookOf(id); return b ? b.t : null; };
   const startFor = id => (T.starts[id] != null ? T.starts[id] : bookStart(id) != null ? bookStart(id) : T.root);
-  let base = startFor(curPat), root = base, step = -1, pass = '', playing = false, lastTop = null, sung = null, vi = 0;
+  /* from a routine item, the sound carries on from the last whole round ((a) → (b) → …) */
+  let base = startFor(curPat), root = base, step = -1, pass = '', playing = false, lastTop = null, sung = null, vi = o.drillId ? vowelAt(bookOf(curPat)) : 0;
   let run = null; /* 자동 오르내리기: { seq: the 도 of each round, i: the round playing } */
   const stepAt = [];
   const pat = () => scalePats().find(p => p.id === curPat) || SK.BOOK[0];
@@ -1863,10 +2026,12 @@ function openScaleTrainer(o = {}) {
   /* 꼭대기 음: the highest note the exercise goes up to before coming back down (yours, or a fifth above the first round) */
   const ceil = () => T.top;
   const limit = () => Math.min(SCALE_HI, ceil() - span());
-  const autoSeq = b => SK.roundSequence(b, limit(), T.direction);
-  const displayedRoot = () => !playing && T.auto && T.direction === 'down' ? Math.max(base, limit()) : root;
+  /* the book repeats 12·25 a semitone lower each time: 5 rounds down from the start, whatever the ceiling or direction */
+  const downEx = () => { const b = bookOf(curPat); return !!(b && b.dir === 'down'); };
+  const autoSeq = b => (downEx() ? SK.downSequence(b, SCALE_LO) : SK.roundSequence(b, limit(), T.direction));
+  const displayedRoot = () => !playing && T.auto && T.direction === 'down' && !downEx() ? Math.max(base, limit()) : root;
   const reviseRun = changed => {
-    if (!run) return;
+    if (!run || downEx()) return; /* going down keeps its way; a new start counts from the next play */
     const returning = T.direction === 'down' || (changed !== 'top' && run.seq[run.i + 1] < root);
     run.seq = run.seq.slice(0, run.i).concat(SK.roundSequence(base, limit(), T.direction, root, returning));
   };
@@ -1894,9 +2059,10 @@ function openScaleTrainer(o = {}) {
     if (!bk) { infoBox.hidden = true; infoBox.replaceChildren(); return; }
     infoBox.hidden = false;
     const B = S.settings.book, L = B.log[bk.no] || {}, isCur = B.cur === bk.no;
+    const plan = bookPlan(todayStr()), keepMain = plan.keep && plan.main === bk.no, review = plan.reviews.includes(bk.no);
     const vs = bk.v && bk.v.length > 1 ? h('div', { class: 'chips sc-vs', role: 'group', 'aria-label': '부를 소리' }, bk.v.map((v, i) => h('button', { class: 'chip sm', 'aria-pressed': String(i === vi), onclick: () => { vi = i; drawInfo(); paint(); } }, `${v[0] ? `(${v[0]}) ` : ''}${v[1]}`, h('small', null, ` ${v[2]}`)))) : null;
     const warm = bk.no < PR.BOOK_FIRST, st = stageOf(bk.no);
-    const acts = warm ? [] : isCur ? [
+    const acts = warm || (plan.keep && (keepMain || isCur)) ? [] : isCur ? [
       h('button', { class: 'btn blue sm', 'data-fk': 'sc-bookdone', onclick: () => {
         const undo = bookDone(bk.no, todayStr()), nx = S.settings.book.cur;
         toast(nx !== bk.no ? `좋아요! 다음 단계 연습은 ‘${SK.BOOK[nx - 1].name}’이에요` : '좋아요! 책의 단계 연습을 모두 마쳤어요', { action: '되돌리기', onAction: () => { undo(); drawInfo(); } });
@@ -1906,7 +2072,7 @@ function openScaleTrainer(o = {}) {
     ].filter(Boolean) : [h('button', { class: 'btn soft sm', 'data-fk': 'sc-bookcur', onclick: () => { B.cur = bk.no; touchSettings(); softRender(); drawInfo(); toast(`오늘의 단계 연습을 ‘${bk.name}’(으)로 바꿨어요`); } }, '이걸 오늘의 단계 연습으로')];
     infoBox.replaceChildren(...[
       h('div', { class: 'sc-info-h' }, h('b', null, bk.name), h('span', { class: 'hint' }, ` · ${bk.sound} · 책 ${bk.no}번`),
-        warm ? h('span', { class: 'pill' }, '매일 몸풀기') : isCur ? h('span', { class: 'pill blue' }, '오늘의 단계 연습') : null),
+        warm ? h('span', { class: 'pill' }, '매일 몸풀기') : keepMain ? h('span', { class: 'pill blue' }, '오늘의 유지 연습') : isCur && !plan.keep ? h('span', { class: 'pill blue' }, '오늘의 단계 연습') : review ? h('span', { class: 'pill' }, '오늘의 복습') : null),
       st ? h('p', { class: 'hint sc-stage' }, `단계: ${st.name}`) : null,
       h('p', { class: 'sc-how' }, bk.how),
       bk.good && bk.good.length ? h('div', { class: 'sc-good' }, h('b', null, '이런 데 좋아요'), h('ul', null, bk.good.map(t => h('li', null, t)))) : null,
@@ -2012,6 +2178,8 @@ function openScaleTrainer(o = {}) {
       T.direction = value; touchSettings(); reviseRun('direction');
       $$('button', directions).forEach(b => b.setAttribute('aria-pressed', String(b === ev.currentTarget))); paint();
     }, `direction-${value}`)));
+  const dirField = h('div', { class: 'field', style: 'margin:14px 0 4px' }, h('span', { class: 'lbl' }, '자동 진행 방향'), directions,
+    h('p', { class: 'hint' }, '상행 시작: 시작음 → 꼭대기 → 시작음. 하행만: 꼭대기에서 시작음까지 내려와요.'));
   /* '내 음 보기' */
   const tuneBox = h('div', { class: 'tuner', hidden: true });
   const setSwitch = on => { const sw = tuneRow.querySelector('.switch'); if (sw) sw.setAttribute('aria-checked', String(on)); };
@@ -2055,19 +2223,20 @@ function openScaleTrainer(o = {}) {
     const say = v ? h('span', { class: 'sc-say' }, ` · ${v[1]}${v[2] && v[2] !== v[1] ? ` (${v[2]})` : ''}`) : null;
     if (run) {
       const n = run.seq.length, i = Math.min(run.i, n - 1);
-      const dir = T.direction === 'down' ? '▼ 하행' : run.seq[i + 1] > root ? '▲ 상행' : run.seq[i + 1] < root ? '▼ 하행' : '마지막';
+      const dir = T.direction === 'down' || downEx() ? '▼ 하행' : run.seq[i + 1] > root ? '▲ 상행' : run.seq[i + 1] < root ? '▼ 하행' : '마지막';
       nowBox.replaceChildren(...[h('b', null, noteName(root)), h('span', null, '에서'), say, h('span', { class: 'hint' }, ` · ${dir ? `${dir} ` : ''}${i + 1}/${n}번째`)].filter(Boolean));
     } else {
       const seq = T.auto ? autoSeq(base) : [base], topRoot = Math.max(...seq);
       nowBox.replaceChildren(...[h('b', null, noteName(seq[0])), h('span', null, ` (${noteSci(seq[0])})에서 시작`), say,
-        h('span', { class: 'hint' }, T.auto && seq.length > 1 ? T.direction === 'down' ? ` · ${noteName(topRoot)}부터 반음씩 내려와요 (${seq.length}번)` : ` · 반음씩 ${topRoot - base}번 올라갔다 내려와요 (${seq.length}번)` : ` · 가장 높은 음 ${noteName(base + span())}`)].filter(Boolean));
+        h('span', { class: 'hint' }, T.auto && seq.length > 1 ? downEx() ? ` · 책처럼 반음씩 내려가요 (${seq.length}번)` : T.direction === 'down' ? ` · ${noteName(topRoot)}부터 반음씩 내려와요 (${seq.length}번)` : ` · 반음씩 ${topRoot - base}번 올라갔다 내려와요 (${seq.length}번)` : ` · 가장 높은 음 ${noteName(base + span())}`)].filter(Boolean));
     }
     const bs = bookStart(curPat);
     startName.textContent = `${noteName(base)} (${noteSci(base)})`;
     startDn.disabled = base <= SCALE_LO; startUp.disabled = base >= SCALE_HI;
     startHint.replaceChildren(...(bs == null ? [] : base === bs ? ['책의 테너 시작 음이에요'] : [`책(테너): ${noteName(bs)} `, h('button', { class: 'link', onclick: () => moveStart(bs) }, '책대로')]));
     const c = ceil();
-    topRow.hidden = !T.auto;
+    topRow.hidden = !T.auto || downEx();
+    dirField.hidden = downEx();
     topName.textContent = `${noteName(c)} (${noteSci(c)})`;
     topDn.disabled = c <= SCALE_LO + 2; topUp.disabled = c >= SCALE_TOP;
     topHint.textContent = base + span() > c ? '이 범위에서는 한 번만 연주해요. 설정값은 그대로 둬요.' : playing ? '새 설정은 다음 묶음부터 이어져요' : '시작음과 따로 저장돼요';
@@ -2100,7 +2269,9 @@ function openScaleTrainer(o = {}) {
   /* a routine item's next check may be another exercise (립롤 1번 → 3번) */
   const nextPat = () => {
     const nx = o.drillId ? drillPat(date, o.drillId) : null;
-    if (nx && nx !== curPat) { curPat = nx; vi = 0; base = root = startFor(nx); chipEls.forEach((b, k) => b.setAttribute('aria-pressed', String(k === nx))); drawInfo(); drawSteps(); drawKeys(); showChip(); }
+    if (nx && nx !== curPat) { curPat = nx; base = root = startFor(nx); chipEls.forEach((b, k) => b.setAttribute('aria-pressed', String(k === nx))); drawSteps(); drawKeys(); showChip(); }
+    if (o.drillId) vi = vowelAt(bookOf(curPat));
+    drawInfo();
   };
   const afterBuild = () => { curPat = T.pat; drawChips(); drawInfo(); drawSteps(); drawKeys(); paint(); };
   /* one round from r: the exercise once, with 도 = r */
@@ -2147,10 +2318,13 @@ function openScaleTrainer(o = {}) {
       }
       playing = false; step = -1; pass = ''; run = null; root = base;
       /* a whole round up and back down is one check of the routine item */
+      let checked = false;
       if (my && forDrill) {
         const dl = drillList(date).find(d => d.id === o.drillId);
-        if (dl && dl.done < dl.target) { bump(date, dl.id, 1); nextPat(); }
+        if (dl && dl.done < dl.target) { bump(date, dl.id, 1); checked = true; nextPat(); }
       }
+      /* 골고루 (a check of ④ already noted it); from a routine item the next round takes the next sound */
+      if (my && !checked && bk && date === todayStr()) { bookRound(bk.no, date); if (o.drillId) vi = vowelAt(bk); drawInfo(); }
       paint();
     });
     next();
@@ -2175,8 +2349,7 @@ function openScaleTrainer(o = {}) {
       h('div', { class: 'sc-ctrl' }, down, again, up),
       startRow,
       topRow,
-      h('div', { class: 'field', style: 'margin:14px 0 4px' }, h('span', { class: 'lbl' }, '자동 진행 방향'), directions,
-        h('p', { class: 'hint' }, '상행 시작: 시작음 → 꼭대기 → 시작음. 하행만: 꼭대기에서 시작음까지 내려와요.')),
+      dirField,
       extra,
       ToggleRow('반음씩 자동 진행', T.auto, v => { stop(); T.auto = v; touchSettings(); paint(); }, '위에서 고른 방향으로 한 묶음씩 이어서 연주해요. 시작음과 꼭대기음은 따로 기억하고, 재생 중 바꾸면 다음 묶음부터 반영돼요.', 'repeat'),
       h('div', { class: 'field', style: 'margin:16px 0 4px' }, h('span', { class: 'lbl' }, '빠르기'), tempo),
@@ -2586,10 +2759,12 @@ function DrillSec(date) {
   const reps = counted.reduce((a, d) => a + Math.min(d.done, d.target), 0), total = counted.reduce((a, d) => a + d.target, 0);
   const e = S.days[date];
   const hints = [];
-  if (rOn && isToday) hints.push(h('button', { class: 'btn ink wide ses-start', 'data-fk': 'ses-start', onclick: openSession }, icon('play', 18), all ? '오늘 연습 다시 보기' : reps ? '이어서 따라 하기' : `오늘 연습 따라 하기 (약 ${RT_MIN}분)`));
+  const mins = rOn ? routineMin(date) : RT_MIN;
+  if (rOn && isToday) hints.push(h('button', { class: 'btn ink wide ses-start', 'data-fk': 'ses-start', onclick: openSession }, icon('play', 18), all ? '오늘 연습 다시 보기' : reps ? '이어서 따라 하기' : `오늘 연습 따라 하기 (약 ${mins}분)`));
+  if (rOn && isToday) hints.push(LevelSeg(date));
   if (rOn) {
     if (rest != null) hints.push(h('p', { class: 'drill-hint warn' }, isToday ? `오늘은 ①~③단계만 해요 (어제 끝난 후 목 상태 ${rest}점)` : `이 날은 ①~③단계만 한 날 (전날 끝난 후 목 상태 ${rest}점)`));
-    else hints.push(h('p', { class: 'drill-hint' }, `노래 전 루틴 약 ${RT_MIN}분 · Singing for the Stars `, h('button', { class: 'link', 'data-fk': 'drills-guide', onclick: openGuide }, '전체 보기')));
+    else hints.push(h('p', { class: 'drill-hint' }, `노래 전 루틴 약 ${mins}분 · Singing for the Stars `, h('button', { class: 'link', 'data-fk': 'drills-guide', onclick: openGuide }, '전체 보기')));
   }
   if (e && e.stop) hints.push(h('p', { class: 'drill-hint warn' }, '목이 긁히거나 따끔해서 끝낸 날이에요'));
   let body;
@@ -2605,10 +2780,11 @@ function DrillSec(date) {
       const auto = (!off && firstOpen && firstOpen.g.k === g.k) || members.some(d => d.id === S.popNote);
       const open = S.openGroups.has(g.k) ? S.openGroups.get(g.k) : auto;
       const title = g.n ? `${g.n} ${g.name}` : g.name;
-      const say = g.no ? `${g.no}단계 ${g.name}${g.min ? ` ${g.min}분` : ''}` : `${g.name}${g.min ? ` ${g.min}분` : ''}${g.note ? `, ${g.note}` : ''}`;
+      const gm = stepMin(date, g);
+      const say = g.no ? `${g.no}단계 ${g.name}${gm ? ` ${gm}분` : ''}` : `${g.name}${gm ? ` ${gm}분` : ''}${g.note ? `, ${g.note}` : ''}`;
       return h('div', { class: 'grp' + (off ? ' rest' : '') + (full ? ' full' : '') },
         h('button', { class: 'grp-h', 'data-fk': `grp-${g.k}`, 'aria-expanded': String(open), 'aria-label': `${say}, ${n}개 중 ${done}개 완료${off ? ', 오늘은 쉬어요' : ''}, ${open ? '접기' : '펼치기'}`, onclick: () => { S.openGroups.set(g.k, !open); render({ focus: `grp-${g.k}` }); } },
-          h('span', { class: 'grp-t' }, h('b', null, title), g.min ? h('span', { class: 'grp-m' }, ` · ${g.min}분`) : null, g.note ? h('small', null, g.note) : null),
+          h('span', { class: 'grp-t' }, h('b', null, title), gm ? h('span', { class: 'grp-m' }, ` · ${gm}분`) : null, g.note ? h('small', null, g.note) : null),
           off ? h('span', { class: 'pill' }, '오늘은 쉬어요') : null,
           h('span', { class: 'sp' }),
           full ? h('span', { class: 'grp-n ok' }, icon('check', 15), '완료') : h('span', { class: 'grp-n' }, `${done}/${n}`),
@@ -2646,7 +2822,9 @@ function DrillRow(date, d) {
   const goalSec = rOn && d.id === hissId() ? hissSec(date) : rOn && d.id === pantId() ? PR.PANT_SEC : null;
   const goalTxt = goalSec == null ? null : d.id === hissId() ? `${date === todayStr() ? '이번 주' : '그 주'} 목표 ${goalSec}초` : `목표 ${goalSec}초`;
   const pronTab = rt && rt.pron ? rt.pron : (!rt && /발음/.test(d.name) ? 'A' : null);
-  const bk = rt && rt.book ? bookNow() : null, bkLog = bk ? S.settings.book.log[bk.no] : null;
+  /* today's plan; a past day's own exercises aren't kept, so it shows none */
+  const plan = rt && rt.book && date === todayStr() ? bookPlan(date) : null, bk = plan ? SK.BOOK[plan.main - 1] : null;
+  const nudge = plan && !plan.keep && stageDays() >= PR.NUDGE_DAYS;
   const keys = hasKeys(d);
   const isToday = date === todayStr();
   return h('div', { class: 'drill' + (complete ? ' done' : '') + (rOn && grpOf(d.id) && grpOf(d.id) !== 'rx' ? ' rt' : '') },
@@ -2659,8 +2837,11 @@ function DrillRow(date, d) {
     h('div', { class: 'drill-bottom' },
       h('span', { class: 'drill-rec' },
         ph ? h('span', { class: 'ph' }, `지금: ${ph.label}${ph.n > 1 ? ` (${ph.i}/${ph.n})` : ''}`) : null,
-        bk ? h('span', { class: 'ph' }, `오늘: ${bk.name}`) : null,
-        bk && stageOf(bk.no) ? h('span', null, stageOf(bk.no).name) : null,
+        bk ? h('span', { class: 'ph' }, `오늘: ${bookLine(date, d.target)}`) : null,
+        bk ? h('span', null, bk.name) : null,
+        bk && !plan.keep && stageOf(bk.no) ? h('span', null, stageOf(bk.no).name) : null,
+        plan && plan.keep ? h('span', null, '책을 다 마쳐서 17~26번을 골고루 돌아가며 해요') : null,
+        nudge ? h('span', { class: 'nudge' }, `5~11번을 ${stageDays()}일 했어요. 고음이 이미 이어지면 `, h('button', { class: 'link', 'data-fk': 'dr-skip14', onclick: skipTo14 }, '“끼익” 단계로'), ' 넘어가도 돼요') : null,
         goalTxt ? h('span', { class: 'goal' }, goalTxt) : null,
         todayBest != null ? h('span', null, `오늘 최고 ${fmtSec(todayBest)}`) : null, best ? h('span', null, `최고 기록 ${fmtSec(best.sec)}`) : null),
       h('div', { class: 'drill-acts' },
@@ -2679,15 +2860,20 @@ function bump(date, id, delta, sec) {
   const e = ensureDay(date);
   snapshotDrills(e);
   let s = e.drills[id];
-  if (!s) { if (!t || date !== todayStr()) return; s = e.drills[id] = { name: t.name, target: t.target, done: 0, times: [] }; }
+  if (!s) { if (!t || date !== todayStr()) return; s = e.drills[id] = { name: t.name, target: dayTarget(t, date), done: 0, times: [] }; }
   if (t) s.name = t.name;
   const before = Math.min(s.done || 0, s.target);
   const next = Math.max(0, Math.min(s.target, before + delta));
   if (next === before && sec == null) return;
   if (next > before) resumeQuiet();
+  /* ④: the exercise this check was for gets its 골고루 note (today's plan only knows today) */
+  const mine = next !== before && date === todayStr() && id === BOOK_RT.id;
+  const sung = mine && next > before ? bookOf(drillPat(date, id)) : null;
   s.done = next;
   if (sec != null) s.times = (s.times || []).concat(Math.round(sec * 10) / 10);
   touch(date);
+  if (sung) bookRound(sung.no, date);
+  else if (mine && next < before) { const bk = bookOf(drillPat(date, id)); if (bk) bookRound(bk.no, date, true); } /* the slot just taken back */
   if (next > before) {
     S.popNote = id;
     const all = drillsAllDone(date);
@@ -3690,7 +3876,7 @@ function DrillEditor() {
     box.replaceChildren();
     S.settings.drills.forEach((d, i) => {
       const num = h('input', { class: 'sv', type: 'number', inputmode: 'numeric', min: 1, max: 99, value: d.target, 'aria-label': `${d.name} 목표 횟수` });
-      const setT = v => { d.target = clampInt(v, 1, 99, d.target); num.value = d.target; applyTargetToday(d.id, d.target); touchSettings(); };
+      const setT = v => { d.target = clampInt(v, 1, 99, d.target); num.value = d.target; applyTargetToday(d.id, dayTarget(d, todayStr())); touchSettings(); };
       num.addEventListener('change', () => setT(num.value));
       box.append(h('div', { class: 'drow' },
         h('div', { class: 'drow-1' },
@@ -3700,6 +3886,7 @@ function DrillEditor() {
         h('div', { class: 'drow-2' },
           h('button', { class: 'chip sm', 'aria-pressed': String(!!d.timed), onclick: ev => { d.timed = !d.timed; ev.currentTarget.setAttribute('aria-pressed', String(d.timed)); touchSettings(); } }, icon('timer', 15), '시간 재기 버튼'),
           routineOn() ? h('span', { class: 'hint drow-g' }, grpLabel(grpOf(d.id))) : null,
+          d.id === BOOK_RT.id ? h('span', { class: 'hint drow-g drow-b' }, '기본 횟수 · 오늘의 강도가 가볍게 −1, 도전 +1, 복습만큼 더해요') : null,
           h('span', { class: 'sp' }),
           h('button', { class: 'icon-btn', 'aria-label': `${d.name} 위로`, disabled: i === 0 || (routineOn() && grpOf(S.settings.drills[i - 1].id) !== grpOf(d.id)), onclick: () => { const a = S.settings.drills; [a[i - 1], a[i]] = [a[i], a[i - 1]]; touchSettings(); draw(); } }, icon('up', 19)),
           h('button', { class: 'icon-btn', 'aria-label': `${d.name} 아래로`, disabled: i === S.settings.drills.length - 1 || (routineOn() && grpOf(S.settings.drills[i + 1].id) !== grpOf(d.id)), onclick: () => { const a = S.settings.drills; [a[i + 1], a[i]] = [a[i], a[i + 1]]; touchSettings(); draw(); } }, icon('dn', 19)),
@@ -3963,50 +4150,56 @@ function openSession() {
   const count = st => { const d = item(st.id); return d ? h('span', { class: 'ses-count' + (d.done >= d.target ? ' ok' : '') }, d.done >= d.target ? [icon('check', 15), ' 다 했어요'] : `${d.done} / ${d.target}회`) : null; };
   const plusOne = (st, label) => h('button', { class: 'btn soft sm', disabled: doneOf(st), onclick: () => check(st) }, icon('plus', 16), label || '1회 체크');
   const why = t => (t ? h('p', { class: 'ses-why' }, h('b', null, '왜 하나요? '), t) : null);
+  /* the step's plan in one line: minutes, exercises × reps, sound, ▲/▼ and 꼭대기 음 */
+  const line = st => h('p', { class: 'ses-line' }, stepLine(date, PR.GROUPS[st.g]));
   const title = (st, name) => h('div', { class: 'ses-h' }, h('span', { class: 'ses-n' }, `${PR.GROUPS[st.g].n} ${PR.GROUPS[st.g].name}`), h('h2', null, name), count(st));
   function content(st) {
     if (st.k === 'intro') {
-      return [h('div', { class: 'ses-h' }, h('h2', null, `오늘 연습 (약 ${RT_MIN}분)`)),
+      return [h('div', { class: 'ses-h' }, h('h2', null, `오늘 연습 (약 ${routineMin(date)}분)`)),
         h('p', { class: 'ses-lead' }, '화면이 한 단계씩 안내해요. 각 단계에서 큰 버튼 하나만 누르면 돼요. 피아노는 알아서 반음씩 올라갔다 내려와요.'),
         rest ? h('p', { class: 'hint warn' }, `어제 끝난 후 목 상태가 ${restInfo(date)}점이라 오늘은 ①~③단계만 해요 (멈춤 규칙).`) : null,
-        h('ol', { class: 'ses-plan' }, PR.STEPS.map((x, k) => (rest && !PR.GROUPS[k].light ? null : h('li', null, h('b', null, `${PR.GROUPS[k].n} ${x.name}`), ` ${x.min}분`, h('small', null, x.why))))),
+        LevelSeg(date, draw),
+        h('ol', { class: 'ses-plan' }, PR.STEPS.map((x, k) => (rest && !PR.GROUPS[k].light ? null : h('li', null, h('b', null, `${PR.GROUPS[k].n} ${x.name}`), h('span', { class: 'ses-line' }, stepLine(date, PR.GROUPS[k]).replace(/^\S+ /, '')), h('small', null, x.why))))),
         h('details', { class: 'sc-more' }, h('summary', null, '책의 1~30번 중에 뭘 하나요?'), h('ul', null, PR.PLAN.slice(1).map(t => h('li', null, t))))];
     }
     if (st.k === 'ready') {
-      return [title(st, '자세·긴장 풀기'), why(PR.STEPS[0].why),
+      return [title(st, '자세·긴장 풀기'), line(st), why(PR.STEPS[0].why),
         h('ul', { class: 'ses-list' }, READY_STEPS.map(t => h('li', null, t))),
         h('button', { class: 'btn ink wide ses-big', disabled: doneOf(st), onclick: () => check(st) }, icon('check', 18), doneOf(st) ? '다 했어요' : '다 했어요 → 다음')];
     }
     if (st.k === 'timed') {
       const d = item(st.id), t = S.settings.drills.find(x => x.id === st.id) || {};
       const goal = st.id === hissId() ? hissSec(date) : PR.PANT_SEC;
-      return [title(st, t.name || (st.id === hissId() ? '히싱' : '개호흡')), why(PR.STEPS[1].why),
+      return [title(st, t.name || (st.id === hissId() ? '히싱' : '개호흡')), line(st), why(PR.STEPS[1].why),
         h('p', { class: 'ses-how' }, t.memo || ''), goal ? h('p', { class: 'hint' }, `목표 ${goal}초${st.id === hissId() ? ' (이번 주)' : ''}`) : null,
         h('button', { class: 'btn ink wide ses-big', disabled: !!(d && d.done >= d.target), onclick: () => openStopwatch(date, st.id, () => { draw(); if (doneOf(st)) setTimeout(() => { if (steps[i] === st) go(i + 1); }, 600); }) }, icon('timer', 18), '타이머 켜고 하기'),
         h('div', { class: 'ses-sub' }, plusOne(st, '타이머 없이 1회 체크'))];
     }
     if (st.k === 'keys') {
       const pat = drillPat(date, st.id), bk = bookOf(pat), rt = PR.BY_ID[st.id], d = item(st.id), ph = d && phaseOf(d);
-      const isBook = !!rt.book, stg = isBook && bk ? stageOf(bk.no) : null;
+      const isBook = !!rt.book, plan = isBook ? bookPlan(date) : null, isCur = isBook && bk && !plan.keep && bk.no === S.settings.book.cur;
+      const kind = !isBook || !bk ? '' : plan.keep && bk.no === plan.main ? '유지 · ' : bk.no !== plan.main ? '복습 · ' : '';
+      const stg = isBook && bk && !kind ? stageOf(bk.no) : null, v = bk && bk.v ? bk.v[vowelAt(bk)] : null;
       const name = isBook ? '오늘의 단계 연습' : rt.name;
-      return [title(st, name), why(PR.STEPS[st.g].why),
+      return [title(st, name), line(st), why(PR.STEPS[st.g].why),
         bk ? h('div', { class: 'ses-ex' },
-          h('b', null, isBook ? bk.name : ph ? ph.label : bk.name),
+          h('b', null, isBook ? `${kind}${bk.no}번 ${bk.name}` : ph ? ph.label : bk.name),
+          v ? h('p', { class: 'ses-say' }, h('b', null, '부를 소리 '), `${v[0] ? `(${v[0]}) ` : ''}${v[1]}${v[2] && v[2] !== v[1] ? ` · ${v[2]}` : ''}`, bk.v.length > 1 ? h('small', { class: 'hint' }, ' 한 번 다 하면 다음 소리로') : null) : null,
           stg ? h('p', { class: 'hint' }, `지금 단계: ${stg.name} (${stg.to - stg.from + 1}개 중 ${bk.no - stg.from + 1}번째) — ${stg.text}`) : null,
           h('p', { class: 'ses-how' }, bk.how),
           bk.good ? h('div', { class: 'sc-good' }, h('b', null, '이런 데 좋아요'), h('ul', null, bk.good.map(t => h('li', null, t)))) : null,
           bk.text.length ? h('details', { class: 'sc-more' }, h('summary', null, '방법 더 보기'), h('ul', null, bk.text.map(t => h('li', null, t)))) : null) : null,
         h('button', { class: 'btn ink wide ses-big', disabled: !!(d && d.done >= d.target), onclick: () => openScaleTrainer({ date, drillId: st.id, pat, autostart: true, onClose: () => { draw(); if (doneOf(st)) setTimeout(() => { if (steps[i] === st) go(i + 1); }, 600); } }) }, icon('piano', 18), '피아노 켜고 따라 부르기'),
-        h('p', { class: 'hint' }, '피아노가 시작 음에서 반음씩 꼭대기 음까지 올라갔다가 다시 내려와요. 한 번 다 오르내리면 1회 체크돼요. 힘들면 언제든 멈춰요.'),
+        h('p', { class: 'hint' }, bk && bk.dir === 'down' ? '피아노가 시작 음에서 책처럼 반음씩 5번 내려가요. 다 내려오면 1회 체크돼요. 힘들면 언제든 멈춰요.' : '피아노가 시작 음에서 반음씩 꼭대기 음까지 올라갔다가 다시 내려와요. 한 번 다 오르내리면 1회 체크돼요. 힘들면 언제든 멈춰요.'),
         h('div', { class: 'ses-sub' }, plusOne(st, '피아노 없이 1회 체크'),
-          isBook && bk ? h('button', { class: 'btn soft sm', onclick: () => { const undo = bookDone(bk.no, todayStr()); draw(); toast(`좋아요! 다음부터는 ‘${SK.BOOK[S.settings.book.cur - 1].name}’이에요`, { action: '되돌리기', onAction: () => { undo(); draw(); } }); } }, '이제 잘 돼요 → 다음 연습') : null,
-          isBook && bk && bk.no < 14 ? h('button', { class: 'btn soft sm', onclick: () => { S.settings.book.cur = 14; touchSettings(); softRender(); draw(); toast('“끼익” 소리 단계부터 할게요'); } }, '고음이 이미 잘 이어져요 → “끼익” 단계로') : null),
-        isBook ? h('p', { class: 'hint' }, '‘이제 잘 돼요’는 목에 힘이 안 들어가고 처음부터 끝까지 소리가 안 끊길 때 눌러요. 며칠이 걸려도 괜찮아요.') : null];
+          isCur ? h('button', { class: 'btn soft sm', onclick: () => { const undo = bookDone(bk.no, todayStr()); draw(); toast(`좋아요! 다음부터는 ‘${SK.BOOK[S.settings.book.cur - 1].name}’이에요`, { action: '되돌리기', onAction: () => { undo(); draw(); } }); } }, '이제 잘 돼요 → 다음 연습') : null,
+          isCur && bk.no < 14 ? h('button', { class: 'btn soft sm', onclick: () => { S.settings.book.cur = 14; touchSettings(); softRender(); draw(); toast('“끼익” 소리 단계부터 할게요'); } }, '고음이 이미 잘 이어져요 → “끼익” 단계로') : null),
+        isCur ? h('p', { class: 'hint' }, '‘이제 잘 돼요’는 목에 힘이 안 들어가고 처음부터 끝까지 소리가 안 끊길 때 눌러요. 며칠이 걸려도 괜찮아요.') : null];
     }
     if (st.k === 'song') {
       const d = item(st.id), ph = d && phaseOf(d), k = ph ? PR.BY_ID.rs_song.ph.findIndex(x => x[0] === ph.label) : 0;
       const m = PR.SONG[Math.max(0, k)];
-      return [title(st, '노래에 적용'), why(PR.STEPS[4].why),
+      return [title(st, '노래에 적용'), line(st), why(PR.STEPS[4].why),
         h('p', { class: 'ses-lead' }, '연습하는 노래에서 고음이 막히는 곳 한 군데를 골라, 그 앞뒤 한 소절을 아래 방법으로 불러요.'),
         h('div', { class: 'ses-ex' }, h('b', null, m.name), h('p', { class: 'ses-how' }, m.text), m.good ? h('p', { class: 'hint' }, `이런 데 좋아요: ${m.good}`) : null,
           m.no === 29 ? h('div', { class: 'song-tips' }, PR.VOWEL_SUB.map(([a, b]) => h('div', { class: 'vs-row' }, h('span', null, a), h('span', { 'aria-hidden': 'true' }, '→'), h('span', null, b)))) : null),
@@ -4122,8 +4315,8 @@ function insertRoutine(opts = {}) {
   if (t2 && t2.drills && Object.keys(t2.drills).length) {
     S.settings.drills.forEach(t => {
       const x = t2.drills[t.id];
-      if (!x) t2.drills[t.id] = { name: t.name, target: t.target, done: 0, times: [] };
-      else if (!had.has(t.id)) x.target = t.target; /* removed earlier today: its count was cut to the reps done */
+      if (!x) t2.drills[t.id] = { name: t.name, target: dayTarget(t, today), done: 0, times: [] };
+      else if (!had.has(t.id)) x.target = dayTarget(t, today); /* removed earlier today: its count was cut to the reps done */
     });
     touch(today);
   }
@@ -4143,7 +4336,7 @@ function migrateRoutine() {
   const OLD = {
     rs_lip: [['립롤'], ['“어” 입술 떨기로 오르내리기 · 1번 → 3번', '“어~” 하며 입술 부르르 · 1번 → 3번']],
     rs_trill: [['혀 트릴'], ['“어” 혀 떨기로 오르내리기 · 2번 → 4번', '“드르르” 혀 떨며 “어~” · 2번 → 4번']],
-    rs_book: [['책 진도 연습'], ['지금 진도의 연습을 오르내리기 ×3', '앱이 골라 준 연습 1개를 피아노 따라 오르내리기 ×3']],
+    rs_book: [['책 진도 연습'], ['지금 진도의 연습을 오르내리기 ×3', '앱이 골라 준 연습 1개를 피아노 따라 오르내리기 ×3', '앱이 골라 준 연습 하나를 피아노 따라 3번']],
     rs_song: [[], ['막히는 음 한 곳에 27~30번을 하나씩', '노래에서 막히는 음 한 곳에 4가지 방법을 하나씩']]
   };
   let renamed = false;
@@ -4929,15 +5122,27 @@ function mergeSettings(cur, inc) {
   inc.scale.custom.forEach(c => { if (!out.scale.custom.some(x => x.id === c.id)) out.scale.custom.push(clone(c)); });
   if (!out.routine && inc.routine) out.routine = clone(inc.routine);
   else if (out.routine && inc.routine) for (const k of ['start', 'hiss', 'pant']) if (!out.routine[k] && inc.routine[k]) out.routine[k] = inc.routine[k];
-  /* 책 진도: the practice log from both (the earlier 시작한 날, the earlier 해낸 날) */
+  /* 책 진도: the practice log from both (the earlier 시작한 날, the earlier 해낸 날). the exercise you are on comes from
+     the phone that marked 잘 돼요 most recently (judged before the logs join), so a sync never moves it back */
   if (inc.book && inc.book.log) {
     out.book = out.book && typeof out.book === 'object' ? out.book : { cur: inc.book.cur, log: {} };
     out.book.log = out.book.log && typeof out.book.log === 'object' ? out.book.log : {};
+    const newestA = b => { let t = ''; for (const k in b.log) { const a = b.log[k] && b.log[k].a; if (typeof a === 'string' && a > t) t = a; } return t; };
+    if (newestA(inc.book) > newestA(out.book)) out.book.cur = inc.book.cur;
     for (const k in inc.book.log) {
       const a = out.book.log[k] || (out.book.log[k] = {}), b = inc.book.log[k] || {};
       for (const f of ['s', 'a']) if (b[f] && (!a[f] || b[f] < a[f])) a[f] = b[f];
     }
   }
+  /* 골고루 rounds: per exercise the most rounds, the latest day and the latest day before it */
+  if (inc.rounds && typeof inc.rounds === 'object') {
+    const r = normRounds(out.rounds, null), ir = normRounds(inc.rounds, null);
+    for (const k in ir) r[k] = joinRound(r[k], ir[k]);
+    out.rounds = r;
+  }
+  /* 오늘의 강도: the one picked last (an older app keeps it without knowing it) */
+  const pAt = x => (x && x.plan && +x.plan.at) || 0;
+  if (inc.plan && (!out.plan || pAt(inc) > pAt(out))) out.plan = clone(inc.plan);
   inc.songs.forEach(m => {
     const o = out.songs.find(x => x.k === m.k);
     if (!o) out.songs.push(clone(m));
@@ -5190,6 +5395,13 @@ function mergeSet3(local, remote, base) {
     else both.push(k);
   }
   if (both.length) { const u = mergeSettings(clone(local), clone(remote)); for (const k of both) out[k] = u[k]; }
+  /* a song changed on both phones comes whole from one side; its 가사 노트 comes from whichever side edited it last */
+  if (Array.isArray(out.songs)) for (const m of out.songs) {
+    const lyOf = list => { const x = Array.isArray(list) ? list.find(y => y && y.k === m.k) : null; return x && x.ly && typeof x.ly === 'object' ? x.ly : null; };
+    const l = lyOf(local.songs), r = lyOf(remote.songs);
+    const best = [m.ly && typeof m.ly === 'object' ? m.ly : null, l, r].reduce((a, b) => (b && (!a || (+b.at || 0) > (+a.at || 0)) ? b : a), null);
+    if (best && best !== m.ly) m.ly = clone(best);
+  }
   out.reminder = local.reminder;
   out.updatedAt = Math.max(Date.now(), local.updatedAt || 0, remote.updatedAt || 0);
   return normSettings(out);
@@ -5956,7 +6168,7 @@ function afterLoad() {
   setTimeout(() => checkUpdate(false), 5000);
   Native.lastCrash().then(t => { if (t) setTimeout(() => toast('지난번에 앱이 갑자기 멈췄어요', { action: '기록 보기', onAction: () => openCrash(t) }), 1500); });
   if (Sync.on()) setTimeout(() => Sync.run(), 1500);
-  if (!Native.isNative || window.SD_TEST) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer, Sync, Cloud, OTA, openLogin, openUpdate, checkUpdate, fp, queueWrite, flushWrites, storeAudio, audioBlob, AUD, afterLogin, audioWhy: () => audioWhy, onAppPause, onAppResume, Synth, Piano, Sound, openScaleTrainer, merge3, mergeList, mergeSet3, dayBase, setBase };
+  if (!Native.isNative || window.SD_TEST) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer, Sync, Cloud, OTA, openLogin, openUpdate, checkUpdate, fp, queueWrite, flushWrites, storeAudio, audioBlob, AUD, afterLogin, audioWhy: () => audioWhy, onAppPause, onAppResume, Synth, Piano, Sound, openScaleTrainer, merge3, mergeList, mergeSet3, dayBase, setBase, bookPlan, drillPat, drillList, openSession, bookRound };
   const R = S.settings.reminder;
   /* the switch stays on: once notifications are allowed again, the reminder comes back by itself */
   if (R.on) Native.ensureReminder(R.h, R.m, REMIND_TEXT).catch(() => {});
