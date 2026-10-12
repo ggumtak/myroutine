@@ -146,6 +146,13 @@ const BUILD_KEYS = [-5, -3, -1, 0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19];
 /* ---------- pitch detection (YIN) for the singer's voice ---------- */
 /* buf: Float32Array of samples; returns frequency in Hz, or null for silence / no clear pitch */
 function detectPitch(buf, sr, minF = 60, maxF = 1400) {
+  /* the voice needs nothing above ~3 kHz: at 44.1/48 kHz, average pairs of samples first (a quarter of the work,
+     which runs ~14 times a second on the main thread) */
+  if (sr > 30000 && buf.length >= 1024) {
+    const half = new Float32Array(buf.length >> 1);
+    for (let i = 0; i < half.length; i++) half[i] = (buf[2 * i] + buf[2 * i + 1]) * 0.5;
+    buf = half; sr /= 2;
+  }
   let rms = 0;
   for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
   rms = Math.sqrt(rms / buf.length);

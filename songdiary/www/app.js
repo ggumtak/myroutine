@@ -2009,7 +2009,8 @@ function bookDone(no, date) {
   };
 }
 function openScaleTrainer(o = {}) {
-  const T = S.settings.scale;
+  /* always the live settings: a cloud sync replaces S.settings while this sheet is open */
+  const T = new Proxy({}, { get: (_, k) => S.settings.scale[k], set: (_, k, v) => { S.settings.scale[k] = v; return true; } });
   const date = o.date && o.date <= todayStr() ? o.date : todayStr();
   /* a routine item opens on its own exercise without changing the one you picked last */
   let curPat = o.pat && scalePats().some(p => p.id === o.pat) ? o.pat : T.pat;
@@ -2018,6 +2019,7 @@ function openScaleTrainer(o = {}) {
   const startFor = id => (T.starts[id] != null ? T.starts[id] : bookStart(id) != null ? bookStart(id) : T.root);
   /* from a routine item, the sound carries on from the last whole round ((a) → (b) → …) */
   let base = startFor(curPat), root = base, step = -1, pass = '', playing = false, lastTop = null, sung = null, vi = o.drillId ? vowelAt(bookOf(curPat)) : 0;
+  let closed = false;
   let run = null; /* 자동 오르내리기: { seq: the 도 of each round, i: the round playing } */
   const stepAt = [];
   const pat = () => scalePats().find(p => p.id === curPat) || SK.BOOK[0];
@@ -2068,8 +2070,8 @@ function openScaleTrainer(o = {}) {
         toast(nx !== bk.no ? `좋아요! 다음 단계 연습은 ‘${SK.BOOK[nx - 1].name}’이에요` : '좋아요! 책의 단계 연습을 모두 마쳤어요', { action: '되돌리기', onAction: () => { undo(); drawInfo(); } });
         drawInfo();
       } }, icon('check', 16), bk.no < PR.BOOK_LAST ? '이제 잘 돼요 → 다음 연습으로' : '이제 잘 돼요'),
-      bk.no < 14 ? h('button', { class: 'btn soft sm', 'data-fk': 'sc-skip14', onclick: () => { B.cur = 14; touchSettings(); softRender(); drawInfo(); toast('“끼익” 소리 단계부터 할게요. 고음이 끊기면 언제든 앞 연습으로 돌아와도 돼요'); } }, '고음이 이미 잘 이어져요 → “끼익” 단계로') : null
-    ].filter(Boolean) : [h('button', { class: 'btn soft sm', 'data-fk': 'sc-bookcur', onclick: () => { B.cur = bk.no; touchSettings(); softRender(); drawInfo(); toast(`오늘의 단계 연습을 ‘${bk.name}’(으)로 바꿨어요`); } }, '이걸 오늘의 단계 연습으로')];
+      bk.no < 14 ? h('button', { class: 'btn soft sm', 'data-fk': 'sc-skip14', onclick: () => { S.settings.book.cur = 14; touchSettings(); softRender(); drawInfo(); toast('“끼익” 소리 단계부터 할게요. 고음이 끊기면 언제든 앞 연습으로 돌아와도 돼요'); } }, '고음이 이미 잘 이어져요 → “끼익” 단계로') : null
+    ].filter(Boolean) : [h('button', { class: 'btn soft sm', 'data-fk': 'sc-bookcur', onclick: () => { S.settings.book.cur = bk.no; touchSettings(); softRender(); drawInfo(); toast(`오늘의 단계 연습을 ‘${bk.name}’(으)로 바꿨어요`); } }, '이걸 오늘의 단계 연습으로')];
     infoBox.replaceChildren(...[
       h('div', { class: 'sc-info-h' }, h('b', null, bk.name), h('span', { class: 'hint' }, ` · ${bk.sound} · 책 ${bk.no}번`),
         warm ? h('span', { class: 'pill' }, '매일 몸풀기') : keepMain ? h('span', { class: 'pill blue' }, '오늘의 유지 연습') : isCur && !plan.keep ? h('span', { class: 'pill blue' }, '오늘의 단계 연습') : review ? h('span', { class: 'pill' }, '오늘의 복습') : null),
@@ -2387,11 +2389,11 @@ function openScaleTrainer(o = {}) {
       tuneRow,
       h('details', { class: 'sc-instructions' }, h('summary', null, '연습 방법과 책 진도 보기'), infoBox),
       h('p', { class: 'hint', style: 'margin-top:8px' }, '책 스케일은 책의 테너 시작 음에서 열려요. 건반을 누르거나 시작 음 ▼로 더 낮게(0옥 도까지) 시작할 수 있고, 연습마다 기억해요. 책: 피아노 끝까지 올라갈 필요 없어요. 힘이 들어가거나 연결이 끊기면 바로 멈추세요.', bestM != null ? ' 빨간 점은 지금까지 낸 최고음이에요.' : '')),
-    onClose: () => { run = null; Synth.stop(); Tuner.stop(); if (kbWatch) kbWatch.disconnect(); document.removeEventListener('visibilitychange', onVis); if (o.onClose) o.onClose(); }
+    onClose: () => { closed = true; clearTimeout(autoT); run = null; Synth.stop(); Tuner.stop(); if (kbWatch) kbWatch.disconnect(); document.removeEventListener('visibilitychange', onVis); if (o.onClose) o.onClose(); }
   });
   requestAnimationFrame(() => { centerRoot(); showChip(); });
   /* 따라 하기 opens the keys already playing */
-  if (o.autostart) setTimeout(() => { if (!playing) start(base); }, 450);
+  const autoT = o.autostart ? setTimeout(() => { if (!playing && !closed) start(base); }, 450) : 0;
 }
 /* your own exercise, built from the notes as sung from 도 */
 function openScaleBuilder(existing, onDone) {
