@@ -2103,21 +2103,35 @@ function openScaleTrainer(o = {}) {
     if (turn && turn.textContent !== txt) turn.textContent = txt;
   };
   const nowBox = h('div', { class: 'sc-now' });
-  /* keyboard: 0옥 도 … 3옥 도 to press, plus dimmed keys where the chosen exercise goes past them */
-  const W = 44, B = 28, keys = new Map();
+  /* keyboard: 0옥 도 … 3옥 도 to press, plus dimmed keys where the chosen exercise goes past them.
+     The keys are sized so a whole round fits on screen: the view stays still while a round plays and only
+     glides a little (a semitone) between rounds, instead of jumping after the melody note by note. */
+  let W = 44, B = 28;
+  const keys = new Map();
   const kb = h('div', { class: 'kb' });
   const kbWrap = h('div', { class: 'kb-wrap' }, kb);
-  let kbRange = '';
+  let kbRange = '', zone = null;
   /* a key's left edge in the scroll box's coordinates (the box has side padding) */
   const keyX = k => k.getBoundingClientRect().left - kbWrap.getBoundingClientRect().left + kbWrap.scrollLeft;
   const centerRoot = () => { const k = keys.get(root); if (k) kbWrap.scrollLeft = Math.max(0, keyX(k) - kbWrap.clientWidth / 2 + W / 2); };
-  /* scroll so the keys from a to b are in view; if they don't all fit, start from a */
+  /* the most white keys any transposition of the exercise covers, plus half a key on each side */
+  const whitesFor = st => {
+    const lo = Math.min(0, ...st), hi = Math.max(0, ...st);
+    let most = 0;
+    for (let r = 0; r < 12; r++) { let n = 0; for (let m = r + lo; m <= r + hi; m++) if (!BLACK_PC.includes(mod12(m))) n++; most = Math.max(most, n); }
+    return most + 1;
+  };
+  const keyWidth = () => {
+    const vw = kbWrap.clientWidth || Math.min(window.innerWidth, 640);
+    return Math.max(24, Math.min(46, Math.floor((vw - 8) / whitesFor(pat().steps))));
+  };
+  /* glide so the keys from a to b are in view (centred when they fit); nothing moves if they already are */
   const showRange = (a, b) => {
     const ka = keys.get(a) || keys.get(a - 1), kz = keys.get(b) || keys.get(b + 1);
     if (!ka || !kz) return;
     const l = keyX(ka) - 6, r = keyX(kz) + kz.offsetWidth + 6, vl = kbWrap.scrollLeft, vw = kbWrap.clientWidth;
     if (l >= vl && r <= vl + vw) return;
-    const to = r - l <= vw ? (l < vl ? l : r - vw) : l;
+    const to = r - l <= vw ? l - (vw - (r - l)) / 2 : l;
     kbWrap.scrollTo({ left: Math.max(0, to), behavior: smooth() });
   };
   const drawKeys = () => {
@@ -2125,8 +2139,11 @@ function openScaleTrainer(o = {}) {
     let lo = Math.max(24, SCALE_LO + Math.min(0, ...st)), hi = Math.min(SCALE_TOP, Math.max(SCALE_HI + Math.max(0, ...st), T.top || 0));
     while (BLACK_PC.includes(lo % 12)) lo--;
     while (BLACK_PC.includes(hi % 12)) hi++;
-    if (kbRange === `${lo}-${hi}`) return;
-    kbRange = `${lo}-${hi}`;
+    const w = keyWidth();
+    if (kbRange === `${lo}-${hi}-${w}`) return;
+    kbRange = `${lo}-${hi}-${w}`;
+    W = w; B = Math.round(w * 0.62);
+    kb.style.setProperty('--kw', W + 'px'); kb.style.setProperty('--kbw', B + 'px');
     keys.clear();
     kb.replaceChildren();
     let whites = 0;
@@ -2146,11 +2163,13 @@ function openScaleTrainer(o = {}) {
   };
   const paintKeys = () => {
     const cur = step >= 0 ? root + pat().steps[step] : null, s = sung != null ? Math.round(sung) : null, top = T.auto ? ceil() : null;
-    keys.forEach((k, m) => { k.classList.toggle('root', m === displayedRoot()); k.classList.toggle('on', m === cur); k.classList.toggle('sing', m === s); k.classList.toggle('top', m === top); });
+    const zl = playing && zone ? zone[0] : null, zh = playing && zone ? zone[1] : null;
+    keys.forEach((k, m) => { k.classList.toggle('root', m === displayedRoot()); k.classList.toggle('on', m === cur); k.classList.toggle('sing', m === s); k.classList.toggle('top', m === top); k.classList.toggle('zone', zl != null && m >= zl && m <= zh); });
+    /* only on a screen too narrow for the whole round: glide (never jump) to the note being played */
     const active = keys.get(cur);
     if (active) {
       const left = keyX(active), right = left + active.offsetWidth, vl = kbWrap.scrollLeft, vw = kbWrap.clientWidth;
-      if (left < vl + 20 || right > vl + vw - 20) kbWrap.scrollTo({ left: Math.max(0, left - vw * 0.45), behavior: 'auto' });
+      if (left < vl + 4 || right > vl + vw - 4) kbWrap.scrollTo({ left: Math.max(0, left - vw * 0.3), behavior: smooth() });
     }
   };
   const down = h('button', { class: 'btn soft', 'aria-label': '시작 음 반음 내리기', onclick: () => moveStart(base - 1) }, icon('dn', 18), '반음');
@@ -2275,13 +2294,23 @@ function openScaleTrainer(o = {}) {
   };
   const afterBuild = () => { curPat = T.pat; drawChips(); drawInfo(); drawSteps(); drawKeys(); paint(); };
   /* one round from r: the exercise once, with 도 = r */
+  /* a split-screen / rotated window changes the width: resize the keys to keep a round on screen */
+  const kbWatch = window.ResizeObserver ? new ResizeObserver(() => {
+    const before = kbRange;
+    drawKeys();
+    if (kbRange === before) return;
+    paintKeys();
+    if (playing && zone) requestAnimationFrame(() => showRange(zone[0], zone[1]));
+  }) : null;
+  if (kbWatch) kbWatch.observe(kbWrap);
   async function playRound(r, onDone) {
     const p = pat(), bk = bookOf(p.id);
     root = r;
     step = -1; pass = '';
     lastTop = Math.max(lastTop != null && run ? lastTop : -1, root + span());
+    zone = [root + Math.min(0, ...p.steps), root + span()];
     paint();
-    showRange(root + Math.min(0, ...p.steps), root + span());
+    showRange(zone[0], zone[1]);
     const ok = await Synth.play(root, p.steps, {
       bpm: T.bpm, chord: T.chord, echo: T.echo, d: bk && bk.d, tie: bk && bk.tie, st: bk && bk.st, glide: bk && bk.glide,
       onStep: (i, ps) => { step = i; pass = ps; stepAt[i] = performance.now(); paintSteps(); paintKeys(); drawTune(); },
@@ -2358,7 +2387,7 @@ function openScaleTrainer(o = {}) {
       tuneRow,
       h('details', { class: 'sc-instructions' }, h('summary', null, '연습 방법과 책 진도 보기'), infoBox),
       h('p', { class: 'hint', style: 'margin-top:8px' }, '책 스케일은 책의 테너 시작 음에서 열려요. 건반을 누르거나 시작 음 ▼로 더 낮게(0옥 도까지) 시작할 수 있고, 연습마다 기억해요. 책: 피아노 끝까지 올라갈 필요 없어요. 힘이 들어가거나 연결이 끊기면 바로 멈추세요.', bestM != null ? ' 빨간 점은 지금까지 낸 최고음이에요.' : '')),
-    onClose: () => { run = null; Synth.stop(); Tuner.stop(); document.removeEventListener('visibilitychange', onVis); if (o.onClose) o.onClose(); }
+    onClose: () => { run = null; Synth.stop(); Tuner.stop(); if (kbWatch) kbWatch.disconnect(); document.removeEventListener('visibilitychange', onVis); if (o.onClose) o.onClose(); }
   });
   requestAnimationFrame(() => { centerRoot(); showChip(); });
   /* 따라 하기 opens the keys already playing */

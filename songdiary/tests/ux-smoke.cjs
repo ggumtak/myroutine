@@ -143,6 +143,41 @@ async function main() {
     await page.waitForTimeout(400);
   }
   check(visibleSteps > 3, 'multiple scale steps were observed');
+  {
+    /* a 1½-octave exercise at phone width: the whole round is on screen and the view holds still while it plays */
+    await sheet.locator('.sc-play').click();
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 360, height: 780 });
+    await page.evaluate(() => {
+      const t = __sdTest;
+      t.S.settings.scale = t.normSettings({ scale: { pat: 'b01', bpm: 130, tempoVersion: 2, root: 48, top: 72, chord: false, auto: false } }).scale;
+      t.openScaleTrainer();
+    });
+    await visible(page, '.sheet.open .sc-play');
+    const sh = page.locator('.sheet.open');
+    await sh.locator('.sc-play').click();
+    await page.waitForFunction(() => document.querySelectorAll('.sheet.open .sc-seq > span')[1]?.classList.contains('cur'));
+    await page.waitForTimeout(450);
+    const view = () => sh.locator('.kb-wrap').evaluate(w => {
+      const b = w.getBoundingClientRect(), z = Array.from(w.querySelectorAll('.zone'));
+      return { left: Math.round(w.scrollLeft), zone: z.length, fits: z.every(k => { const a = k.getBoundingClientRect(); return a.left >= b.left - 1 && a.right <= b.right + 1; }) };
+    });
+    const first = await view(), samples = [];
+    for (let i = 0; i < 6; i++) { await page.waitForTimeout(250); samples.push(await view()); }
+    check(first.zone >= 10 && first.fits, 'the whole round of a 1½-octave exercise is on screen at 360px');
+    check(samples.every(v => v.left === first.left), 'the keyboard holds still while a round plays');
+    await sh.locator('.sc-play').click();
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => {
+      const t = __sdTest;
+      t.S.settings.scale = t.normSettings({ scale: { pat: 'five', bpm: 130, tempoVersion: 2, root: 49, top: 63, chord: false } }).scale;
+      t.openScaleTrainer();
+    });
+    await visible(page, '.sheet.open .sc-play');
+    await sheet.locator('.sc-play').click(); /* playing again, as the checks below expect */
+    await page.waitForFunction(() => document.querySelector('.sheet.open .sc-seq > .cur'));
+  }
   await sheet.locator('.sc-play').click();
   await sheet.locator('[data-fk="direction-down"]').click();
   await sheet.locator('.sc-play').click();
