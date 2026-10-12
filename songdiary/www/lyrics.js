@@ -204,6 +204,7 @@ const TOOLS = [
   { id: 'memo', label: '메모', desc: '메모를 달 줄을 눌러요.' },
   { id: 'erase', label: '지우개', desc: '글자를 누르면 그 글자의 표시와 발음이 모두 지워져요.' }
 ];
+let restOpen = false;
 let expanded = false; /* remembered until the app reloads */
 
 function open({ key, title, artist }) {
@@ -289,14 +290,7 @@ function open({ key, title, artist }) {
     toolBtns.forEach((b, id) => b.setAttribute('aria-pressed', String(id === tool)));
     paintDesc();
   };
-  const reveal = id => {
-    const b = toolBtns.get(id);
-    if (!b || !tools) return;
-    const l = b.offsetLeft, r = l + b.offsetWidth;
-    if (l < tools.scrollLeft + 24) tools.scrollLeft = Math.max(0, l - 24);
-    else if (r > tools.scrollLeft + tools.clientWidth - 24) tools.scrollLeft = r - tools.clientWidth + 24;
-  };
-  const selectTool = id => { fresh(); tool = id; paintBar(); paintPaper(); reveal(id); };
+  const selectTool = id => { fresh(); tool = id; paintBar(); paintPaper(); };
   const drawBar = () => {
     toolBtns = new Map();
     const mk = (id, kids, fk) => {
@@ -304,13 +298,13 @@ function open({ key, title, artist }) {
       toolBtns.set(id, b);
       return b;
     };
-    const items = TOOLS.map(t => mk(t.id, t.label));
+    const modes = TOOLS.map(t => mk(t.id, t.label));
     const showN = expanded ? TECHS.length : VISIBLE_TECHS;
-    TECHS.slice(0, showN).forEach(t => items.push(mk(t.id, [symEl(t.id), t.name])));
-    items.push(h('button', { class: 'chip sm ly-chip ly-more', 'aria-expanded': String(expanded), 'data-fk': 'ly-more', onclick: () => { expanded = !expanded; const keep = tools.scrollLeft; drawBar(); tools.scrollLeft = keep; } },
+    const items = TECHS.slice(0, showN).map(t => mk(t.id, [symEl(t.id), t.name]));
+    items.push(h('button', { class: 'chip sm ly-chip ly-more', 'aria-expanded': String(expanded), 'data-fk': 'ly-more', onclick: () => { expanded = !expanded; drawBar(); if (tools.parentNode) tools.parentNode.classList.toggle('open', expanded); } },
       expanded ? '접기' : `기교 더 보기 +${TECHS.length - VISIBLE_TECHS}`));
     if (!tools) tools = h('div', { class: 'ly-tools', role: 'toolbar', 'aria-label': '표시 도구' });
-    tools.replaceChildren(...items);
+    tools.replaceChildren(h('div', { class: 'ly-modes' }, modes), h('div', { class: 'ly-techs' }, items));
     return tools;
   };
 
@@ -465,20 +459,21 @@ function open({ key, title, artist }) {
     if (ORD[id] >= VISIBLE_TECHS) expanded = true;
     tab = 'note'; tool = id;
     draw();
-    reveal(id);
     obj.sheet.querySelector('.sheet-body').scrollTop = 0;
   };
   const paintCheck = () => {
     const counts = {};
     Object.keys(ly.m).forEach(k => ly.m[k].forEach(id => { counts[id] = (counts[id] || 0) + 1; }));
-    const heard = new Set(ly.heard), next = TECHS.find(t => !heard.has(t.id));
+    const used = TECHS.filter(t => counts[t.id]), pool = used.length ? used : TECHS;
+    const heard = new Set(ly.heard.filter(id => pool.some(t => t.id === id))), next = pool.find(t => !heard.has(t.id));
+    const total = pool.length;
     const prog = h('div', { class: 'ly-prog' },
-      h('div', { class: 'ly-prog-n' }, h('b', null, `다 들었어요 ${heard.size} / ${TECHS.length}`)),
-      h('div', { class: 'ly-trk', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(TECHS.length), 'aria-valuenow': String(heard.size), 'aria-label': '들어 본 기교' }, h('i', { style: `width:${Math.round(heard.size / TECHS.length * 100)}%` })),
-      h('p', { class: 'ly-prog-t' }, next ? `중요한 것부터 하나씩: 이번엔 ‘${next.name}’만 들어 보세요` : `${TECHS.length}가지를 모두 들어 봤어요. 다시 듣고 싶은 기교는 이름을 눌러 보세요.`),
+      h('div', { class: 'ly-prog-n' }, h('b', null, `다 들었어요 ${heard.size} / ${total}`), used.length ? h('span', { class: 'hint' }, ' · 이 곡에 쓴 기교 기준') : null),
+      h('div', { class: 'ly-trk', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(total), 'aria-valuenow': String(heard.size), 'aria-label': '들어 본 기교' }, h('i', { style: `width:${Math.round(heard.size / total * 100)}%` })),
+      h('p', { class: 'ly-prog-t' }, next ? `중요한 것부터 하나씩: 이번엔 ‘${next.name}’만 들어 보세요` : (used.length ? `이 곡에 쓴 ${total}가지를 모두 들어 봤어요. 다시 듣고 싶은 기교는 이름을 눌러 보세요.` : `${TECHS.length}가지를 모두 들어 봤어요. 다시 듣고 싶은 기교는 이름을 눌러 보세요.`)),
       next ? h('button', { class: 'btn blue sm', 'data-fk': 'ly-go-next', onclick: () => gotoTool(next.id) }, `‘${next.name}’ 표시하러 가기`) : null,
       h('p', { class: 'hint' }, '체크 칸은 ‘이것만 들으며 한 번 들었어요’ 표시예요. 가사에 체크한 표시를 보면서 한 가지씩 집중해서 들어요.'));
-    const rows = TECHS.map((t, i) => {
+    const rowOf = (t, i) => {
       const on = heard.has(t.id);
       const ck = h('input', { type: 'checkbox', checked: on, 'aria-label': `${t.name} — 이것만 들으며 한 번 들었어요`, 'data-fk': 'ly-heard-' + t.id, onchange: () => {
         const want = ck.checked;
@@ -496,9 +491,14 @@ function open({ key, title, artist }) {
           h('span', { class: 'ly-rt' }, h('span', { class: 'ly-rk' }, i + 1), symEl(t.id, 'big'), h('b', null, t.name),
             h('span', { class: 'ly-cnt' }, counts[t.id] ? `${counts[t.id]}곳` : '표시 없음'), next === t ? h('span', { class: 'ly-now' }, '지금 차례') : null),
           h('span', { class: 'ly-rd' }, t.desc)));
-    });
-    panel.replaceChildren(prog, ...rows,
-      h('div', { class: 'ly-reset' }, h('button', { class: 'btn ghost sm', disabled: !heard.size, onclick: () => confirmSheet({ title: '체크를 초기화할까요?', text: '‘들었어요’ 체크만 모두 지워져요. 가사에 단 표시는 그대로예요.', ok: '초기화', danger: true, onOk: () => { ly.heard = []; commit(); paintCheck(); } }) }, icon('undo', 16), '체크 초기화')));
+    };
+    const restList = used.length ? TECHS.filter(t => !counts[t.id]) : [];
+    const restBox = restList.length ? h('details', { class: 'ly-rest', 'data-fk': 'ly-rest' }, h('summary', null, `나머지 기교 ${restList.length}가지`), ...restList.map(t => rowOf(t, ORD[t.id]))) : null;
+    if (restBox && restOpen) restBox.open = true;
+    if (restBox) restBox.addEventListener('toggle', () => { restOpen = restBox.open; });
+    const rows = (used.length ? used : TECHS).map(t => rowOf(t, ORD[t.id]));
+    panel.replaceChildren(prog, ...(used.length ? [h('p', { class: 'ly-sec' }, `이 곡에 쓴 기교 ${used.length}가지`)] : []), ...rows, restBox,
+      h('div', { class: 'ly-reset' }, h('button', { class: 'btn ghost sm', disabled: !ly.heard.length, onclick: () => confirmSheet({ title: '체크를 초기화할까요?', text: '‘들었어요’ 체크만 모두 지워져요. 가사에 단 표시는 그대로예요.', ok: '초기화', danger: true, onOk: () => { ly.heard = []; commit(); paintCheck(); } }) }, icon('undo', 16), '체크 초기화')));
   };
 
   const copyText = () => {
@@ -527,6 +527,7 @@ function open({ key, title, artist }) {
       tools = null;
       descEl = h('p', { class: 'ly-desc', 'aria-live': 'polite' });
       head.append(drawBar(), descEl);
+      head.classList.toggle('open', expanded);
       paper = h('div', { class: 'ly-paper' });
       paper.addEventListener('keydown', onPaperKey);
       paper.addEventListener('focusin', onPaperFocus);

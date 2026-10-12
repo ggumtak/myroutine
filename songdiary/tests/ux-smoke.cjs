@@ -298,10 +298,11 @@ async function main() {
   await ly.locator('.ly-syl[data-k="2.0"]').click();
   await ly.locator('[data-fk="ly-tab-check"]').click();
   await ly.locator('.ly-row').first().waitFor({ state: 'visible' });
-  check(await ly.locator('.ly-row').count() === 23 && (await ly.locator('.ly-prog-t').innerText()).includes('‘숨 쉬는 곳’'), 'check tab lists 23 techniques and points at the first one');
+  check(await ly.locator('.ly-row').count() === 23 && await ly.locator('.ly-rest .ly-row').count() === 21 && (await ly.locator('.ly-prog-t').innerText()).includes('‘숨 쉬는 곳’'), 'check tab lists the 2 used techniques first, 21 more folded, and points at the first one');
+  check((await ly.locator('.ly-prog-n').innerText()).includes('0 / 2') && (await ly.locator('.ly-rest').evaluate(e => e.open)) === false, 'progress counts only the techniques this song uses; the rest are folded');
   check((await ly.locator('[data-fk="ly-pick-h"]').innerText()).includes('2곳'), 'each row counts its marks in this song');
   await ly.locator('[data-fk="ly-heard-breath"]').check();
-  check((await ly.locator('.ly-prog-n').innerText()).includes('1 / 23') && (await ly.locator('.ly-prog-t').innerText()).includes('‘숨소리 섞기’'), 'ticking a technique moves the progress on to the next one');
+  check((await ly.locator('.ly-prog-n').innerText()).includes('1 / 2') && (await ly.locator('.ly-prog-t').innerText()).includes('‘H 어택’'), 'ticking a technique moves the progress on to the next one');
   await noOverflow(page, 'listen-and-check tab fits 390px');
   await page.waitForTimeout(600);
   check((await lyMeta()).heard.join() === 'breath', 'heard techniques are saved');
@@ -316,7 +317,7 @@ async function main() {
   check(await ly.locator('.ly-syl[data-k="1.3"] .ly-br').count() === 1, 'the moved mark is drawn on its new line');
   await page.setViewportSize({ width: 320, height: 700 });
   await noOverflow(page, 'lyric notebook fits 320px');
-  check(await ly.locator('.ly-tools').evaluate(el => el.scrollWidth > el.clientWidth), 'only the chip bar scrolls sideways');
+  check(await ly.locator('.ly-tools').evaluate(el => el.scrollWidth <= el.clientWidth + 1), 'the tool chips wrap instead of scrolling sideways');
   await page.screenshot({ path: path.join(screenshots, 'lyrics-320.png') });
   await ly.getByRole('button', { name: '가사 고치기' }).click();
   await ly.locator('textarea.ly-ta').fill((await lyMeta()).text + '\n' + '가나다라마바사아자차'.repeat(4));

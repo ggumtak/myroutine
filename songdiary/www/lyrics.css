@@ -24,9 +24,14 @@
 /* sticky tool bar */
 .ly-head{position:sticky;top:-8px;z-index:3;margin:-8px -20px 0;padding:8px 20px 6px;background:var(--sheet);border-bottom:1px solid var(--rule-2)}
 .ly-head .seg{margin-bottom:8px}
-.ly-tools{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;margin:0 -20px;padding:2px 20px}
-.ly-tools::-webkit-scrollbar{display:none}
+.ly-head.open{position:static} /* all 23 chips are tall: let them scroll away instead of covering the lyrics */
+.ly-tools{display:grid;gap:6px}
+.ly-modes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.ly-modes .ly-chip{justify-content:center;padding-left:4px;padding-right:4px}
+.ly-techs{display:flex;flex-wrap:wrap;gap:6px}
 .ly-chip{gap:5px}
+.ly-tools .chip.sm.ly-chip{min-height:40px}
+@media (max-height:700px){.ly-head{position:static}} /* the chip rows would cover most of a short screen */
 .ly-chip.ly-more{border-style:dashed}
 .ly-sym{display:inline-block;min-width:1.1em;text-align:center;font-weight:700;font-size:13px;line-height:1.2;color:var(--gc,var(--ink-2))}
 .ly-sym.big{font-size:15px;min-width:26px;padding:3px 0;border-radius:8px;background:var(--sheet-2)}
@@ -87,3 +92,7 @@
 .ly-row.done .ly-rt b{text-decoration:line-through;text-decoration-color:var(--ink-4)}
 .ly-reset{display:flex;justify-content:center;padding:14px 0 6px}
 .ly-memo{color:var(--ink-2)}
+
+.ly-rest{margin-top:10px;border-top:1px solid var(--rule-2)}
+.ly-rest>summary{display:flex;align-items:center;min-height:44px;padding:0 4px;font-size:14px;font-weight:700;color:var(--ink-2);cursor:pointer}
+.ly-sec{margin:12px 2px 2px;font-size:13px;font-weight:700;color:var(--ink-2)}

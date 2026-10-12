@@ -49,6 +49,21 @@ async function main() {
     t.render();
   });
 
+  // ---------- renamed routine items: 립트릴 · 텅트릴 · 오늘의 스케일 ----------
+  const renamed = await page.evaluate(() => {
+    const t = __sdTest, ds = t.S.settings.drills, saved = JSON.stringify(ds);
+    const set = (id, name) => { const d = ds.find(x => x.id === id); if (d) d.name = name; };
+    set('rs_lip', '입술 떨기 (립롤)'); set('rs_trill', '혀 굴리기 (트릴)'); set('rs_book', '오늘의 단계 연습');
+    t.render();
+    const names = ['rs_lip', 'rs_trill', 'rs_book'].map(id => (ds.find(x => x.id === id) || {}).name);
+    const custom = ds.find(x => x.id === 'rs_lip'); if (custom) custom.name = '내 립롤 연습'; t.render();
+    const kept = (ds.find(x => x.id === 'rs_lip') || {}).name;
+    t.S.settings.drills = JSON.parse(saved); t.render();
+    return { names, kept };
+  });
+  check(JSON.stringify(renamed.names) === JSON.stringify(['립트릴', '텅트릴', '오늘의 스케일']), 'stored routine names move to 립트릴 · 텅트릴 · 오늘의 스케일');
+  check(renamed.kept === '내 립롤 연습', 'a name the user wrote is kept');
+
   // ---------- the book's start notes and directions ----------
   const book = await page.evaluate(() => ({ t12: ScaleKit.BOOK[11].t, d12: ScaleKit.BOOK[11].dir, d25: ScaleKit.BOOK[24].dir, s12: ScaleKit.downSequence(61, 36), s25: ScaleKit.downSequence(ScaleKit.BOOK[24].t, 36), low: ScaleKit.downSequence(38, 36), how9: ScaleKit.BOOK[8].how }));
   check(book.t12 === 61, '12번 starts on the book’s tenor C♯ (MIDI 61)');
