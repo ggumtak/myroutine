@@ -1,0 +1,89 @@
+/* 가사 노트 — lyric notebook sheet (lyrics.js). Tokens come from app.css; only the technique accents are defined here. */
+:root{
+  --ly-breath:#2468C9; --ly-onset:#237A4B; --ly-pitch:var(--blue); --ly-ending:#B85F00; --ly-tone:#B83A78; --ly-rhythm:#5B6477;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ly-breath:#7FB4FF; --ly-onset:#6FD29A; --ly-ending:#F2A33A; --ly-tone:#FF8FC0; --ly-rhythm:#AFB7C7;
+  }
+}
+:root[data-theme="dark"]{
+  --ly-breath:#7FB4FF; --ly-onset:#6FD29A; --ly-ending:#F2A33A; --ly-tone:#FF8FC0; --ly-rhythm:#AFB7C7;
+}
+.lg-breath{--gc:var(--ly-breath)}
+.lg-onset{--gc:var(--ly-onset)}
+.lg-pitch{--gc:var(--ly-pitch)}
+.lg-ending{--gc:var(--ly-ending)}
+.lg-tone{--gc:var(--ly-tone)}
+.lg-rhythm,.lg-dyn{--gc:var(--ly-rhythm)}
+
+.btn.ly-open{width:100%;margin-bottom:18px}
+.ly{width:100%;min-width:0}
+.ly-foot{display:flex;gap:8px;flex:1;min-width:0}
+
+/* sticky tool bar */
+.ly-head{position:sticky;top:-8px;z-index:3;margin:-8px -20px 0;padding:8px 20px 6px;background:var(--sheet);border-bottom:1px solid var(--rule-2)}
+.ly-head .seg{margin-bottom:8px}
+.ly-tools{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;margin:0 -20px;padding:2px 20px}
+.ly-tools::-webkit-scrollbar{display:none}
+.ly-chip{gap:5px}
+.ly-chip.ly-more{border-style:dashed}
+.ly-sym{display:inline-block;min-width:1.1em;text-align:center;font-weight:700;font-size:13px;line-height:1.2;color:var(--gc,var(--ink-2))}
+.ly-sym.big{font-size:15px;min-width:26px;padding:3px 0;border-radius:8px;background:var(--sheet-2)}
+.chip[aria-pressed="true"] .ly-sym{color:inherit}
+.ly-desc{margin:7px 0 0;font-size:12.5px;line-height:1.4;min-height:35px;color:var(--ink-2)}
+
+/* ruled notebook */
+.ly-paper{padding:6px 0 28px;font-family:var(--font-hand)}
+.ly-line{border-bottom:1px solid var(--rule);padding:0 2px}
+.ly-wl{display:flex;flex-wrap:wrap;align-items:flex-end;column-gap:15px}
+.ly-w{display:inline-flex;flex-wrap:wrap;max-width:100%;align-items:flex-end}
+.ly-gap{height:18px}
+.ly-syl{position:relative;display:inline-flex;flex-direction:column;align-items:center;justify-content:flex-end;min-width:18px;margin:0;padding:0;border:0;background:transparent;color:var(--ink);font:inherit;-webkit-appearance:none;appearance:none}
+.ly-syl.has-br{margin-right:7px}
+.ly-top{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;min-height:26px;pointer-events:none}
+.ly-ch{display:block;font-size:22px;line-height:34px;padding:0 1px;border-radius:5px;pointer-events:none}
+.ly-syl.has-pr .ly-ch{text-decoration:underline dotted var(--red);text-decoration-thickness:2px;text-underline-offset:4px}
+.ly-syl.on .ly-ch{background:var(--hl)}
+.ly-syl:focus-visible{outline-offset:-1px;border-radius:6px}
+.ly-pr{font-size:16px;line-height:16px;font-weight:700;color:var(--red)}
+.ly-mk{font-family:var(--font-ui);font-size:12px;line-height:13px;font-weight:700;color:var(--gc,var(--ink-3));white-space:nowrap}
+.ly-mk.ly-n{color:var(--ink-3)}
+.ly-br{position:absolute;right:-5px;bottom:16px;font-family:var(--font-ui);font-size:13px;line-height:13px;font-weight:700;color:var(--gc);pointer-events:none}
+.ly-paper.focus .ly-mk:not(.cur),.ly-paper.focus .ly-br:not(.cur){opacity:.4}
+.ly-p{display:inline-block;font-size:22px;line-height:34px;color:var(--ink-2)}
+.ly-memo{margin:-4px 0 6px;font-size:15px;line-height:1.3;font-style:italic;color:var(--ink-3);overflow-wrap:anywhere}
+.ly-memo::before{content:"✎ "}
+
+/* edit view */
+.ly-ta{font-family:var(--font-hand);font-size:20px;line-height:28px;min-height:220px;resize:none}
+.ly-edit-row{display:flex;align-items:center;gap:8px;margin:-8px 0 12px}
+.ly-quote{margin:0 0 14px;padding:8px 12px;border-left:3px solid var(--rule);font-family:var(--font-hand);font-size:17px;color:var(--ink-2)}
+
+/* small sheets */
+.ly-vlist{display:grid;gap:4px}
+.ly-vrow{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--rule-2)}
+.ly-vt{flex:1;min-width:0;display:grid;gap:1px}
+.ly-vp{margin-top:10px;font-family:var(--font-hand);font-size:19px;color:var(--ink-2)}
+.ly-vp b{color:var(--red)}
+
+/* 들으며 체크하기 */
+.ly-check{padding-top:12px}
+.ly-prog{display:grid;gap:8px;justify-items:start;padding:12px 14px;margin-bottom:10px;border-radius:14px;background:var(--blue-soft)}
+.ly-prog-n{font-size:14px}
+.ly-trk{width:100%;height:6px;border-radius:3px;background:var(--rule-2);overflow:hidden}
+.ly-trk i{display:block;height:100%;background:var(--blue);border-radius:3px}
+.ly-prog-t{font-size:15px;font-weight:600;line-height:1.45}
+.ly-row{display:flex;align-items:stretch;gap:2px;border-bottom:1px solid var(--rule-2)}
+.ly-row.next{background:var(--blue-soft);border-radius:12px;border-bottom-color:transparent}
+.ly-ck{display:grid;place-items:center;flex:none;width:44px;min-height:44px}
+.ly-ck input{width:22px;height:22px;margin:0;accent-color:var(--blue)}
+.ly-rn{flex:1;min-width:0;display:grid;gap:2px;padding:9px 6px 9px 0;border:0;background:transparent;text-align:left;font:inherit;color:inherit}
+.ly-rt{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:15px}
+.ly-rk{font-size:11.5px;color:var(--ink-3);min-width:16px;text-align:right}
+.ly-cnt{font-size:12px;color:var(--ink-3)}
+.ly-now{font-size:11.5px;font-weight:700;color:var(--on-accent);background:var(--blue);border-radius:999px;padding:0 8px;line-height:18px}
+.ly-rd{font-size:13px;line-height:1.45;color:var(--ink-2)}
+.ly-row.done .ly-rt b{text-decoration:line-through;text-decoration-color:var(--ink-4)}
+.ly-reset{display:flex;justify-content:center;padding:14px 0 6px}
+.ly-memo{color:var(--ink-2)}
