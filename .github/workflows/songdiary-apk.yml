@@ -102,6 +102,7 @@ jobs:
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
 
       # only after the APK built: the same screens go out as the in-app update
+      # GitHub sometimes refuses a push for a while ("fatal error in commit_refs"): try again a few times
       - name: Publish in-app update
         if: steps.on.outputs.on == 'true'
         run: |
@@ -110,18 +111,23 @@ jobs:
           git -C "$ota" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C "$ota" add -A
           git -C "$ota" commit -q -m "노래일기 ${{ steps.ver.outputs.name }} (code ${{ steps.ver.outputs.code }}) from ${GITHUB_SHA::7}"
-          git -C "$ota" push -q origin songdiary-ota
-          echo "in-app update ${{ steps.ver.outputs.name }} published"
+          for wait in 15 45 90 180 0; do
+            if git -C "$ota" push -q origin songdiary-ota; then echo "in-app update ${{ steps.ver.outputs.name }} published"; exit 0; fi
+            [ "$wait" -gt 0 ] || break
+            echo "::warning::push refused, trying again in ${wait}s"; sleep "$wait"
+          done
+          echo "::error::GitHub refused the in-app update push 5 times; the APK still goes to Drive"; exit 1
 
+      # the APK goes out even when the in-app update couldn't be published
       - uses: actions/upload-artifact@v4
-        if: steps.on.outputs.on == 'true'
+        if: always() && steps.on.outputs.on == 'true' && steps.build.outcome == 'success'
         with:
           name: songdiary-apk
           path: ${{ steps.build.outputs.apk }}
           retention-days: 7
 
       - name: Upload APK to Google Drive
-        if: steps.on.outputs.on == 'true'
+        if: always() && steps.on.outputs.on == 'true' && steps.build.outcome == 'success'
         run: python3 songdiary/tools/drive_apk.py upload --file "${{ steps.build.outputs.apk }}"
 
       - name: Remove the key
