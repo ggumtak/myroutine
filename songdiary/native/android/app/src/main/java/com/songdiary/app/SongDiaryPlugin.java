@@ -20,10 +20,13 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** What www/native.js asks of Android beyond the standard plugins: keep the screen on, open the app's settings,
- *  and recordings shared to the app (copied into cache/share, then picked up with takeSharedFiles). */
+ *  and recordings shared to the app (copied into cache/incoming, then picked up with takeSharedFiles; the page
+ *  deletes each copy once it has read it). Not cache/share: the page empties that one for its own exports. */
 @CapacitorPlugin(name = "SongDiary")
 public class SongDiaryPlugin extends Plugin {
     private static final String TAG = "SongDiary";
@@ -131,8 +134,9 @@ public class SongDiaryPlugin extends Plugin {
         intent.setAction(Intent.ACTION_MAIN); /* not taken twice when the activity is recreated */
         if (uris.isEmpty()) return;
         new Thread(() -> {
-            File dir = new File(getContext().getCacheDir(), "share");
+            File dir = new File(getContext().getCacheDir(), "incoming");
             dir.mkdirs();
+            dropStale(dir);
             ContentResolver cr = getContext().getContentResolver();
             List<JSObject> got = new ArrayList<>();
             for (Uri u : uris) {
@@ -160,9 +164,17 @@ public class SongDiaryPlugin extends Plugin {
                             byte[] buf = new byte[65536];
                             int r;
                             while ((r = in.read(buf)) > 0) { os.write(buf, 0, r); n += r; if (n > MAX_SIZE) break; }
+                        } catch (Exception e) {
+                            out.delete(); /* no half copy left behind */
+                            throw e;
                         }
                         f.put("size", n);
-                        f.put("path", Uri.fromFile(out).toString());
+                        if (n > MAX_SIZE) {
+                            out.delete(); /* the page refuses it and never reads it */
+                            f.put("path", "");
+                        } else {
+                            f.put("path", Uri.fromFile(out).toString());
+                        }
                     }
                     got.add(f);
                 } catch (Exception e) {
@@ -172,6 +184,20 @@ public class SongDiaryPlugin extends Plugin {
             synchronized (pending) { pending.addAll(got); }
             notifyListeners("sharedFiles", new JSObject(), true);
         }).start();
+    }
+
+    /* copies older than a day that nobody picked up (the app was closed before the page read them) */
+    private void dropStale(File dir) {
+        File[] old = dir.listFiles();
+        if (old == null) return;
+        Set<String> keep = new HashSet<>();
+        synchronized (pending) {
+            for (JSObject f : pending) keep.add(f.getString("path", ""));
+        }
+        long cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000;
+        for (File f : old) {
+            if (f.isFile() && f.lastModified() < cutoff && !keep.contains(Uri.fromFile(f).toString())) f.delete();
+        }
     }
 
     private static File free(File dir, String name) {

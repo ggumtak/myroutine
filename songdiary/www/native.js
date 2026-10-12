@@ -54,24 +54,33 @@ const Store = {
     });
   },
   keys(store) { return withDB(db => reqP(db.transaction(store).objectStore(store).getAllKeys())); },
-  /* entries: [[key, value|undefined]] — undefined deletes. opts {durability: 'strict'}: on disk before it resolves */
+  /* entries: [[key, value|undefined]] — undefined deletes. opts {durability: 'strict'}: on disk before it resolves.
+     entries may also be a function returning them: called again if the write is retried, so a retry never writes
+     a copy taken before a newer write */
   write(store, entries, opts) {
-    if (!entries.length) return Promise.resolve();
+    const get = typeof entries === 'function' ? entries : () => entries;
+    if (typeof entries !== 'function' && !entries.length) return Promise.resolve();
     return withDB(db => {
+      const list = get();
+      if (!list.length) return Promise.resolve();
       const t = opts ? db.transaction(store, 'readwrite', opts) : db.transaction(store, 'readwrite');
       const st = t.objectStore(store);
-      for (const [k, v] of entries) { if (v === undefined) st.delete(k); else st.put(v, k); }
+      for (const [k, v] of list) { if (v === undefined) st.delete(k); else st.put(v, k); }
       return done(t);
     });
   },
   put(store, key, val, opts) { return this.write(store, [[key, val]], opts); },
-  /* several stores in one transaction: { store: [[key, value|undefined]] } — all written or none */
+  /* several stores in one transaction: { store: [[key, value|undefined]] } — all written or none.
+     map may also be a function returning it (built again on a retry, as in write) */
   writeAll(map, opts) {
-    const stores = Object.keys(map).filter(k => map[k] && map[k].length);
-    if (!stores.length) return Promise.resolve();
+    const get = typeof map === 'function' ? map : () => map;
+    const used = m => Object.keys(m).filter(k => m[k] && m[k].length);
+    if (typeof map !== 'function' && !used(map).length) return Promise.resolve();
     return withDB(db => {
+      const m = get(), stores = used(m);
+      if (!stores.length) return Promise.resolve();
       const t = opts ? db.transaction(stores, 'readwrite', opts) : db.transaction(stores, 'readwrite');
-      for (const name of stores) { const st = t.objectStore(name); for (const [k, v] of map[name]) { if (v === undefined) st.delete(k); else st.put(v, k); } }
+      for (const name of stores) { const st = t.objectStore(name); for (const [k, v] of m[name]) { if (v === undefined) st.delete(k); else st.put(v, k); } }
       return done(t);
     });
   },
@@ -208,10 +217,23 @@ const Files = {
     await writeBlob(path, 'DOCUMENTS', blob, onProgress);
     return `내 파일 > 내장 저장공간 > Documents > ${path.split('/').join(' > ')}`;
   },
-  /* the copy handed to the share sheet can be gigabytes; once the app starts again it is surely not needed */
+  /* the copy handed to the share sheet can be gigabytes; one from an earlier visit is surely not needed.
+     Recent files stay: an older APK also copies files shared *to* the app into this folder (now cache/incoming),
+     and may still be copying one. Called only after the files shared at start have been read. */
   async clearShareCache() {
     const FS = plug('Filesystem');
-    if (FS) { try { await FS.rmdir({ path: 'share', directory: 'CACHE', recursive: true }); } catch (e) { /* not there */ } }
+    if (!FS) return;
+    let list = [];
+    try { list = (await FS.readdir({ path: 'share', directory: 'CACHE' })).files || []; } catch (e) { return; /* not there */ }
+    const old = Date.now() - 10 * 60000;
+    for (const f of list) {
+      if (!f || typeof f !== 'object' || !f.name || !(+f.mtime < old)) continue;
+      const path = `share/${f.name}`;
+      try {
+        if (f.type === 'directory') await FS.rmdir({ path, directory: 'CACHE', recursive: true });
+        else await FS.deleteFile({ path, directory: 'CACHE' });
+      } catch (e) { /* ignore */ }
+    }
   },
   /* a file name in 문서/노래일기/<sub> that doesn't replace an earlier export */
   async freeName(sub, name) {
@@ -297,12 +319,13 @@ const App = {
   /* what Android wrote down the last time the app crashed (read once), or '' */
   async lastCrash() { const P = plug('SongDiary'); if (!P || !P.lastCrash) return ''; try { const r = await P.lastCrash(); return (r && r.text) || ''; } catch (e) { return ''; } },
   openAppSettings() { const P = plug('SongDiary'); if (P) P.openAppSettings().catch(() => {}); },
+  /* resolves once the files waiting at start have been handed to fn and fn has finished (fn may be async) */
   onShared(fn) {
     const P = plug('SongDiary');
-    if (!P) return;
-    const pull = () => P.takeSharedFiles().then(r => { if (r && r.files && r.files.length) fn(r.files); }).catch(() => {});
+    if (!P) return Promise.resolve();
+    const pull = () => P.takeSharedFiles().then(r => (r && r.files && r.files.length ? fn(r.files) : null)).catch(() => {});
     P.addListener('sharedFiles', pull);
-    pull();
+    return pull();
   },
   onBack(fn) { const A = plug('App'); if (A) A.addListener('backButton', fn); },
   onPause(fn) { const A = plug('App'); if (A) A.addListener('pause', fn); },

@@ -251,8 +251,8 @@ function open({ key, title, artist }) {
     const hint = first ? '한 줄에 한 소절씩. 가사는 폰 안에만 저장되고 계정 동기화 시 내 계정에만 올라가요'
       : '그대로인 줄의 표시는 유지돼요. 글자를 고친 줄은 같은 자리의 같은 글자에만 표시가 남아요.';
     const find = h('button', { class: 'btn ghost sm', 'data-fk': 'ly-find', onclick: () => U.openUrl('https://www.google.com/search?q=' + encodeURIComponent([title, artist, '가사'].filter(Boolean).join(' '))) }, icon('search', 16), '가사 찾기');
-    root.replaceChildren(field(first ? '가사' : '가사 고치기', ta, hint), h('div', { class: 'ly-edit-row' }, cnt, h('span', { class: 'sp' }), find),
-      first ? null : h('button', { class: 'btn ghost sm danger', onclick: () => confirmSheet({ title: '가사를 지울까요?', text: '이 곡의 가사와 모든 표시, 발음, 메모가 지워져요.', ok: '지우기', danger: true, onOk: () => { fresh(); ly = emptyLy(); rov.clear(); commit(); editing = true; draw(); } }) }, icon('trash', 16), '가사 전체 지우기'));
+    root.replaceChildren(...[field(first ? '가사' : '가사 고치기', ta, hint), h('div', { class: 'ly-edit-row' }, cnt, h('span', { class: 'sp' }), find),
+      first ? null : h('button', { class: 'btn ghost sm danger', onclick: () => confirmSheet({ title: '가사를 지울까요?', text: '이 곡의 가사와 모든 표시, 발음, 메모가 지워져요.', ok: '지우기', danger: true, onOk: () => { fresh(); ly = emptyLy(); rov.clear(); commit(); editing = true; draw(); } }) }, icon('trash', 16), '가사 전체 지우기')].filter(Boolean));
     const save = () => {
       fresh();
       const nl = lines(ta.value);

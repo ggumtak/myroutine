@@ -73,7 +73,7 @@ async function main() {
   await visible(page, '.sheet.open .sc-play');
   let sheet = page.locator('.sheet.open');
   check((await sheet.locator('.sc-now').innerText()).includes('반음씩 내려가요 (5번)'), '12번 shows 5 rounds going down before playing');
-  check(await sheet.locator('.sc-top').nth(1).isHidden(), '12번 hides the 꼭대기 음, which it ignores');
+  check(await sheet.locator('.sc-top').nth(1).isHidden(), '12번 hides the 가장 높은 음, which it ignores');
   await sheet.locator('.sc-play').click();
   await page.waitForFunction(() => document.querySelector('.sheet.open .sc-seq > .cur'));
   const now12 = await sheet.locator('.sc-now').innerText();
@@ -219,7 +219,7 @@ async function main() {
   await page.evaluate(() => { const e = __sdTest.S.days[ymd(0)]; if (e && e.drills.rs_book) e.drills.rs_book.done = 0; __sdTest.render(); });
   await page.locator('[data-fk="grp-r4"]').click();
   const row = await page.locator('#sec-drills').innerText();
-  check(row.includes('20번') && row.includes('×3') && row.includes('복습 15번 ×1'), '④ row shows today’s exercise and the review');
+  check(row.includes('20번') && row.includes('×3') && /복습 .*\(15번\) ×1/.test(row), '④ row shows today’s exercise and the review');
 
   // ---------- sounds take turns ----------
   await page.evaluate(() => { __sdTest.S.settings.rounds[20] = { n: 0 }; __sdTest.render(); });
@@ -264,8 +264,8 @@ async function main() {
   sheet = page.locator('.sheet.open');
   await sheet.locator('.ses-dot').first().click();
   const intro = await sheet.locator('.ses-card').innerText();
-  check(intro.includes('오늘의 강도') && /20번 \(c\) 음 → 어 ×3/.test(intro) && intro.includes('복습 15번 ×1'), 'session intro shows the 강도 and ④ in detail');
-  check(/1번 ×1 → 3번 ×1/.test(intro) && /꼭대기/.test(intro), 'session intro shows ③ with reps, direction and top note');
+  check(intro.includes('오늘의 강도') && /\(20번\) \(c\) 음 → 어 ×3/.test(intro) && /복습 .*\(15번\) ×1/.test(intro), 'session intro shows the 강도 and ④ in detail');
+  check(/\(1번\) ×1 → .*\(3번\) ×1/.test(intro) && /가장 높은 음/.test(intro), 'session intro shows ③ with reps, direction and top note');
   const steps = await sheet.locator('.ses-dot').count();
   for (let k = 0; k < steps; k++) {
     await sheet.locator('.ses-dot').nth(k).click();

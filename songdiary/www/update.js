@@ -102,7 +102,7 @@ const OTA = {
   },
   /* downloads the changed files (by their sha256, from the version's own folder), copies the rest from this copy,
      checks all of them, then switches. onProgress(done, total, fetched) */
-  async apply(latest, onProgress) {
+  async apply(latest, onProgress, beforeSwitch) {
     if (!isNative) throw new Error('unsupported');
     if (installingCode != null) throw new Error('update-in-progress');
     installingCode = latest.code;
@@ -145,6 +145,8 @@ const OTA = {
     /* if the new copy doesn't start, back to the one running now */
     s.prev = sv && sv.code ? { type: 'file', path: sv.path } : { type: 'asset' };
     save(s);
+    /* everything typed is on disk before the page goes away */
+    if (beforeSwitch) { try { await beforeSwitch(); } catch (e) { /* switching matters more than a late save */ } }
     /* the WebView reloads from the new copy; it is kept only after it starts up fine (confirmBoot) */
     await native('WebView', 'setServerBasePath', { path });
     } finally { installingCode = null; }

@@ -127,12 +127,12 @@ async function main() {
   check(await sheet.locator('.sc-seq > span').first().innerText() === '도#', 'solfa follows the actual transposed root');
   check(await sheet.locator('.sc-top').nth(1).locator('.sc-top-n').innerText() === topBefore, 'changing start does not change the ceiling');
   const startBefore = await sheet.locator('.sc-top').first().locator('.sc-top-n').innerText();
-  await sheet.getByRole('button', { name: '꼭대기 음 반음 올리기', exact: true }).click();
+  await sheet.getByRole('button', { name: '가장 높은 음 반음 올리기', exact: true }).click();
   check(await sheet.locator('.sc-top').first().locator('.sc-top-n').innerText() === startBefore, 'changing ceiling does not change the start');
   await sheet.locator('.sc-play').click();
   await page.waitForFunction(() => document.querySelector('.sheet.open .sc-seq > .cur'));
   const epoch = await page.evaluate(() => __sdTest.Synth.seq);
-  await sheet.getByRole('button', { name: '꼭대기 음 반음 올리기', exact: true }).click();
+  await sheet.getByRole('button', { name: '가장 높은 음 반음 올리기', exact: true }).click();
   await sheet.locator('.sc-top').first().getByRole('button', { name: '시작 음 반음 올리기', exact: true }).click();
   check(await page.evaluate(() => __sdTest.Synth.seq) === epoch, 'live start/ceiling edits do not interrupt or restart the current round');
   let visibleSteps = 0;

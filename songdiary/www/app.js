@@ -302,7 +302,7 @@ function normDay(date, e) {
   if (!e || typeof e !== 'object') return b;
   const arr = x => (Array.isArray(x) ? x.filter(i => i && typeof i === 'object' && i.id) : []);
   const drills = {};
-  if (e.drills && typeof e.drills === 'object') for (const id in e.drills) { const s = e.drills[id]; if (s && typeof s === 'object') drills[id] = { name: String(s.name || '연습'), target: clampInt(s.target, 1, 99, 5), done: clampInt(s.done, 0, 99, 0), times: Array.isArray(s.times) ? s.times.filter(n => typeof n === 'number') : [] }; }
+  if (e.drills && typeof e.drills === 'object') for (const id in e.drills) { const s = e.drills[id]; if (s && typeof s === 'object') drills[id] = { name: String(s.name || '연습'), target: clampInt(s.target, 1, 99, 5), done: clampInt(s.done, 0, 99, 0), times: Array.isArray(s.times) ? s.times.filter(n => typeof n === 'number') : [] }; if (drills[id] && s && Array.isArray(s.bk)) drills[id].bk = s.bk.slice(0, 99).map(n => (Number.isInteger(n) && n >= 1 && n <= 99 ? n : 0)); }
   return {
     ...b, ...e, date,
     cond: e.cond >= 1 && e.cond <= 5 ? e.cond : null,
@@ -311,7 +311,7 @@ function normDay(date, e) {
     water: +e.water || 0, minutes: +e.minutes || 0,
     goal: String(e.goal || ''), memo: String(e.memo || ''), next: String(e.next || ''),
     rating: e.rating >= 1 && e.rating <= 5 ? e.rating : null,
-    high: typeof e.high === 'number' ? e.high : null,
+    high: Number.isInteger(e.high) && e.high >= 24 && e.high <= 108 ? e.high : null, /* a MIDI note; the picker offers HIGH_MIN~HIGH_MAX */
     after: +e.after >= 1 && +e.after <= 10 ? Math.round(+e.after) : null, /* 끝난 후 목 상태 1~10 */
     pron: normPron(e.pron),
     stop: +e.stop > 0 ? +e.stop : null, /* when '그날은 끝' was pressed */
@@ -332,7 +332,7 @@ function touchSettings() { S.settings.updatedAt = Date.now(); queueWrite('@s', 5
 function entryDates() { return Object.keys(S.days).filter(d => hasContent(S.days[d])).sort(); }
 
 /* ================= persistence (everything stays on this phone) ================= */
-const WQ = { keys: new Set(), timer: 0, busy: false, again: false, warned: 0 };
+const WQ = { keys: new Set(), timer: 0, busy: false, again: false, warned: 0, run: null };
 function queueWrite(key, delay = 400) {
   WQ.keys.add(key);
   Sync.changed();
@@ -340,13 +340,27 @@ function queueWrite(key, delay = 400) {
   WQ.timer = setTimeout(runWrites, delay);
   updateSave();
 }
+/* resolves once nothing is queued and no write is running (or a write failed: it is tried again in 4 s) */
 function flushWrites() { clearTimeout(WQ.timer); return runWrites(); }
-async function runWrites() {
-  if (WQ.busy) { WQ.again = true; return; }
-  if (!WQ.keys.size || S.mode !== 'ready') { updateSave(); return; }
+function runWrites() {
+  if (WQ.busy) { WQ.again = true; return WQ.run; } /* the running one writes again before it resolves */
+  if (!WQ.keys.size || S.mode !== 'ready') { updateSave(); return Promise.resolve(); }
+  WQ.busy = true;
+  WQ.run = (async () => {
+    try {
+      let ok = true;
+      do { WQ.again = false; ok = await writeQueued(); } while (ok && WQ.again && WQ.keys.size);
+    } finally {
+      WQ.busy = false; WQ.again = false; WQ.run = null;
+    }
+    updateSave();
+  })();
+  return WQ.run;
+}
+/* one write of what is queued now; false when it failed */
+async function writeQueued() {
   const keys = Array.from(WQ.keys);
   WQ.keys.clear();
-  WQ.busy = true;
   updateSave();
   try {
     const days = [];
@@ -358,6 +372,7 @@ async function runWrites() {
     if (meta) await Store.write('meta', meta);
     if (days.length) await Store.write('days', days);
     S.saveErr = null;
+    return true;
   } catch (err) {
     keys.forEach(k => WQ.keys.add(k));
     S.saveErr = (err && err.name) || 'error';
@@ -367,11 +382,8 @@ async function runWrites() {
     }
     clearTimeout(WQ.timer);
     WQ.timer = setTimeout(runWrites, 4000);
-  } finally {
-    WQ.busy = false;
+    return false;
   }
-  if (WQ.again) { WQ.again = false; runWrites(); return; }
-  updateSave();
 }
 function retrySaves() { if (S.saveErr) flushWrites(); }
 function updateSave() {
@@ -381,7 +393,7 @@ function updateSave() {
   if (S.mode === 'loading') text = '';
   else if (S.saveErr) { text = '저장 안 됨'; err = true; }
   else if (WQ.keys.size || WQ.busy) text = '저장 중…';
-  else text = '저장됨';
+  else text = ''; /* saved: nothing to say */
   if (el.textContent !== text) el.textContent = text;
   el.classList.toggle('err', err);
   el.disabled = !err;
@@ -406,6 +418,8 @@ async function loadAll() {
   applyTheme();
   updateSave();
   render();
+  /* the first real screen (also the error one) is drawn: an update being tried has started, whatever the data did */
+  window.__sdBooted = true;
   afterLoad();
 }
 function isDark() {
@@ -639,6 +653,8 @@ const Player = {
     }
     this.stopAll();
     if (this.loop && this.loop.id !== r.id) this.loop = null;
+    /* another recording: the decoded copy of the last one (tens of MB) is let go */
+    if (this.wa && this.waFor !== r.id) { this.wa.halt(); this.wa = null; this.waFor = null; }
     this.cur = { id: r.id, dur: r.dur || 0, aud: r.aud, mime: r.mime };
     if (this.wa && this.waFor === r.id) {
       if (opts.at != null) this.wa.currentTime = opts.at;
@@ -690,11 +706,19 @@ const Player = {
   },
   async srcFor(r) {
     if (!r.aud) return null;
-    if (this.urls.has(r.aud)) return this.urls.get(r.aud);
+    if (this.urls.has(r.aud)) { const u = this.urls.get(r.aud); this.urls.delete(r.aud); this.urls.set(r.aud, u); return u; } /* most recent last */
     const blob = await audioBlob(r);
     if (!blob) return null;
+    if (this.urls.has(r.aud)) return this.urls.get(r.aud);
     const url = URL.createObjectURL(blob);
     this.urls.set(r.aud, url);
+    /* the last few stay ready; older ones are let go (never the one in the player) */
+    const inUse = this.el.getAttribute('src');
+    for (const [k, u] of this.urls) {
+      if (this.urls.size <= 4) break;
+      if (k === r.aud || u === inUse) continue;
+      URL.revokeObjectURL(u); this.urls.delete(k);
+    }
     return url;
   },
   async fallbackWA(cur) {
@@ -1023,7 +1047,7 @@ function render(opts = {}) {
   const keep = !opts.focus && !opts.top && act && act !== document.body && main.contains(act) && !isTyping() ? ctlKey(act) : '';
   const title = S.settings ? S.settings.title : '나의 소리일기';
   $('#tb-title').textContent = '소리일기';
-  $('#tb-subtitle').textContent = title;
+  $('#tb-subtitle').textContent = title; $('#tb-subtitle').hidden = title === '나의 소리일기'; /* the default name only repeats the title */
   document.title = `${title} · 소리일기`;
   $$('.tab').forEach(b => { const active = b.dataset.tab === S.tab; b.setAttribute('aria-selected', String(active)); b.tabIndex = active ? 0 : -1; });
   main.setAttribute('role', 'tabpanel');
@@ -1142,7 +1166,7 @@ function WhatsNew() {
     h('b', null, '새로워졌어요'),
     h('ul', null,
       h('li', null, '노래 전 루틴을 Singing for the Stars(세스 릭스) 책으로 새로 짰어요. 히싱·개호흡은 그대로예요.'),
-      h('li', null, '책의 스케일 26개가 건반에 들어 있어요. 시작을 한 번 누르면 꼭대기 음까지 반음씩 올라갔다가 다시 내려와요.'),
+      h('li', null, '책의 스케일 26개가 건반에 들어 있어요. 시작을 한 번 누르면 가장 높은 음까지 반음씩 올라갔다가 다시 내려와요.'),
       h('li', null, '‘오늘 연습 따라 하기’를 누르면 처음부터 끝까지 한 단계씩 안내해요. 건반은 0옥 도부터 있어요.'),
       !u.seen13 ? h('li', null, '맨 위 ‘멈춤 규칙’이 목 상태와 연습 시간을 보고 알려 줘요. 20~25분 부르면 쉬라고 알려 줘요.') : null,
       !u.seen12 ? h('li', null, '‘기초 연습’의 건반(🎹)으로 스케일 연습을 할 수 있어요.') : null,
@@ -1184,10 +1208,11 @@ function swipe(el, onLeft, onRight) {
 
 /* ================= practice timer ================= */
 /* the practice timer also keeps the singing stretch (seg) and a rest (rest) for 멈춤 규칙 3 */
-function startTimer(date) {
+function startTimer(date, o = {}) {
   const now = Date.now();
   lsSet(LS_TIMER, { date, start: now, seg: now, rest: 0, cue: '' });
   render();
+  if (o.quiet) return; /* the session sheet is open: the bar's clock says it */
   const e = S.days[date];
   if (e && e.goal.trim()) toast('연습 시간을 재기 시작했어요. 20분·25분에 쉬라고 알려 줄게요');
   else toast('연습 시간을 재기 시작했어요. 오늘 집중할 것 1개 정해 볼까요?', { action: '고르기', onAction: () => focusField('cue-0') }); /* focusField picks the open list's row */
@@ -1198,7 +1223,7 @@ function stopTimer(o = {}) {
   if (!tm) return 0;
   lsSet(LS_TIMER, null);
   const add = Math.round((Date.now() - tm.start) / 60000);
-  if (add > 240) { render(); editMinutes(tm.date, ((S.days[tm.date] || {}).minutes || 0) + add, '4시간 넘게 켜져 있었어요. 이 날 연습한 시간을 모두 합쳐서 확인해 주세요.', () => toast('기록하지 않았어요. 연필 버튼으로 직접 적을 수 있어요')); return 0; }
+  if (add > 240) { render(); editMinutes(tm.date, ((S.days[tm.date] || {}).minutes || 0) + add, '4시간 넘게 켜져 있었어요. 이 날 연습한 시간을 모두 합쳐서 확인해 주세요.', () => toast('기록하지 않았어요. 연필 버튼으로 직접 적을 수 있어요'), () => { const e = S.days[tm.date]; if (e && e.after == null && !Sheets.length) openAfterSheet(tm.date); }); return 0; }
   if (add >= 1) { const e = ensureDay(tm.date); e.minutes = (e.minutes || 0) + add; touch(tm.date); if (!o.quiet) toast(`${fmtMin(add)}을 기록했어요`); }
   else if (!o.quiet) toast('1분이 안 돼서 기록하지 않았어요');
   render();
@@ -1277,14 +1302,14 @@ function tickTimer() {
   }
 }
 /* onCancel: called when the sheet is closed without saving */
-function editMinutes(date, suggested, note, onCancel) {
+function editMinutes(date, suggested, note, onCancel, onSaved) {
   const e = S.days[date];
   let val = suggested != null ? suggested : (e ? e.minutes : 0);
   const out = h('input', { class: 'input', type: 'number', inputmode: 'numeric', min: 0, max: 1440, value: val, 'aria-label': '연습 시간(분)', 'data-autofocus': '' });
   const quick = h('div', { class: 'btn-row' }, [-10, -5, 5, 10, 30].map(n => h('button', { class: 'btn soft sm', onclick: () => { out.value = Math.max(0, (parseInt(out.value, 10) || 0) + n); } }, (n > 0 ? '+' : '−') + Math.abs(n) + '분')));
   let s = null;
   let saved = false;
-  const save = h('button', { class: 'btn ink', onclick: () => { const v = clampInt(out.value, 0, 1440, 0); const d = ensureDay(date); d.minutes = v; saved = true; touch(date); closeSheet(s, true); render(); toast(`연습 시간을 ${fmtMin(v)}으로 적었어요`); } }, '저장');
+  const save = h('button', { class: 'btn ink', onclick: () => { const v = clampInt(out.value, 0, 1440, 0); const d = ensureDay(date); d.minutes = v; saved = true; touch(date); closeSheet(s, true); render(); toast(`연습 시간을 ${fmtMin(v)}으로 적었어요`); if (onSaved) onSaved(v); } }, '저장');
   s = openSheet({ title: `${fmtMD(date)} 연습 시간`, body: h('div', null, note ? h('p', { class: 'banner' }, note) : null, field('모두 몇 분 연습했나요?', out), quick), foot: [save], onClose: () => { if (!saved && onCancel) onCancel(); } });
 }
 
@@ -1633,10 +1658,20 @@ function SongSuggest(inp, opts) {
   return box;
 }
 /* album art, singer, and quick ways to hear the original / find an MR / read the lyrics */
-function SongHero(L, key, onChange, beforeLink) {
+/* 찾아보기: the outside links for a song (preview, YouTube, MR, lyrics search, karaoke number) */
+function SongLinks(L) {
   const c = L.cat;
   const q = [L.title, L.artist].filter(Boolean).join(' ');
   const enc = encodeURIComponent;
+  return h('div', { class: 'hero-links' },
+    c && c.prev ? h('button', { class: 'btn soft sm', onclick: ev => Preview.toggle(c.prev, ev.currentTarget) }, icon('play', 16), '원곡 미리듣기') : null,
+    h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://www.youtube.com/results?search_query=${enc(q)}`) }, icon('video', 17), '유튜브'),
+    h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://www.youtube.com/results?search_query=${enc(q + ' MR')}`) }, icon('music', 16), 'MR 찾기'),
+    h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://m.search.naver.com/search.naver?query=${enc(q + ' 가사')}`) }, icon('search', 16), '가사 검색'),
+    h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://m.search.naver.com/search.naver?query=${enc(q + ' 노래방 번호')}`) }, icon('search', 16), '노래방 번호'));
+}
+function SongHero(L, key, onChange, beforeLink, o = {}) {
+  const c = L.cat;
   const sub = [L.artist, c && c.album && c.album !== L.title ? c.album.replace(/ - (Single|EP)$/, '') : '', c && c.year].filter(Boolean).join(' · ');
   return h('div', { class: 'hero' },
     h('div', { class: 'hero-top' },
@@ -1645,12 +1680,7 @@ function SongHero(L, key, onChange, beforeLink) {
         h('b', null, L.title),
         h('span', { class: sub ? '' : 'hint' }, sub || '가수는 아래에 적거나 실제 노래와 연결하면 채워져요'),
         h('button', { class: 'link', onclick: () => { if (beforeLink) beforeLink(); openSongLink(key, onChange); } }, icon('link', 15), c ? '다른 노래로 연결' : '실제 노래와 연결하기'))),
-    h('div', { class: 'hero-links' },
-      c && c.prev ? h('button', { class: 'btn soft sm', onclick: ev => Preview.toggle(c.prev, ev.currentTarget) }, icon('play', 16), '원곡 미리듣기') : null,
-      h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://www.youtube.com/results?search_query=${enc(q)}`) }, icon('video', 17), '유튜브'),
-      h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://www.youtube.com/results?search_query=${enc(q + ' MR')}`) }, icon('music', 16), 'MR 찾기'),
-      h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://m.search.naver.com/search.naver?query=${enc(q + ' 가사')}`) }, icon('lyrics', 16), '가사'),
-      h('button', { class: 'btn soft sm', onclick: () => Native.openUrl(`https://m.search.naver.com/search.naver?query=${enc(q + ' 노래방 번호')}`) }, icon('search', 16), '노래방 번호')));
+    o.noLinks ? null : SongLinks(L));
 }
 function openSongLink(key, onDone) {
   const L = songLib().get(key);
@@ -1920,16 +1950,16 @@ function vowelAt(bk) {
   return ((R && R.n) || 0) % bk.v.length;
 }
 const vowelTxt = bk => (bk && bk.v && bk.v.length > 1 ? ` (${bk.v[vowelAt(bk)][0]}) ${bk.v[vowelAt(bk)][1]}` : '');
-const exTxt = (no, reps) => { const bk = SK.BOOK[no - 1]; return `${no}번${vowelTxt(bk)} ×${reps}${bk.dir === 'down' ? ' ▼' : ''}`; };
+const exTxt = (no, reps) => { const bk = SK.BOOK[no - 1]; return `${bk.name}(${no}번)${vowelTxt(bk)} ×${reps}${bk.dir === 'down' ? ' ▼' : ''}`; };
 /* '20번 (b) 음 → 오 ×3 + 복습 17번 ×1' */
 function bookLine(date, target) {
   const plan = bookPlan(date), sl = bookSlots(plan, target);
   const mainN = sl.filter(n => n === plan.main).length, rev = sl.filter(n => n !== plan.main);
   return (plan.keep ? '유지 ' : '') + exTxt(plan.main, mainN) + rev.map(n => ` + 복습 ${exTxt(n, 1)}`).join('');
 }
-/* the piano's way through the warm-ups and ④: ▲ up and back / ▼ down only, to the 꼭대기 음 */
-const autoTxt = () => { const T = S.settings.scale; return T.auto ? ` · ${T.direction === 'down' ? '▼' : '▲'} 꼭대기 ${noteName(T.top)}` : ''; };
-/* one line per step: '③ 6분 · 1번 ×1 → 3번 ×1 · 2번 ×1 → 4번 ×1 · ▲ 꼭대기 2옥 도' */
+/* the piano's way through the warm-ups and ④: up and back, or down only, from the highest note ('꼭대기 음' in the data) */
+const autoTxt = () => { const T = S.settings.scale; return T.auto ? ` · ${T.direction === 'down' ? '위에서 내려오기 · ' : ''}가장 높은 음 ${noteName(T.top)}` : ''; };
+/* one line per step: '③ 6분 · 입술 떨기(1번) ×1 → … · 가장 높은 음 2옥 도' */
 function stepLine(date, g) {
   const t = id => S.settings.drills.find(d => d.id === id);
   const parts = [];
@@ -2080,7 +2110,7 @@ function openScaleTrainer(o = {}) {
       bk.good && bk.good.length ? h('div', { class: 'sc-good' }, h('b', null, '이런 데 좋아요'), h('ul', null, bk.good.map(t => h('li', null, t)))) : null,
       vs,
       h('details', { class: 'sc-more' }, h('summary', null, '방법 더 보기'),
-        h('ul', null, bk.text.map(t => h('li', null, t)), h('li', null, `${SK.START[bk.start]} — 책의 테너 시작 음: ${noteName(bk.t)} (${noteSci(bk.t)})`), bk.no <= 4 ? h('li', null, '공기를 너무 쓰거나 높은 음을 미리 걱정하면 입술·혀가 멈춰요. 그럴 땐 높은 음에 다가갈 때 몸을 앞으로 숙였다가 끝나면 일어서요.') : null)),
+        h('ul', null, bk.text.map(t => h('li', null, t)), h('li', null, `${SK.START[bk.start]} — 책에서 정한 시작 음: ${noteName(bk.t)} (${noteSci(bk.t)})`), bk.no <= 4 ? h('li', null, '공기를 너무 쓰거나 높은 음을 미리 걱정하면 입술·혀가 멈춰요. 그럴 땐 높은 음에 다가갈 때 몸을 앞으로 숙였다가 끝나면 일어서요.') : null)),
       h('details', { class: 'sc-more' }, h('summary', null, '말 풀이 (가슴소리·머리소리·끼익 소리…)'), WordList()),
       warm ? null : h('div', { class: 'sc-log' }, h('span', { class: 'hint' }, `처음 한 날 ${L.s ? fmtMD(L.s) : '—'} · 잘 되게 된 날 ${L.a ? fmtMD(L.a) : '—'}`), acts)].filter(Boolean));
   };
@@ -2180,10 +2210,10 @@ function openScaleTrainer(o = {}) {
   /* 꼭대기 음 */
   const topName = h('b', { class: 'sc-top-n', 'aria-live': 'polite' });
   const setTop = m => { T.top = Math.max(SCALE_LO + 2, Math.min(SCALE_TOP, m)); touchSettings(); reviseRun('top'); drawKeys(); paint(); if (!playing) showRange(T.top - 4, T.top); };
-  const topDn = h('button', { class: 'btn soft sm sq', 'aria-label': '꼭대기 음 반음 내리기', onclick: () => setTop(ceil() - 1) }, icon('dn', 18));
-  const topUp = h('button', { class: 'btn soft sm sq', 'aria-label': '꼭대기 음 반음 올리기', onclick: () => setTop(ceil() + 1) }, icon('up', 18));
+  const topDn = h('button', { class: 'btn soft sm sq', 'aria-label': '가장 높은 음 반음 내리기', onclick: () => setTop(ceil() - 1) }, icon('dn', 18));
+  const topUp = h('button', { class: 'btn soft sm sq', 'aria-label': '가장 높은 음 반음 올리기', onclick: () => setTop(ceil() + 1) }, icon('up', 18));
   const topHint = h('span', { class: 'hint' });
-  const topRow = h('div', { class: 'sc-top' }, h('span', { class: 'lbl' }, '꼭대기 음'), topDn, topName, topUp, topHint);
+  const topRow = h('div', { class: 'sc-top' }, h('span', { class: 'lbl' }, '가장 높은 음'), topDn, topName, topUp, topHint);
   /* 시작 음 without playing: go lower (or higher) than the book's start whenever you like */
   const startName = h('b', { class: 'sc-top-n', 'aria-live': 'polite' });
   const moveStart = m => { setStart(Math.max(SCALE_LO, Math.min(SCALE_HI, m)), playing); reviseRun('start'); drawInfo(); paint(); if (!playing) showRange(base, base + span()); };
@@ -2195,12 +2225,12 @@ function openScaleTrainer(o = {}) {
   const tempo = h('div', { class: 'seg sc-tempo', role: 'group', 'aria-label': '빠르기' },
     TEMPOS.map(([l, v]) => segBtn(l, T.bpm === v, ev => { T.bpm = v; touchSettings(); $$('button', tempo).forEach(b => b.setAttribute('aria-pressed', String(b === ev.currentTarget))); }, `tempo-${v}`)));
   const directions = h('div', { class: 'seg', role: 'group', 'aria-label': '자동 진행 방향' },
-    [['updown', '상행 시작'], ['down', '하행만']].map(([value, label]) => segBtn(label, T.direction === value, ev => {
+    [['updown', '올라갔다 내려오기'], ['down', '위에서 내려오기만']].map(([value, label]) => segBtn(label, T.direction === value, ev => {
       T.direction = value; touchSettings(); reviseRun('direction');
       $$('button', directions).forEach(b => b.setAttribute('aria-pressed', String(b === ev.currentTarget))); paint();
     }, `direction-${value}`)));
   const dirField = h('div', { class: 'field', style: 'margin:14px 0 4px' }, h('span', { class: 'lbl' }, '자동 진행 방향'), directions,
-    h('p', { class: 'hint' }, '상행 시작: 시작음 → 꼭대기 → 시작음. 하행만: 꼭대기에서 시작음까지 내려와요.'));
+    h('p', { class: 'hint' }, '올라갔다 내려오기: 시작 음 → 가장 높은 음 → 시작 음. 위에서 내려오기만: 가장 높은 음에서 시작 음까지 내려와요.'));
   /* '내 음 보기' */
   const tuneBox = h('div', { class: 'tuner', hidden: true });
   const setSwitch = on => { const sw = tuneRow.querySelector('.switch'); if (sw) sw.setAttribute('aria-checked', String(on)); };
@@ -2254,7 +2284,7 @@ function openScaleTrainer(o = {}) {
     const bs = bookStart(curPat);
     startName.textContent = `${noteName(base)} (${noteSci(base)})`;
     startDn.disabled = base <= SCALE_LO; startUp.disabled = base >= SCALE_HI;
-    startHint.replaceChildren(...(bs == null ? [] : base === bs ? ['책의 테너 시작 음이에요'] : [`책(테너): ${noteName(bs)} `, h('button', { class: 'link', onclick: () => moveStart(bs) }, '책대로')]));
+    startHint.replaceChildren(...(bs == null ? [] : base === bs ? ['책에서 정한 시작 음이에요'] : [`책: ${noteName(bs)} `, h('button', { class: 'link', onclick: () => moveStart(bs) }, '책대로')]));
     const c = ceil();
     topRow.hidden = !T.auto || downEx();
     dirField.hidden = downEx();
@@ -2382,13 +2412,13 @@ function openScaleTrainer(o = {}) {
       topRow,
       dirField,
       extra,
-      ToggleRow('반음씩 자동 진행', T.auto, v => { stop(); T.auto = v; touchSettings(); paint(); }, '위에서 고른 방향으로 한 묶음씩 이어서 연주해요. 시작음과 꼭대기음은 따로 기억하고, 재생 중 바꾸면 다음 묶음부터 반영돼요.', 'repeat'),
+      ToggleRow('한 번 끝날 때마다 반음씩 높이기', T.auto, v => { stop(); T.auto = v; touchSettings(); paint(); }, '위에서 고른 방향으로 한 묶음씩 이어서 연주해요. 시작 음과 가장 높은 음은 따로 기억하고, 재생 중 바꾸면 다음 묶음부터 반영돼요.', 'repeat'),
       h('div', { class: 'field', style: 'margin:16px 0 4px' }, h('span', { class: 'lbl' }, '빠르기'), tempo),
-      ToggleRow('시작 전에 기준 화음', T.chord, v => { T.chord = v; touchSettings(); }, '스케일 전에 첫 음의 화음을 들려줘요', 'music'),
+      ToggleRow('시작 전 화음 들려주기', T.chord, v => { T.chord = v; touchSettings(); }, '스케일 전에 첫 음의 화음을 들려줘요', 'music'),
       ToggleRow('따라 부르기 박자', T.echo, v => { T.echo = v; touchSettings(); }, '피아노가 끝나면 같은 박자를 한 번 더 짚어 줘요. 들은 다음 따라 부르는 연습이에요.', 'repeat'),
       tuneRow,
       h('details', { class: 'sc-instructions' }, h('summary', null, '연습 방법과 책 진도 보기'), infoBox),
-      h('p', { class: 'hint', style: 'margin-top:8px' }, '책 스케일은 책의 테너 시작 음에서 열려요. 건반을 누르거나 시작 음 ▼로 더 낮게(0옥 도까지) 시작할 수 있고, 연습마다 기억해요. 책: 피아노 끝까지 올라갈 필요 없어요. 힘이 들어가거나 연결이 끊기면 바로 멈추세요.', bestM != null ? ' 빨간 점은 지금까지 낸 최고음이에요.' : '')),
+      h('p', { class: 'hint', style: 'margin-top:8px' }, '책 스케일은 책에서 정한 시작 음에서 열려요. 건반을 누르거나 시작 음 ▼로 더 낮게(0옥 도까지) 시작할 수 있고, 연습마다 기억해요. 책: 피아노 끝까지 올라갈 필요 없어요. 힘이 들어가거나 연결이 끊기면 바로 멈추세요.', bestM != null ? ' 빨간 점은 지금까지 낸 최고음이에요.' : '')),
     onClose: () => { closed = true; clearTimeout(autoT); run = null; Synth.stop(); Tuner.stop(); if (kbWatch) kbWatch.disconnect(); document.removeEventListener('visibilitychange', onVis); if (o.onClose) o.onClose(); }
   });
   requestAnimationFrame(() => { centerRoot(); showChip(); });
@@ -2482,7 +2512,16 @@ function QuickActions(date) {
   return h('div', { class: 'quick-actions', role: 'group', 'aria-label': '자주 쓰는 기능' },
     h('button', { class: 'quick-action', 'data-fk': 'quick-scale', onclick: () => openScaleTrainer({ date }) }, icon('piano', 23), h('span', null, '스케일'), h('small', null, '바로 연습')),
     h('button', { class: 'quick-action', 'data-fk': 'quick-record', onclick: () => openRecorder(date) }, icon('mic', 23), h('span', null, '녹음'), h('small', null, '내 소리 듣기')),
-    h('button', { class: 'quick-action', 'data-fk': 'quick-note', onclick: () => focusField('memo') }, icon('edit', 23), h('span', null, '한 줄 기록'), h('small', null, '느낌 남기기')));
+    h('button', { class: 'quick-action', 'data-fk': 'quick-note', onclick: () => focusField('memo') }, icon('edit', 23), h('span', null, '오늘 메모'), h('small', null, '느낌 남기기')));
+}
+/* the day's one main action, right under the date: walk through today's routine */
+function SessionCTA(date) {
+  if (!routineOn() || date !== todayStr()) return null;
+  const counted = drillList(date).filter(d => !d.orphan && counts(date, d.id));
+  const all = counted.length > 0 && counted.every(d => d.done >= d.target), reps = counted.reduce((a, d) => a + Math.min(d.done, d.target), 0);
+  return h('button', { class: 'btn ink wide ses-start ses-cta', 'data-fk': 'ses-start', onclick: openSession }, icon('play', 20),
+    h('span', { class: 'cta-t' }, all ? '오늘 연습 다시 보기' : reps ? '이어서 따라 하기' : '오늘 연습 따라 하기'),
+    all ? null : h('small', null, `약 ${routineMin(date)}분`));
 }
 function TodayView() {
   const date = S.date, today = todayStr(), isToday = date === today;
@@ -2514,7 +2553,8 @@ function TodayView() {
         nx ? h('button', { class: 'btn blue', 'data-fk': `next-${nx.k}`, onclick: () => jumpPart(nx.k) }, nx.name + '으로', icon('right', 17))
           : h('button', { class: 'btn blue', onclick: () => { S.lib.seg = 'journal'; go('songs'); } }, icon('diary', 18), '일기 모아보기')));
   };
-  return h('div', { class: 'v-today' }, isToday ? (UpdateBanner() || WhatsNew() || BackupNudge()) : null, head,
+  return h('div', { class: 'v-today' }, isToday ? (UpdateBanner() || WhatsNew()) : null, head,
+    SessionCTA(date),
     isToday ? QuickActions(date) : null,
     TodayNav(),
     /* the practice clock and the stop rules belong to the whole day, so they come before its parts */
@@ -2524,12 +2564,13 @@ function TodayView() {
     part('practice', '몸을 풀고 소리를 만들어요', DrillSec(date)),
     part('sing', '부르고, 녹음해서 들어 봐요', SongSec(date, e), RecSec(date, e)),
     part('after', isToday ? '목 상태를 적고 오늘을 돌아봐요' : '그날을 돌아봐요',
-      AfterSec(date, e), ReflectSec(date, e), NotesSec(date, e),
+      AfterSec(date, e), NotesSec(date, e), ReflectSec(date, e),
       h('div', { class: 'sec today-foot' },
         h('div', { class: 'foot-btns' },
           h('button', { class: 'btn soft', onclick: () => copySummary(date) }, icon('copy', 18), '요약 복사'),
           h('button', { class: 'btn soft', onclick: () => shareSummary(date) }, icon('send', 18), '요약 보내기')))),
-    memo ? h('div', { class: 't-memory' }, memo) : null);
+    memo ? h('div', { class: 't-memory' }, memo) : null,
+    isToday ? BackupNudge() : null);
 }
 /* 오늘, in the order a practice day goes (the bar's labels are short; headings say it in full) */
 const TGROUPS = [
@@ -2619,8 +2660,8 @@ function StopCard(date) {
   const folded = onN ? u.stopFold === true : u.stopFold !== false;
   const shown = folded ? R.filter(r => r.on || r.hintAct) : R;
   return h('div', { class: 'sec stop-card' + (onN ? ' alert' : ''), id: 'sec-stop' },
-    h('button', { class: 'stop-h', 'data-fk': 'stop-fold', 'aria-expanded': String(!folded), 'aria-label': `멈춤 규칙 4가지${onN ? `, 지금 해당 ${onN}개` : ''}, ${folded ? '펼치기' : '접기'}`, onclick: () => { uiSet('stopFold', !folded); render({ focus: 'stop-fold' }); } },
-      icon('shield', 20), h('b', null, '멈춤 규칙'),
+    h('button', { class: 'stop-h', 'data-fk': 'stop-fold', 'aria-expanded': String(!folded), 'aria-label': `목 보호 규칙 4가지${onN ? `, 지금 해당 ${onN}개` : ''}, ${folded ? '펼치기' : '접기'}`, onclick: () => { uiSet('stopFold', !folded); render({ focus: 'stop-fold' }); } },
+      icon('shield', 20), h('b', null, '목 보호 규칙'),
       folded ? h('span', { class: 'hint' }, onN ? `지금 해당 ${onN}개` : '4가지 · 펼치기') : null, h('span', { class: 'sp' }), icon(folded ? 'chevd' : 'chevu', 18)),
     shown.length ? h('ul', { class: 'stop-list' }, shown.map(r => h('li', { class: 'stop-rule' + (r.on ? ' on' : '') + (r.done ? ' done' : '') },
       h('span', { class: 'sr-n', 'aria-hidden': 'true' }, `${R.indexOf(r) + 1}`),
@@ -2643,7 +2684,8 @@ function markStop(date, ask) {
       added = stopTimer({ quiet: true }); /* opens 끝난 후 목 상태 when it isn't written yet */
       if (!added && !Sheets.length && d.after == null) openAfterSheet(date);
     } else if (d.after == null) openAfterSheet(date);
-    toast(`오늘은 끝으로 적었어요${added ? ` · 연습 ${fmtMin(added)} 기록` : ''}. 목을 쉬게 해 주세요`, { action: '되돌리기', onAction: () => { const d2 = ensureDay(date); d2.stop = null; touch(date); render({ focus: d2.throat.some(t => t === '긁힘' || t === '따가움') ? 'stop-end' : 'stop-1' }); } });
+    const t0 = todayStr(), where = date === t0 ? '오늘은 끝으로 적었어요' : `${date === addDays(t0, -1) ? `어제(${fmtMD(date)})` : fmtMD(date)} 기록에 끝으로 적었어요`; /* practice past midnight goes to its day */
+    toast(`${where}${added ? ` · 연습 ${fmtMin(added)} 기록` : ''}. 목을 쉬게 해 주세요`, { action: '되돌리기', onAction: () => { const d2 = ensureDay(date); d2.stop = null; touch(date); render({ focus: d2.throat.some(t => t === '긁힘' || t === '따가움') ? 'stop-end' : 'stop-1' }); } });
   };
   if (!ask) { end(); return; }
   confirmSheet({ title: '오늘은 여기까지 해요', text: '목이 긁히거나 따끔하면 그날은 끝이에요. 연습 시간을 저장하고, 끝난 후 목 상태를 적어요.', ok: '오늘은 끝', danger: true, onOk: end });
@@ -2758,7 +2800,8 @@ function GoalSec(date, e) {
   const pick = (i, fk) => {
     const d = ensureDay(date), t = cueText(PR.CUES[i]);
     const rest = d.goal.split('\n').filter(l => l.trim() && !isCue(l));
-    d.goal = (chosen(i) ? rest : [t, ...rest]).join('\n');
+    const on = d.goal.split('\n').some(l => l.trim() === t); /* the goal as it is now (typing doesn't redraw the chips) */
+    d.goal = (on ? rest : [t, ...rest]).join('\n');
     touch(date);
     render({ focus: fk });
   };
@@ -2791,7 +2834,6 @@ function DrillSec(date) {
   const e = S.days[date];
   const hints = [];
   const mins = rOn ? routineMin(date) : RT_MIN;
-  if (rOn && isToday) hints.push(h('button', { class: 'btn ink wide ses-start', 'data-fk': 'ses-start', onclick: openSession }, icon('play', 18), all ? '오늘 연습 다시 보기' : reps ? '이어서 따라 하기' : `오늘 연습 따라 하기 (약 ${mins}분)`));
   if (rOn && isToday) hints.push(LevelSeg(date));
   if (rOn) {
     if (rest != null) hints.push(h('p', { class: 'drill-hint warn' }, isToday ? `오늘은 ①~③단계만 해요 (어제 끝난 후 목 상태 ${rest}점)` : `이 날은 ①~③단계만 한 날 (전날 끝난 후 목 상태 ${rest}점)`));
@@ -2825,8 +2867,8 @@ function DrillSec(date) {
   }
   return h('div', { class: 'sec drills' + (all ? ' all' : '') + (rOn ? ' routine' : ''), id: 'sec-drills' },
     h('div', { class: 'sec-h' }, h('h3', null, '기초 연습'), counted.length ? h('span', { class: 'sec-note' }, all ? '모두 완료!' : `${doneN}/${counted.length} 완료`) : null, h('span', { class: 'sp' }),
-      h('button', { class: 'icon-btn', 'aria-label': S.settings.sound ? '체크 소리 끄기' : '체크 소리 켜기', onclick: () => { S.settings.sound = !S.settings.sound; touchSettings(); render(); toast(S.settings.sound ? '체크할 때 음이 울려요' : '체크 소리를 껐어요'); } }, icon(S.settings.sound ? 'sound' : 'mute', 20)),
-      h('button', { class: 'icon-btn', 'data-fk': 'drills-keys', 'aria-label': '스케일 연습 건반 열기', onclick: () => openScaleTrainer({ date }) }, icon('piano', 21)),
+      h('button', { class: 'btn ghost sm', 'aria-label': S.settings.sound ? '체크 소리 끄기' : '체크 소리 켜기', onclick: () => { S.settings.sound = !S.settings.sound; touchSettings(); render(); toast(S.settings.sound ? '체크할 때 음이 울려요' : '체크 소리를 껐어요'); } }, icon(S.settings.sound ? 'sound' : 'mute', 17), '체크 소리'),
+      h('button', { class: 'btn ghost sm', 'data-fk': 'drills-keys', 'aria-label': '스케일 연습 건반 열기', onclick: () => openScaleTrainer({ date }) }, icon('piano', 17), '스케일'),
       h('button', { class: 'btn ghost sm', onclick: openDrillEditor }, '편집')),
     list.length ? h('div', { class: 'drill-prog', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': reps, 'aria-label': `기초 연습 ${reps}/${total}회` }, h('i', { style: `width:${total ? (reps / total * 100).toFixed(1) : 0}%` })) : null,
     hints,
@@ -2900,11 +2942,19 @@ function bump(date, id, delta, sec) {
   /* ④: the exercise this check was for gets its 골고루 note (today's plan only knows today) */
   const mine = next !== before && date === todayStr() && id === BOOK_RT.id;
   const sung = mine && next > before ? bookOf(drillPat(date, id)) : null;
+  /* bk: the exercise each ④ check counted, in order — after '이제 잘 돼요' the slot shows the next exercise */
+  const was = Array.isArray(s.bk) ? s.bk[next] : undefined;
   s.done = next;
   if (sec != null) s.times = (s.times || []).concat(Math.round(sec * 10) / 10);
+  if (sung) { const l = (Array.isArray(s.bk) ? s.bk : []).slice(0, before); while (l.length < before) l.push(0); l.push(sung.no); s.bk = l; }
+  else if (mine && next < before && Array.isArray(s.bk)) s.bk = s.bk.slice(0, next);
   touch(date);
   if (sung) bookRound(sung.no, date);
-  else if (mine && next < before) { const bk = bookOf(drillPat(date, id)); if (bk) bookRound(bk.no, date, true); } /* the slot just taken back */
+  else if (mine && next < before) {
+    /* the slot just taken back: the exercise it counted (0 = not known: left alone); a record from before bk: as shown */
+    const bk = Array.isArray(s.bk) || was !== undefined ? (was ? SK.BOOK[was - 1] : null) : bookOf(drillPat(date, id));
+    if (bk) bookRound(bk.no, date, true);
+  }
   if (next > before) {
     S.popNote = id;
     const all = drillsAllDone(date);
@@ -2924,6 +2974,8 @@ function bump(date, id, delta, sec) {
   } else if (next < before) vibrate(6);
   render();
 }
+/* does this song have lyrics typed into its 가사 노트? */
+const hasLyrics = key => { const m = S.settings.songs.find(x => x.k === key); return !!(m && m.ly && m.ly.text); };
 function SongSec(date, e) {
   const lib = songLib();
   const songs = e ? e.songs : [];
@@ -2964,7 +3016,8 @@ function SongSec(date, e) {
           h('span', { class: 'song-t' }, s.title),
           sub ? h('span', { class: 'song-a' }, sub) : null,
           s.note ? h('span', { class: 'song-n' }, s.note) : null),
-        h('span', { class: 'nth' }, nth === 1 ? '처음' : `${nth}번째`));
+        h('span', { class: 'nth' }, nth === 1 ? '처음' : `${nth}번째`),
+        window.LyricNote ? h('div', { class: 'song-ly' }, h('button', { class: 'chip sm ly-mini', 'data-fk': 'sly-' + s.id, 'aria-label': `${s.title} 가사 노트 열기`, onclick: () => window.LyricNote.open({ key: normKey(s.title), title: s.title, artist: s.artist || (L && L.artist) || '' }) }, icon('lyrics', 14), '가사 노트', hasLyrics(normKey(s.title)) ? h('span', { class: 'ly-dot', 'aria-label': '가사 있음' }) : null)) : null);
     })) : null,
     h('div', { class: 'composer' }, inp, h('button', { class: 'btn ink', onpointerdown: ev => ev.preventDefault(), onclick: add }, '추가')),
     sugg,
@@ -3000,11 +3053,11 @@ function RecSec(date, e) {
     recs.length && !e.fb.some(it => it.from === '녹음 듣고') ? h('button', { class: 'link rec-heard', 'data-fk': 'rec-heard', onclick: () => { fromHeard(); focusField('c-fb'); } }, '녹음 듣고 느낀 점 적기 ›') : null);
 }
 /* a shortcut to write '녹음 듣고' feedback; 누가? goes back to what it was after that one note */
-function fromHeard() { const C = S.compose.fb; if (!C.once) C.prev = C.from; C.from = '녹음 듣고'; C.once = true; }
+function fromHeard() { S.reflOpen = true; const C = S.compose.fb; if (!C.once) C.prev = C.from; C.from = '녹음 듣고'; C.once = true; }
 /* ④ 오늘의 기록: each line of the lecture's daily record, filled from where it already lives; a tap goes to the blank */
 function RecordCard(date, e) {
   const has = (k, fn) => !!(e && e[k].some(fn));
-  const toBad = tag => () => { ensureTags([tag]); S.compose.bad.tag = tag; focusField('c-bad'); };
+  const toBad = tag => () => { S.reflOpen = true; ensureTags([tag]); S.compose.bad.tag = tag; focusField('c-bad'); };
   const rows = [
     ['time', '연습 시간', !!(e && e.minutes > 0), () => editMinutes(date)],
     ['focus', '집중할 것', !!(e && e.goal.trim()), () => focusField(e && e.goal.trim() ? 'goal' : 'cue-0')],
@@ -3012,13 +3065,13 @@ function RecordCard(date, e) {
     ['tight', '조인 지점', has('bad', it => it.tag === TAG_TIGHT), toBad(TAG_TIGHT)],
     ['pron', '찾은 모음·자음', !!(e && e.pron), () => openPron(date, e && e.pron && e.pron.v ? 'B' : 'A')],
     ['after', '끝난 후 목 상태', !!(e && e.after != null), () => focusField(`after-${(e && e.after) || 5}`)],
-    ['good', '좋았던 느낌', has('good', () => true), () => focusField('c-good')],
+    ['good', '좋았던 느낌', has('good', () => true), () => { S.reflOpen = true; focusField('c-good'); }],
     ['heard', '녹음 듣고', has('fb', it => it.from === '녹음 듣고'), () => { fromHeard(); focusField('c-fb'); }]
   ];
   const n = rows.filter(r => r[2]).length;
   return h('div', { class: 'rec-card' },
     h('div', { class: 'lbl-row' }, h('span', { class: 'lbl' }, date === todayStr() ? '오늘의 기록' : '이 날의 기록'), h('span', { class: 'sp' }), h('span', { class: 'hint' }, `${n}/${rows.length}`)),
-    h('div', { class: 'chips' }, rows.map(([k, l, ok, fn]) => h('button', { class: 'chip sm rc' + (ok ? ' ok' : ''), 'data-fk': `rec-${k}`, 'aria-label': `${l}, ${ok ? '적었어요' : '아직 안 적었어요'}`, onclick: fn }, ok ? icon('check', 14) : null, l))));
+    h('div', { class: 'chips' }, rows.map(([k, l, ok, fn]) => h('button', { class: 'rc-link' + (ok ? ' ok' : ''), 'data-fk': `rec-${k}`, 'aria-label': `${l}, ${ok ? '적었어요' : '아직 안 적었어요'}`, onclick: fn }, ok ? icon('check', 14) : null, l, h('span', { class: 'arr', 'aria-hidden': 'true' }, '→')))));
 }
 function AfterSec(date, e) {
   const a = e ? e.after : null;
@@ -3028,11 +3081,17 @@ function AfterSec(date, e) {
     a != null && a <= 5 ? h('p', { class: 'hint warn' }, afterLow(date)) : h('p', { class: 'hint' }, '1 나쁨 · 10 아주 좋음'),
     RatingRow(date, e));
 }
+/* 마무리's second half: the record's jump links, and the three lists folded under 더 적기 (open once any has a line) */
 function ReflectSec(date, e) {
+  const any = !!(e && (e.good.length || e.bad.length || e.fb.length));
+  const more = h('details', { class: 'more-fold', 'data-fk': 'more-fold', open: S.reflOpen || any },
+    h('summary', null, '더 적기', h('small', null, '잘 된 점 · 아쉬웠던 점 · 받은 피드백')),
+    ['good', 'bad', 'fb'].map(k => ItemList(date, e, k)));
+  more.addEventListener('toggle', () => { S.reflOpen = more.open; });
   return h('div', { class: 'sec', id: 'sec-reflect' },
     h('div', { class: 'sec-h' }, h('h3', null, '돌아보기')),
     RecordCard(date, e),
-    ['good', 'bad', 'fb'].map(k => ItemList(date, e, k)));
+    more);
 }
 /* 메모 and 다음 연습 때 할 것 */
 function NotesSec(date, e) {
@@ -3127,7 +3186,7 @@ function RatingRow(date, e) {
   const r = e ? e.rating : null;
   const notes = h('div', { class: 'rating', role: 'radiogroup', 'aria-label': date === todayStr() ? '오늘 연습 만족도' : '이 날 연습 만족도' });
   for (let i = 1; i <= 5; i++) notes.append(h('button', { class: 'rnote' + (r && i <= r ? ' on' : ''), role: 'radio', 'aria-checked': String(r === i), 'aria-label': `${i}점, ${RATE_LABELS[i - 1]}`, html: NOTE_SVG, onclick: () => { const d = ensureDay(date); d.rating = d.rating === i ? null : i; touch(date); if (d.rating) Sound.rate(i); render(); } }));
-  return h('div', { class: 'rating-wrap' }, h('span', { class: 'lbl' }, date === todayStr() ? '오늘 연습은 어땠나요?' : '이 날 연습은 어땠나요?'), h('div', { class: 'rating-line' }, notes, h('span', { class: 'rating-val' }, r ? RATE_LABELS[r - 1] : '')));
+  return h('div', { class: 'rating-wrap' }, h('span', { class: 'lbl' }, date === todayStr() ? '오늘 연습은 어땠나요?' : '이 날 연습은 어땠나요?'), h('div', { class: 'rating-line' }, notes), h('div', { class: 'rating-val', 'aria-hidden': 'true' }, r ? RATE_LABELS[r - 1] : '\u00a0'));
 }
 function deleteItem(date, kind, id) {
   const e = S.days[date];
@@ -3479,6 +3538,12 @@ function nextTake(date, key) {
 /* a finished take is kept until it is saved or thrown away — the app may be closed while you listen back */
 function saveDraft(d) { Store.put('meta', 'recDraft', d).catch(() => {}); }
 function dropDraft() { Store.del('meta', 'recDraft').catch(() => {}); }
+/* the take is let go only once the day record holding it is on disk; if that write failed the draft stays
+   (offered again later: a take twice is better than none) */
+async function dropDraftWhenSaved(date) {
+  await flushWrites();
+  if (!S.saveErr && !WQ.keys.has(date)) dropDraft();
+}
 async function offerDraft() {
   let d = null;
   try { d = await Store.get('meta', 'recDraft'); } catch (e) { return; }
@@ -3496,15 +3561,19 @@ async function offerDraft() {
       const info = await storeAudio(d.blob, 'recording.' + extFor(d.blob.type));
       const song = songSel.value || null;
       ensureDay(date).recs.push({ id: uid('r'), aud: info.aud, mime: info.mime, size: info.size, title: titleInp.value.trim() || '녹음', song, songTitle: songTitleFor(date, song), dur: Math.round((d.durSec || 0) * 10) / 10, fav: false, at: d.at || Date.now(), src: 'mic', marks: Array.isArray(d.marks) ? d.marks : [] });
-      touch(date); done = true; dropDraft();
+      touch(date); done = true;
+      await dropDraftWhenSaved(date);
       closeSheet(s, true); render(); toast(`${fmtMD(date)} 기록에 녹음을 저장했어요`);
     } catch (err) { save.disabled = false; toast(assetErrMsg(err)); }
   } }, '저장하기');
   const discard = h('button', { class: 'btn soft', onclick: () => confirmSheet({ title: '이 녹음을 버릴까요?', text: '버리면 되돌릴 수 없어요.', ok: '버리기', danger: true, onOk: () => { done = true; dropDraft(); closeSheet(s, true); } }) }, '버리기');
+  /* partial: the app was closed while recording; what was recorded until then (offerDraft's own fields otherwise) */
   s = openSheet({
-    title: '저장하지 않은 녹음이 있어요',
+    title: d.partial ? '녹음하다가 앱이 닫혔어요' : '저장하지 않은 녹음이 있어요',
     body: h('div', { class: 'rc-review' },
-      h('p', { class: 'hint', style: 'margin-bottom:8px' }, `${fmtMD(date)}에 녹음하고 저장하기 전에 앱이 닫혔어요.${d.durSec ? ` (${fmtDur(d.durSec)})` : ''}`),
+      h('p', { class: 'hint', style: 'margin-bottom:8px' }, d.partial
+        ? `${fmtMD(date)}에 녹음하는 중에 앱이 닫혔어요. 그때까지 녹음된 부분을 저장할 수 있어요.${d.durSec ? ` (약 ${fmtDur(d.durSec)})` : ''}`
+        : `${fmtMD(date)}에 녹음하고 저장하기 전에 앱이 닫혔어요.${d.durSec ? ` (${fmtDur(d.durSec)})` : ''}`),
       url ? h('audio', { controls: true, src: url, preload: 'metadata' }) : null,
       field('이름', titleInp), field('어떤 노래의 녹음인가요?', songSel)),
     foot: [discard, save],
@@ -3576,18 +3645,38 @@ async function openRecorder(date) {
       h('p', { class: 'hint', style: 'margin-top:4px;text-align:left' }, stage === 'ready' ? '녹음 시작을 누르면 반주도 처음부터 같이 나와요. 이어폰을 끼면 목소리만 녹음돼요.' : ''));
   };
   Store.get('meta', 'mr').then(v => { if (v && v.blob) { lastMr = v; drawMr(); } }).catch(() => {});
+  /* while recording, what has been recorded so far is kept as a draft too (marked partial): Android may end the
+     app in the background, and the chunks live only in memory. Written when the app is left, and every 30 s or
+     more (a long take is written less often), only when it has grown */
+  let draftSize = 0, draftAt = 0, wantDraft = false, draftTick = 0;
+  const savePartial = () => {
+    if (stage !== 'recording' && stage !== 'paused') return;
+    const size = chunks.reduce((a, c) => a + c.size, 0);
+    if (!size || size === draftSize) return;
+    draftSize = size; draftAt = Date.now();
+    saveDraft({ blob: new Blob(chunks, { type: ((rec && rec.mimeType) || mime || 'audio/webm').split(';')[0] }), date, durSec: elapsed(), marks: marks.slice(), at: Date.now(), partial: true });
+  };
+  const leaving = () => {
+    if (stage !== 'recording' && stage !== 'paused') return;
+    savePartial(); /* what is there now, in case nothing more runs */
+    wantDraft = true; /* and again with the last bit once the recorder hands it over */
+    try { rec.requestData(); } catch (e) { wantDraft = false; }
+  };
   let leftAt = 0;
   const onVis = () => {
+    if (document.visibilityState === 'hidden') leaving();
     if (document.visibilityState === 'hidden' && (stage === 'recording')) leftAt = Date.now();
     else if (document.visibilityState === 'visible' && leftAt) { leftAt = 0; status.textContent = '앱을 나갔다 오면 그동안은 녹음이 안 될 수 있어요. 반주는 여기 ‘반주 틀고 녹음하기’로 틀어 주세요.'; status.style.color = 'var(--red)'; }
   };
   document.addEventListener('visibilitychange', onVis);
+  window.addEventListener('pagehide', leaving);
   const g0 = S.days[date] && S.days[date].goal.trim();
   const box = h('div', { class: 'recorder' }, g0 ? h('p', { class: 'rc-focus clip' }, h('b', null, '집중 '), g0.split('\n')[0]) : null, status, timeEl, meter, markInfo, mrBox, acts);
   const cleanup = () => {
     S.recording = false;
-    cancelAnimationFrame(raf); clearInterval(tick);
+    cancelAnimationFrame(raf); clearInterval(tick); clearInterval(draftTick);
     document.removeEventListener('visibilitychange', onVis);
+    window.removeEventListener('pagehide', leaving);
     if (mr) { mr.audio.pause(); URL.revokeObjectURL(mr.url); mr = null; }
     try { if (rec && rec.state !== 'inactive') { rec.onstop = null; rec.stop(); } } catch (e) { /* ignore */ }
     if (stream) stream.getTracks().forEach(t => t.stop());
@@ -3647,7 +3736,7 @@ async function openRecorder(date) {
       h('button', { class: 'btn ink big wide', onclick: ev => {
         if (stage !== 'recording' && stage !== 'paused') return;
         ev.currentTarget.disabled = true;
-        clearInterval(tick); durSec = elapsed(); stage = 'stopping'; mrStop();
+        clearInterval(tick); clearInterval(draftTick); durSec = elapsed(); stage = 'stopping'; mrStop();
         status.textContent = '녹음을 마무리하고 있어요…';
         try { rec.stop(); } catch (e) { /* ignore */ }
       } }, icon('stop', 20), '끝내기'));
@@ -3656,8 +3745,12 @@ async function openRecorder(date) {
     mime = pickMime(); chunks = [];
     try { rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 160000 } : undefined); }
     catch (e) { try { rec = new MediaRecorder(stream); } catch (e2) { toast('녹음을 시작하지 못했어요.'); return; } }
-    rec.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    rec.ondataavailable = ev => {
+      if (ev.data && ev.data.size) chunks.push(ev.data);
+      if (wantDraft) { wantDraft = false; savePartial(); }
+    };
     rec.onstop = () => {
+      clearInterval(draftTick); wantDraft = false;
       if (stage === 'recording' || stage === 'paused') { durSec = elapsed(); clearInterval(tick); mrStop(); } /* stopped by the system (mic taken, error) */
       blob = new Blob(chunks, { type: (rec.mimeType || mime || 'audio/webm').split(';')[0] });
       saveDraft({ blob, date, durSec, marks: marks.slice(), at: Date.now() });
@@ -3668,6 +3761,9 @@ async function openRecorder(date) {
     segStart = performance.now(); acc = 0;
     stage = 'recording'; S.recording = true; resumeQuiet();
     tick = setInterval(() => { timeEl.textContent = fmtDur(elapsed()); }, 250);
+    draftSize = 0; draftAt = Date.now(); wantDraft = false;
+    clearInterval(draftTick);
+    draftTick = setInterval(() => { if (Date.now() - draftAt >= Math.max(30000, draftSize / 1e6 * 3000)) savePartial(); }, 5000); /* 30 s, 10 MB → 30 s, 40 MB → 2 min */
     status.style.color = '';
     status.textContent = '녹음 중이에요. 화면은 켜진 채로 둘게요.';
     box.classList.add('on');
@@ -3699,12 +3795,12 @@ async function openRecorder(date) {
       saveBtn.disabled = true; saveBtn.textContent = '저장하는 중…';
       try {
         const info = await storeAudio(blob, 'recording.' + extFor(blob.type));
-        dropDraft();
         const song = songSel.value || null;
         const d = ensureDay(date);
         d.recs.push({ id: uid('r'), aud: info.aud, mime: info.mime, size: info.size, title: titleInp.value.trim() || '녹음', song, songTitle: songTitleFor(date, song), dur: Math.round(durSec * 10) / 10, fav: false, at: Date.now(), src: 'mic', marks: marks.slice() });
         touch(date);
         stage = 'saved';
+        await dropDraftWhenSaved(date);
         /* 노래 전 루틴 ⑥ '마지막 1회 녹음' */
         const last = date === todayStr() && S.settings.drills.some(x => x.id === 'rt_rec') && drillList(date).find(x => x.id === 'rt_rec');
         closeSheet(sheet, true);
@@ -3960,22 +4056,18 @@ function openDrillEditor() {
 /* ================= 노래 전 루틴: 발음 찾기, 안내, 넣기·빼기 ================= */
 /* 발음 찾기 — 모음 찾기 (A), 자음 찾기 (B), 가사에 입히기 (C) */
 function openPron(date, tab = 'A') {
-  const isToday = date === todayStr();
   let cur = tab, tblOpen = !lsGet(LS_UI, {}).pronTbl, local = 0;
   const pron0 = (S.days[date] && S.days[date].pron) || {};
   let vCur = pron0.v || 'ㅓ', cCur = pron0.c || 'ㅁ';
   const body = h('div', { class: 'pron' });
   const saved = () => (S.days[date] && S.days[date].pron) || { v: '', c: '' };
-  const hasItem = id => isToday && S.settings.drills.some(x => x.id === id);
-  const item = id => drillList(date).find(x => x.id === id);
-  /* keep a pick; the first pick of the day also checks 모음 찾기 / 자음 찾기 in 기초 연습 */
+  /* keep a pick (the lecture routine's 모음/자음 찾기 items it also checked are gone: migrateRoutine) */
   const save = (key, val) => {
     const d = ensureDay(date), p = d.pron ? { ...d.pron } : { v: '', c: '' };
     p[key] = val;
     d.pron = p.v || p.c ? p : null;
     touch(date);
-    const id = key === 'v' ? 'rt_pa' : 'rt_pb', it = hasItem(id) && item(id);
-    if (val && it && it.done < it.target) bump(date, id, 1); else softRender();
+    softRender();
   };
   const table = () => h('div', { class: 'pron-tbl' },
     h('button', { class: 'pron-tbl-h', 'data-fk': 'pron-tbl', 'aria-expanded': String(tblOpen), onclick: () => { tblOpen = !tblOpen; uiSet('pronTbl', tblOpen ? null : true); draw('pron-tbl'); } },
@@ -4004,7 +4096,7 @@ function openPron(date, tab = 'A') {
     return [
       h('p', { class: 'lead' }, PR.PRON.A.lead),
       h('button', { class: 'btn soft wide', 'data-fk': 'pron-keys', onclick: () => openScaleTrainer({ date, pat: 'five' }) }, icon('piano', 18), '건반으로 “머” 5음 스케일'),
-      h('p', { class: 'hint' }, '반음 버튼으로 5음 꼭대기가 막히는 음 근처에 오게 맞춰요.'),
+      h('p', { class: 'hint' }, '반음 버튼으로 5음 중 가장 높은 음이 막히는 음 근처에 오게 맞춰요.'),
       rules(PR.PRON.A),
       ladder(PR.V, vCur, v => PR.syl('ㅁ', v), sv, v => { vCur = v; }, 'pron-v', 'ㅓ', '뒤집혀요', '조이고 질러져요', t => `‘${t}’가 가장 편해요 · 적기`,
         () => { save('v', vCur); draw('pron-v-save'); toast(`편한 모음을 ‘${PR.syl('ㅁ', vCur)}’로 적었어요`); },
@@ -4041,10 +4133,9 @@ function openPron(date, tab = 'A') {
     const since = addDays(date, -14);
     const recent = [];
     for (const d of Object.keys(S.days).filter(x => x >= since && x <= date).sort().reverse()) for (const it of S.days[d].bad) if (!it.resolved && (it.tag === TAG_FLIP || it.tag === TAG_TIGHT) && recent.length < 6 && !recent.some(r => r.text === it.text)) recent.push(it);
-    const useItem = hasItem('rt_pc') && item('rt_pc');
-    const cur = useItem || { id: 'rt_pc', target: 5, done: local };
-    const done = cur.done, ph = phaseOf(cur);
-    const cnt = done >= cur.target ? [icon('check', 18), '다 했어요'] : ph ? `${ph.label} 1회 (${ph.i}/${ph.n})${ph.label === '원래 가사로' ? ' · 바꾼 느낌 유지' : ''}` : `1회 (${done + 1}/${cur.target})`;
+    /* counted here only (the lecture routine's item for it is gone: migrateRoutine) */
+    const target = 5, done = local;
+    const cnt = done >= target ? [icon('check', 18), '다 했어요'] : `1회 (${done + 1}/${target})`;
     return [
       h('p', { class: 'lead' }, PR.PRON.C.lead),
       field('연습곡 고음 가사', inp),
@@ -4053,11 +4144,11 @@ function openPron(date, tab = 'A') {
         inp.focus({ preventScroll: true }); try { inp.select(); } catch (e) { /* ignore */ }
       } }, it.text.length > 20 ? it.text.slice(0, 20) + '…' : it.text))) : null,
       out,
-      h('button', { class: 'btn blue wide', 'data-fk': 'pron-count', disabled: done >= cur.target, onclick: () => {
-        if (useItem) bump(date, 'rt_pc', 1); else local++;
+      h('button', { class: 'btn blue wide', 'data-fk': 'pron-count', disabled: done >= target, onclick: () => {
+        local++;
         draw('pron-count');
       } }, cnt),
-      !useItem && done > 0 ? h('button', { class: 'link', onclick: () => { local = 0; draw('pron-count'); } }, '처음부터') : null];
+      done > 0 ? h('button', { class: 'link', onclick: () => { local = 0; draw('pron-count'); } }, '처음부터') : null];
   };
   function draw(fk) {
     body.replaceChildren(
@@ -4149,7 +4240,6 @@ const READY_STEPS = ['바르게 서요: 머리·가슴·골반이 한 줄로, �
 function openSession() {
   const date = todayStr();
   if (!routineOn()) { openRoutineInsert(); return; }
-  if (!lsGet(LS_TIMER, null)) startTimer(date);
   const rest = restDay(date);
   const item = id => drillList(date).find(d => d.id === id) || null;
   const has = id => S.settings.drills.some(d => d.id === id);
@@ -4166,14 +4256,17 @@ function openSession() {
   /* coming back later the same day: pick up at the first step not done yet */
   let i = 0;
   if (steps.some(st => st.id && (item(st.id) || {}).done > 0)) { const f = steps.findIndex(st => st.id && !doneOf(st)); i = f >= 0 ? f : steps.length - 1; }
+  /* the clock starts with the first real action (시작하기, a check, the keys), not when the sheet opens */
+  const begin = () => { if (!lsGet(LS_TIMER, null)) startTimer(date, { quiet: true }); };
   const body = h('div', { class: 'ses' });
   const prevBtn = h('button', { class: 'btn soft', onclick: () => go(i - 1) }, '이전');
   const nextBtn = h('button', { class: 'btn ink', onclick: () => go(i + 1) });
   let s = null;
-  const go = n => { i = Math.max(0, Math.min(steps.length - 1, n)); draw(); const b = s && s.sheet.querySelector('.sheet-body'); if (b) b.scrollTop = 0; };
+  const go = n => { if (n > i) begin(); i = Math.max(0, Math.min(steps.length - 1, n)); draw(); const b = s && s.sheet.querySelector('.sheet-body'); if (b) b.scrollTop = 0; };
   /* a check that finishes the step moves on by itself */
   const check = st => {
     const before = doneOf(st);
+    begin();
     bump(date, st.id, 1);
     draw();
     if (!before && doneOf(st)) setTimeout(() => { if (steps[i] === st && !(s && s.closed)) go(i + 1); }, 900);
@@ -4182,8 +4275,10 @@ function openSession() {
   const plusOne = (st, label) => h('button', { class: 'btn soft sm', disabled: doneOf(st), onclick: () => check(st) }, icon('plus', 16), label || '1회 체크');
   const why = t => (t ? h('p', { class: 'ses-why' }, h('b', null, '왜 하나요? '), t) : null);
   /* the step's plan in one line: minutes, exercises × reps, sound, ▲/▼ and 꼭대기 음 */
-  const line = st => h('p', { class: 'ses-line' }, stepLine(date, PR.GROUPS[st.g]));
-  const title = (st, name) => h('div', { class: 'ses-h' }, h('span', { class: 'ses-n' }, `${PR.GROUPS[st.g].n} ${PR.GROUPS[st.g].name}`), h('h2', null, name), count(st));
+  /* the header carries '준비 · 2분'; the plan line only what is left of it */
+  let named = '';
+  const line = st => { const t = stepLine(date, PR.GROUPS[st.g]).replace(/^\S+ \d+분(?: · )?/, ''); return t && t !== named ? h('p', { class: 'ses-line' }, t) : null; };
+  const title = (st, name) => { named = name; return h('div', { class: 'ses-h' }, h('span', { class: 'ses-n' }, `${PR.GROUPS[st.g].n} ${PR.GROUPS[st.g].name} · ${stepMin(date, PR.GROUPS[st.g])}분`), h('h2', null, name), count(st)); };
   function content(st) {
     if (st.k === 'intro') {
       return [h('div', { class: 'ses-h' }, h('h2', null, `오늘 연습 (약 ${routineMin(date)}분)`)),
@@ -4203,7 +4298,7 @@ function openSession() {
       const goal = st.id === hissId() ? hissSec(date) : PR.PANT_SEC;
       return [title(st, t.name || (st.id === hissId() ? '히싱' : '개호흡')), line(st), why(PR.STEPS[1].why),
         h('p', { class: 'ses-how' }, t.memo || ''), goal ? h('p', { class: 'hint' }, `목표 ${goal}초${st.id === hissId() ? ' (이번 주)' : ''}`) : null,
-        h('button', { class: 'btn ink wide ses-big', disabled: !!(d && d.done >= d.target), onclick: () => openStopwatch(date, st.id, () => { draw(); if (doneOf(st)) setTimeout(() => { if (steps[i] === st) go(i + 1); }, 600); }) }, icon('timer', 18), '타이머 켜고 하기'),
+        h('button', { class: 'btn ink wide ses-big', disabled: !!(d && d.done >= d.target), onclick: () => { begin(); openStopwatch(date, st.id, () => { draw(); if (doneOf(st)) setTimeout(() => { if (steps[i] === st) go(i + 1); }, 600); }); } }, icon('timer', 18), '타이머 켜고 하기'),
         h('div', { class: 'ses-sub' }, plusOne(st, '타이머 없이 1회 체크'))];
     }
     if (st.k === 'keys') {
@@ -4220,8 +4315,8 @@ function openSession() {
           h('p', { class: 'ses-how' }, bk.how),
           bk.good ? h('div', { class: 'sc-good' }, h('b', null, '이런 데 좋아요'), h('ul', null, bk.good.map(t => h('li', null, t)))) : null,
           bk.text.length ? h('details', { class: 'sc-more' }, h('summary', null, '방법 더 보기'), h('ul', null, bk.text.map(t => h('li', null, t)))) : null) : null,
-        h('button', { class: 'btn ink wide ses-big', disabled: !!(d && d.done >= d.target), onclick: () => openScaleTrainer({ date, drillId: st.id, pat, autostart: true, onClose: () => { draw(); if (doneOf(st)) setTimeout(() => { if (steps[i] === st) go(i + 1); }, 600); } }) }, icon('piano', 18), '피아노 켜고 따라 부르기'),
-        h('p', { class: 'hint' }, bk && bk.dir === 'down' ? '피아노가 시작 음에서 책처럼 반음씩 5번 내려가요. 다 내려오면 1회 체크돼요. 힘들면 언제든 멈춰요.' : '피아노가 시작 음에서 반음씩 꼭대기 음까지 올라갔다가 다시 내려와요. 한 번 다 오르내리면 1회 체크돼요. 힘들면 언제든 멈춰요.'),
+        h('button', { class: 'btn ink wide ses-big', disabled: !!(d && d.done >= d.target), onclick: () => { begin(); openScaleTrainer({ date, drillId: st.id, pat, autostart: true, onClose: () => { draw(); if (doneOf(st)) setTimeout(() => { if (steps[i] === st) go(i + 1); }, 600); } }); } }, icon('piano', 18), '피아노 켜고 따라 부르기'),
+        h('p', { class: 'hint' }, bk && bk.dir === 'down' ? '피아노가 시작 음에서 책처럼 반음씩 5번 내려가요. 다 내려오면 1회 체크돼요. 힘들면 언제든 멈춰요.' : '피아노가 시작 음에서 반음씩 가장 높은 음까지 올라갔다가 다시 내려와요. 한 번 다 오르내리면 1회 체크돼요. 힘들면 언제든 멈춰요.'),
         h('div', { class: 'ses-sub' }, plusOne(st, '피아노 없이 1회 체크'),
           isCur ? h('button', { class: 'btn soft sm', onclick: () => { const undo = bookDone(bk.no, todayStr()); draw(); toast(`좋아요! 다음부터는 ‘${SK.BOOK[S.settings.book.cur - 1].name}’이에요`, { action: '되돌리기', onAction: () => { undo(); draw(); } }); } }, '이제 잘 돼요 → 다음 연습') : null,
           isCur && bk.no < 14 ? h('button', { class: 'btn soft sm', onclick: () => { S.settings.book.cur = 14; touchSettings(); softRender(); draw(); toast('“끼익” 소리 단계부터 할게요'); } }, '고음이 이미 잘 이어져요 → “끼익” 단계로') : null),
@@ -4351,11 +4446,22 @@ function insertRoutine(opts = {}) {
     });
     touch(today);
   }
+  const mid = S.days[today] && S.days[today].drills ? clone(S.days[today].drills) : {};
   touchSettings(); S.openGroups.clear(); render();
   return () => {
     S.settings.drills = before.drills; S.settings.tags = before.tags; S.settings.routine = before.routine;
     const t3 = S.days[today];
-    if (t3) { t3.drills = before.snap || {}; touch(today); }
+    /* only what the insert did to today's record is undone: reps checked since then stay */
+    if (t3 && t3.drills) {
+      const snap = before.snap || {}, cur = t3.drills;
+      for (const id of Object.keys(cur)) {
+        const x = cur[id], o = snap[id];
+        if (o) { if (mid[id] && x.target === mid[id].target) x.target = o.target; } /* its count as it was, unless changed since */
+        else if (!before.drills.some(d => d.id === id)) { if (!(x.done > 0)) delete cur[id]; else x.target = Math.min(x.done, x.target); } /* added by the insert */
+      }
+      for (const id in snap) if (!cur[id]) cur[id] = clone(snap[id]); /* taken out by the insert */
+      touch(today);
+    }
     touchSettings(); S.openGroups.clear(); render();
     toast('노래 전 루틴 넣기를 되돌렸어요');
   };
@@ -4416,7 +4522,7 @@ function drawCalBody(body) {
   const q = S.cal.q.trim();
   if (q) { body.replaceChildren(SearchResults(q)); return; }
   const stats = MonthStats(`${S.cal.y}-${pad(S.cal.m + 1)}-`);
-  body.replaceChildren(...[MonthPanel(), DayPreview(S.cal.sel), stats ? h('div', { class: 'page' }, stats) : null, MonthList(), WeeksStrip()].filter(Boolean));
+  body.replaceChildren(...[MonthPanel(), DayPreview(S.cal.sel), stats ? h('div', { class: 'page' }, stats) : null, MonthLink(), WeeksStrip()].filter(Boolean));
 }
 /* after picking a day, make sure its preview is on screen */
 function revealPreview(start) {
@@ -4473,7 +4579,7 @@ function MonthPanel() {
   return h('div', { class: 'page' },
     h('div', { class: 'cal-top' },
       h('button', { class: 'navbtn', 'aria-label': '이전 달', onclick: () => moveMonth(-1) }, icon('left', 24)),
-      h('div', { class: 'cal-title' }, `${y}년 ${m + 1}월`),
+      h('div', { class: 'cal-title' }, `${y}. ${m + 1}`),
       h('button', { class: 'navbtn', 'aria-label': '다음 달', disabled: isCur, onclick: () => moveMonth(1) }, icon('right', 24))),
     sum, grid,
     h('div', { class: 'legend' },
@@ -4526,10 +4632,12 @@ function WeeksStrip() {
     if (has) n++;
     d = addDays(d, 1);
   }
-  return h('div', { class: 'page weeks-page' },
-    h('div', { class: 'sec-h', style: 'margin:14px 0 8px' }, h('h2', null, '지난 20주'), h('span', { class: 'sec-note' }, `${n}일 노래했어요`)),
+  const fold = h('details', { class: 'weeks-fold', open: S.weeksOpen },
+    h('summary', null, '20주 보기', h('small', null, `${n}일 노래했어요`)),
     grid,
     h('div', { class: 'legend' }, h('span', null, '적게'), [1, 2, 3, 4].map(l => h('i', { class: 'wk', 'data-l': l })), h('span', null, '많이 (연습 시간 기준)')));
+  fold.addEventListener('toggle', () => { S.weeksOpen = fold.open; });
+  return h('div', { class: 'page weeks-page' }, fold);
 }
 function pvLine(label, content) { return h('div', { class: 'pv-line' }, h('span', null, label), content); }
 function DayPreview(date) {
@@ -4564,6 +4672,12 @@ function DayPreview(date) {
   if (e.recs.length) box.append(h('div', { class: 'recs', style: 'padding-bottom:6px' }, e.recs.map(r => RecRow(r, date))));
   return box;
 }
+/* the month's diary lives in 기록 → 일기; the calendar only points there */
+function MonthLink() {
+  const prefix = `${S.cal.y}-${pad(S.cal.m + 1)}-`;
+  if (!entryDates().some(d => d.startsWith(prefix))) return null;
+  return h('div', { class: 'page month-link' }, h('button', { class: 'link', 'data-fk': 'month-all', onclick: () => { S.lib.seg = 'journal'; go('songs'); } }, '이 달 일기 모두 보기 → 기록'));
+}
 function MonthList() {
   const prefix = `${S.cal.y}-${pad(S.cal.m + 1)}-`;
   const ds = entryDates().filter(d => d.startsWith(prefix)).reverse();
@@ -4578,7 +4692,7 @@ function EntryCard(d) {
   const issues = all.length;
   const first = open[0] || all[0];
   return h('button', { class: 'ecard', 'data-fk': 'entry-' + d, onclick: () => goDate(d) },
-    h('div', { class: 'ec-d' + dowClass(d) }, h('b', null, dt.getDate()), h('span', null, WD[dt.getDay()])),
+    h('div', { class: 'ec-d' + dowClass(d) }, h('b', null, `${dt.getDate()}일`), h('span', null, WD[dt.getDay()] + '요일')),
     h('div', { class: 'ec-b' },
       h('div', { class: 'ec-top' },
         e.rating ? rateDots(e.rating) : null,
@@ -4757,7 +4871,7 @@ function SongListPanel() {
       used.map(st => h('button', { class: 'chip sm', 'aria-pressed': String(S.lib.status === st), onclick: () => { S.lib.status = S.lib.status === st ? null : st; render(); } }, `${st} ${all.filter(L => L.status === st).length}`))) : null,
     lib.map(L => h('button', { class: 'song-card' + (L.cat && L.cat.art ? ' has-art' : ''), 'data-fk': 'song-' + L.key, onclick: () => openSongDetail(L.key) },
       L.cat && L.cat.art ? artThumb(L.cat.art, 48) : null,
-      h('span', { class: 'sc-t' }, L.title, L.status ? h('span', { class: 'st-pill', 'data-st': SONG_STATUS.indexOf(L.status) }, L.status) : null),
+      h('span', { class: 'sc-t' }, L.title, L.status ? h('span', { class: 'st-pill', 'data-st': SONG_STATUS.indexOf(L.status) }, L.status) : null, hasLyrics(L.key) ? h('span', { class: 'st-pill ly-pill' }, '가사 노트') : null),
       h('span', { class: 'sc-days' }, L.dates.length, h('small', null, '일 연습')),
       L.artist ? h('span', { class: 'sc-a' }, L.artist) : null,
       h('span', { class: 'sc-s' }, h('span', null, `최근 ${fmtMD(L.last)}`), L.recs.length ? h('span', null, `녹음 ${L.recs.length}개`) : null, L.recs.some(x => x.r.fav) ? h('span', null, '베스트 있음') : null))));
@@ -4807,19 +4921,22 @@ function openSongDetail(key) {
   };
   drawRecs();
   let hero = null;
+  const links = h('div', { class: 'field' });
   const drawHero = () => {
     const LL = songLib().get(key) || L;
-    const nh = SongHero(LL, key, () => { drawHero(); const now = songLib().get(key); if (now) aInp.value = now.artist || ''; }, () => saveMeta.flush());
+    const nh = SongHero(LL, key, () => { drawHero(); const now = songLib().get(key); if (now) aInp.value = now.artist || ''; }, () => saveMeta.flush(), { noLinks: true });
     if (hero) { Preview.stop(); hero.replaceWith(nh); }
     hero = nh;
+    links.replaceChildren(h('span', { class: 'lbl' }, '찾아보기'), SongLinks(LL));
   };
   drawHero();
-  const lyBtn = h('button', { class: 'btn soft ly-open', 'data-fk': 'ly-open', onclick: () => { saveMeta.flush(); window.LyricNote.open({ key, title: L.title, artist: aInp.value.trim() }); } }, icon('lyrics', 18), '가사 노트 · 기교 표시');
+  const lyBtn = h('button', { class: 'btn blue ly-open', 'data-fk': 'ly-open', onclick: () => { saveMeta.flush(); window.LyricNote.open({ key, title: L.title, artist: aInp.value.trim() }); } }, icon('lyrics', 18), '가사 노트 · 기교 표시');
   const s = openSheet({
     title: L.title,
     body: h('div', null, hero, story,
-      field('지금 이 곡은', stChips), field('가수', aInp), field('곡 메모', memo),
+      field('지금 이 곡은', stChips),
       window.LyricNote ? lyBtn : null,
+      field('곡 메모', memo), field('가수', aInp), links,
       recPart),
     onClose: () => { saveMeta.flush(); Preview.stop(); if (songDetailRefresh === refresh) songDetailRefresh = null; render(); }
   });
@@ -4850,7 +4967,7 @@ function AllRecsPanel() {
   return page;
 }
 function RangePanel() {
-  const pts = entryDates().filter(d => S.days[d].high != null).map(d => ({ d, m: S.days[d].high }));
+  const pts = entryDates().filter(d => Number.isInteger(S.days[d].high) && S.days[d].high >= 0 && S.days[d].high <= 127).map(d => ({ d, m: S.days[d].high }));
   if (!pts.length) return h('div', { class: 'page' }, h('div', { class: 'empty' }, h('span', { class: 'hand' }, '음역 기록이 아직 없어요'), '오늘 화면 ‘노래’ 아래 ‘오늘 낸 최고음’을 골라 두면 여기에 그래프가 그려져요.'));
   const shown = pts.slice(-40);
   const best = pts.reduce((a, b) => (b.m > a.m ? b : a));
@@ -4860,7 +4977,7 @@ function RangePanel() {
   const x = i => (shown.length === 1 ? L + (W - L - R) / 2 : L + (i * (W - L - R)) / (shown.length - 1));
   const y = m => T + ((hi - m) * (H - T - B)) / Math.max(1, hi - lo);
   let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="날짜별 최고음 그래프">`;
-  for (let m = Math.ceil(lo); m <= hi; m++) {
+  for (let m = Math.max(-2, Math.ceil(lo)); m <= Math.min(129, hi); m++) { /* bounded: one line per note at most */
     if (m % 12 === 0 || m % 12 === 7 || (hi - lo) <= 8) {
       svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(m).toFixed(1)}" y2="${y(m).toFixed(1)}"/><text class="axis" x="${L - 6}" y="${(y(m) + 4).toFixed(1)}" text-anchor="end">${noteName(m)}</text>`;
     }
@@ -5308,7 +5425,7 @@ function ReminderBlock() {
 function openSettings() {
   if (S.mode !== 'ready') return;
   const titleInp = h('input', { class: 'input', value: S.settings.title, maxlength: 30, 'aria-label': '일기 이름' });
-  titleInp.addEventListener('input', debounce(() => { S.settings.title = titleInp.value.trim() || defaultSettings().title; touchSettings(); $('#tb-subtitle').textContent = S.settings.title; document.title = `${S.settings.title} · 소리일기`; }, 400));
+  titleInp.addEventListener('input', debounce(() => { S.settings.title = titleInp.value.trim() || defaultSettings().title; touchSettings(); $('#tb-subtitle').textContent = S.settings.title; $('#tb-subtitle').hidden = S.settings.title === '나의 소리일기'; document.title = `${S.settings.title} · 소리일기`; }, 400));
   const themeSeg = h('div', { class: 'seg' });
   const drawTheme = () => themeSeg.replaceChildren(...THEMES.map(([k, l]) => segBtn(l, S.settings.theme === k, () => { S.settings.theme = k; touchSettings(); applyTheme(); drawTheme(); })));
   drawTheme();
@@ -5465,13 +5582,20 @@ const Sync = {
   saveNow() {
     clearTimeout(this.saveT);
     if (!this.st) return Promise.resolve();
-    /* taken now, as they are: what is written matches the notes exactly */
-    const keys = Array.from(this.pend), days = [], meta = [['sync', clone(this.st)]];
-    for (const [k] of keys) {
-      if (k === '@s') meta.push(['settings', clone(S.settings)]);
-      else { const e = S.days[k]; days.push([k, e && hasContent(e) ? clone(e) : undefined]); }
-    }
-    return Store.writeAll({ days, meta }).then(() => { for (const [k, n] of keys) if (this.pend.get(k) === n) this.pend.delete(k); }, () => {});
+    /* taken when written, as they are: what is written matches the notes exactly. A retried write takes them
+       again, so it never puts back a copy older than one written in between */
+    let keys = [];
+    const build = () => {
+      if (!this.st) { keys = []; return {}; } /* signed out meanwhile */
+      keys = Array.from(this.pend);
+      const days = [], meta = [['sync', clone(this.st)]];
+      for (const [k] of keys) {
+        if (k === '@s') meta.push(['settings', clone(S.settings)]);
+        else { const e = S.days[k]; days.push([k, e && hasContent(e) ? clone(e) : undefined]); }
+      }
+      return { days, meta };
+    };
+    return Store.writeAll(build).then(() => { for (const [k, n] of keys) if (this.pend.get(k) === n) this.pend.delete(k); }, () => {});
   },
   on() { const u = Cloud.user(); return !!(u && this.st && this.st.uid === u.id && Cloud.config()); },
   /* a local change: send it a little later (several quick edits go together) */
@@ -6007,12 +6131,15 @@ async function openUpdate(L) {
       if (T.minApk && apk && apk < T.minApk) { running = false; go.disabled = false; prog.hidden = true; msg.textContent = '이 버전은 새 설치 파일(APK)이 필요해요. 새 APK를 받아 설치해 주세요.'; return; }
       S.update = T;
       let said = 0;
+      /* the page reloads from the new copy at the end of apply: everything typed is on disk first (and again
+         just before the switch, for what changed during the download) */
+      await flushWrites(); await Sync.saveNow();
       await OTA.apply(T, (done, total, fetched) => {
         const pct = Math.round(done / total * 100);
         prog.firstChild.style.width = `${pct}%`; prog.setAttribute('aria-valuenow', pct);
         count.textContent = `받는 중 ${done}/${total}${fetched ? ` · 새 파일 ${fetched}개` : ''}`;
         if (pct >= said + 25) { said = pct - pct % 25; msg.textContent = `받는 중 ${said}%`; }
-      });
+      }, async () => { await flushWrites(); await Sync.saveNow(); });
       count.textContent = '';
       msg.textContent = '새 버전으로 다시 열어요…';
     } catch (e) {
@@ -6192,8 +6319,8 @@ let booted = false;
 function afterLoad() {
   if (booted || S.mode !== 'ready') return;
   booted = true;
-  Native.onShared(takeShared);
-  Files.clearShareCache();
+  /* the share folder is tidied only after the files shared at start were read (an older APK copies them there) */
+  Native.onShared(takeShared).finally(() => Files.clearShareCache());
   setTimeout(() => { if (!Sheets.length) offerDraft(); }, 800);
   OTA.confirmBoot().then(() => { const v = OTA.takeUpdated(); if (v) toast(`${v} 버전으로 업데이트했어요`); }).catch(() => {});
   setTimeout(() => checkUpdate(false), 5000);

@@ -86,3 +86,4 @@
 .ly-rd{font-size:13px;line-height:1.45;color:var(--ink-2)}
 .ly-row.done .ly-rt b{text-decoration:line-through;text-decoration-color:var(--ink-4)}
 .ly-reset{display:flex;justify-content:center;padding:14px 0 6px}
+.ly-memo{color:var(--ink-2)}
