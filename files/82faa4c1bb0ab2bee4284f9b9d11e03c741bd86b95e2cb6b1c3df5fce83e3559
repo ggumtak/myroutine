@@ -1319,6 +1319,9 @@ function snapshotDrills(e) {
   e.drills = {};
   S.settings.drills.forEach(t => { e.drills[t.id] = { name: t.name, target: dayTarget(t, e.date || todayStr()), done: 0, times: [] }; });
 }
+/* a day keeps the name an item had then; the routine's renamed items show their name of today */
+const OLD_DRILL_NAMES = { rs_lip: ['립롤', '입술 떨기 (립롤)'], rs_trill: ['혀 트릴', '혀 굴리기 (트릴)'], rs_book: ['책 진도 연습', '오늘의 단계 연습'] };
+const dayDrillName = (id, s) => (OLD_DRILL_NAMES[id] && OLD_DRILL_NAMES[id].includes(s.name) && PR.BY_ID[id] ? PR.BY_ID[id].name : s.name) || '연습';
 function drillList(date) {
   const e = S.days[date];
   const snap = (e && e.drills) || {};
@@ -1327,7 +1330,7 @@ function drillList(date) {
     const pos = id => { const i = S.settings.drills.findIndex(t => t.id === id); return i < 0 ? 1e3 : i; };
     return Object.keys(snap).sort((a, b) => pos(a) - pos(b)).map(id => {
       const s = snap[id], t = S.settings.drills.find(x => x.id === id);
-      return { id, name: (t && t.name) || s.name || '연습', memo: t ? t.memo : '', timed: !!(t && t.timed), target: s.target, done: Math.min(s.done || 0, s.target), times: s.times || [] };
+      return { id, name: (t && t.name) || dayDrillName(id, s), memo: t ? t.memo : '', timed: !!(t && t.timed), target: s.target, done: Math.min(s.done || 0, s.target), times: s.times || [] };
     });
   }
   const list = S.settings.drills.map(t => {
@@ -1337,7 +1340,7 @@ function drillList(date) {
   });
   for (const id in snap) {
     const s = snap[id];
-    if (!list.some(x => x.id === id) && (s.done || 0) > 0) list.push({ id, name: s.name || '연습', memo: '', timed: false, target: s.target, done: Math.min(s.done, s.target), times: s.times || [], orphan: true });
+    if (!list.some(x => x.id === id) && (s.done || 0) > 0) list.push({ id, name: dayDrillName(id, s), memo: '', timed: false, target: s.target, done: Math.min(s.done, s.target), times: s.times || [], orphan: true });
   }
   return list;
 }
@@ -2834,7 +2837,7 @@ function DrillSec(date) {
   if (rOn && isToday) hints.push(LevelSeg(date));
   if (rOn) {
     if (rest != null) hints.push(h('p', { class: 'drill-hint warn' }, isToday ? `오늘은 ①~③단계만 해요 (어제 끝난 후 목 상태 ${rest}점)` : `이 날은 ①~③단계만 한 날 (전날 끝난 후 목 상태 ${rest}점)`));
-    else hints.push(h('p', { class: 'drill-hint' }, `노래 전 루틴 약 ${mins}분 · Singing for the Stars `, h('button', { class: 'link', 'data-fk': 'drills-guide', onclick: openGuide }, '전체 보기')));
+    else hints.push(h('p', { class: 'drill-hint' }, `노래 전 루틴 약 ${mins}분 · `, h('button', { class: 'link', 'data-fk': 'drills-guide', onclick: openGuide }, '전체 보기')));
   }
   if (e && e.stop) hints.push(h('p', { class: 'drill-hint warn' }, '목이 긁히거나 따끔해서 끝낸 날이에요'));
   let body;
@@ -4596,7 +4599,7 @@ function MonthStats(prefix) {
   for (const d of ds) {
     const e = S.days[d];
     if (e.after != null) { an++; asum += e.after; if (e.after <= 5) alow++; }
-    for (const id in e.drills) { const s = e.drills[id]; const c = drillDays.get(s.name) || { n: 0, full: 0 }; if (s.done > 0) c.n++; if (s.done >= s.target) c.full++; drillDays.set(s.name, c); }
+    for (const id in e.drills) { const s = e.drills[id], nm = dayDrillName(id, s); const c = drillDays.get(nm) || { n: 0, full: 0 }; if (s.done > 0) c.n++; if (s.done >= s.target) c.full++; drillDays.set(nm, c); }
     e.songs.forEach(s => songs.set(s.title, (songs.get(s.title) || 0) + 1));
     e.bad.concat(e.fb).forEach(it => { if (it.tag) tags.set(it.tag, (tags.get(it.tag) || 0) + 1); });
     if (e.rating) { rated++; rsum += e.rating; }
@@ -4653,7 +4656,7 @@ function DayPreview(date) {
   if (e.after != null) meta.push(h('span', { class: e.after <= 5 ? 'low' : '' }, `끝난 후 목 ${e.after}/10`));
   if (e.minutes) meta.push(h('span', null, `연습 ${fmtMin(e.minutes)}`));
   if (drillsAllDone(date)) meta.push(h('span', { class: 'mini-stamp' }, '참 잘했어요'));
-  const drills = Object.values(e.drills || {});
+  const drills = Object.keys(e.drills || {}).length ? drillList(date) : []; /* today's names (립트릴 …), also for days saved under the old ones */
   const lines = h('div', { class: 'pv-lines' },
     meta.length ? h('div', { class: 'pv-meta' }, meta) : null,
     e.stop ? pvLine('멈춤', h('span', null, '목이 긁히거나 따끔해서 그날은 끝')) : routineOn() && restDay(date) ? pvLine('멈춤', h('span', null, `전날 끝난 후 목 상태 ${restInfo(date)}점 → ①~③단계만`)) : null,
