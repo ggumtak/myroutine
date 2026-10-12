@@ -4,10 +4,10 @@
   box-sizing:border-box;
   padding-top:var(--sat);
   padding-bottom:var(--sab);
-  --bg:#ECEFF3; --sheet:#FBFCFD; --sheet-2:#F0F2F6;
+  --bg:#F4F2EF; --sheet:#FFFDFA; --sheet-2:#F0ECE8;
   --ink:#1C2330; --ink-2:#525C70; --ink-3:#646D80; --ink-4:#7F889B;
   --rule:#D2D8E2; --rule-2:#E3E7EE;
-  --blue:#2350C4; --blue-soft:rgba(35,80,196,.10);
+  --blue:#69508C; --blue-soft:rgba(105,80,140,.10);
   --red:#D5342D; --red-soft:rgba(213,52,45,.09);
   --hl:rgba(255,218,60,.62); --hl-solid:#FFD93D;
   --graphite:#5B6477; --gold:#C98A00;
@@ -24,7 +24,7 @@
     --bg:#11141B; --sheet:#191E28; --sheet-2:#222837;
     --ink:#E5E9F1; --ink-2:#A7B0C1; --ink-3:#8790A3; --ink-4:#7A8497; --ink-4:#7A8497;
     --rule:#353C4D; --rule-2:#292F3D;
-    --blue:#8AA8FF; --blue-soft:rgba(138,168,255,.15);
+    --blue:#C7ACEB; --blue-soft:rgba(199,172,235,.15);
     --red:#FF7D74; --red-soft:rgba(255,125,116,.13);
     --hl:rgba(236,200,64,.30); --hl-solid:#E9C84A;
     --graphite:#AFB7C7; --gold:#F2B632;
@@ -38,7 +38,7 @@
   --bg:#11141B; --sheet:#191E28; --sheet-2:#222837;
   --ink:#E5E9F1; --ink-2:#A7B0C1; --ink-3:#8790A3;
   --rule:#353C4D; --rule-2:#292F3D;
-  --blue:#8AA8FF; --blue-soft:rgba(138,168,255,.15);
+  --blue:#C7ACEB; --blue-soft:rgba(199,172,235,.15);
   --red:#FF7D74; --red-soft:rgba(255,125,116,.13);
   --hl:rgba(236,200,64,.30); --hl-solid:#E9C84A;
   --graphite:#AFB7C7; --gold:#F2B632;
@@ -722,9 +722,14 @@ body::before{content:"";position:fixed;top:0;left:0;right:0;height:var(--sat);ba
 .sc-turn:empty{display:none}
 .sc-steps.build{min-height:48px;padding:8px 12px;border-radius:12px;background:var(--sheet-2)}
 .sc-now{font-size:15px;margin-bottom:10px}
+.sc-tempo{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.sc-tempo button{min-width:0;white-space:normal;min-height:44px;font-size:13px;line-height:1.3;padding:6px 3px}
+.sc-instructions{margin-top:18px;border-top:1px solid var(--rule-2);padding-top:14px}
+.sc-instructions>summary{cursor:pointer;min-height:44px;font-weight:600;color:var(--blue)}
 .sc-now b{font-family:var(--font-hand);font-size:24px;line-height:1}
 .kb-wrap{overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:0 -20px;padding:0 20px 4px}
 .kb-wrap::-webkit-scrollbar{display:none}
+.kb-wrap:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
 .kb{position:relative;height:150px}
 .kw,.kbk{position:absolute;top:0;border:0;padding:0;touch-action:manipulation;-webkit-user-select:none;user-select:none}
 .kw{width:44px;bottom:0;background:linear-gradient(to bottom,var(--key-w) 80%,var(--key-w2));border:1px solid var(--key-line);border-radius:0 0 9px 9px;color:#1C2330;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:0;padding-bottom:8px;font-weight:700;font-size:13px}
@@ -943,6 +948,67 @@ body.kb .tnav{position:relative;top:auto}
 .foot-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .today-foot > .hint{margin-top:8px;text-align:center;font-size:12.5px}
 @media (prefers-reduced-motion: reduce){.tnav button{transition:none}}
+
+/* 소리일기: a quiet notebook, with the tools within reach. */
+.topbar-in{padding:9px 12px;gap:9px;min-height:62px}
+.brand-mark{flex:none;border-radius:10px}
+.tb-brand{flex:1;min-width:0}
+.tb-title{font-family:var(--font-ui);font-size:19px;letter-spacing:-.04em;line-height:1.3}
+.tb-subtitle{font-size:11px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.5}
+.icon-btn{width:44px;height:44px}
+.day-date{font-family:var(--font-ui);font-size:29px;font-weight:700;letter-spacing:-.045em}
+.day-sub{margin-top:5px;font-size:12.5px}
+.v-today .day-head{padding:10px 0 14px}
+.quick-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 14px}
+.quick-action{display:grid;justify-items:center;gap:2px;min-height:94px;padding:13px 4px 10px;border:1px solid var(--rule-2);border-radius:18px;background:var(--sheet);color:var(--ink);font-size:14px;font-weight:600;box-shadow:0 2px 5px rgba(28,35,48,.02)}
+.quick-action .ic{color:var(--blue);margin-bottom:3px}
+.quick-action small{font-size:11px;font-weight:400;color:var(--ink-3)}
+.quick-action:active{background:var(--blue-soft)}
+.tnav{--tb-h:62px}
+.tnav-in{gap:3px;padding:4px;border-radius:18px}
+.tnav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:57px;font-size:12px;padding:6px 2px;border-radius:14px}
+.tnav button[aria-selected="true"]{color:var(--blue);background:var(--sheet)}
+.t-session{border:1px solid var(--rule-2);box-shadow:none}
+.timer-line{gap:10px}
+.t-session .timer-row{padding:12px 0}
+.t-session .stop-card{border-top:1px solid var(--rule-2);padding:4px 0}
+.stop-h{min-height:44px}
+.stop-h>.ic{color:var(--blue)}
+.stop-card.alert .stop-h>.ic{color:var(--red)}
+.tgrp{margin-top:19px}
+.tg-head{display:block;padding:0 4px 10px}
+.tg-t{position:static;width:auto;height:auto;overflow:visible;clip:auto;white-space:normal;display:flex;align-items:center;gap:8px;font-size:20px;font-weight:700;line-height:1.5;letter-spacing:-.035em}
+.tg-t .ic{color:var(--blue)}
+.tg-sub{margin-top:3px;font-size:12.5px}
+.tg-card{padding:0 16px 4px}
+.diary-welcome{display:flex;gap:10px;align-items:center;padding:16px 0;border-bottom:1px solid var(--rule-2)}
+.diary-art{display:block;width:120px;height:88px;object-fit:contain;margin:0 auto 12px}
+.diary-welcome .diary-art{width:76px;height:68px;margin:0;flex:none}
+.diary-welcome .hand{font-size:24px;line-height:1.2;color:var(--blue);margin-bottom:5px}
+.diary-welcome .hint{font-size:12px;line-height:1.55}
+.part-actions{display:flex;gap:8px;margin-top:14px}
+.part-actions .btn{min-height:48px}
+.part-actions .btn.blue{flex:1}
+.view-head{padding:14px 4px 16px;gap:10px}
+.view-head>.ic{color:var(--blue)}
+.view-title{font-family:var(--font-ui);font-size:25px;letter-spacing:-.04em;line-height:1.3}
+.tabbar-in{height:68px;gap:4px;padding:6px 8px}
+:root{--tabbar-h:68px}
+.tab{gap:3px;font-size:12px;border-radius:15px;min-height:48px}
+.tab[aria-selected="true"]{color:var(--blue);background:var(--blue-soft)}
+.cup{width:28px;min-height:44px}
+.bar{min-width:34px;min-height:44px}
+.sec-h{flex-wrap:wrap;row-gap:6px}
+.v-today .sec-h h3{display:flex;gap:7px;align-items:center}
+.rec-actions .btn{min-height:48px;flex:1}
+.empty{padding:30px 12px}
+.empty .hand{font-size:25px;line-height:1.35}
+@media(max-width:360px){
+  .day-date{font-size:25px}.quick-action{font-size:13px}.quick-action small{font-size:10.5px}
+  .cond-line{flex-wrap:wrap;row-gap:4px}.diary-welcome .diary-art{width:56px}
+  .tb-timer{padding:5px 7px;font-size:12px}.tb-subtitle{max-width:120px}
+}
+@media(hover:hover){.quick-action:hover{border-color:var(--blue);background:var(--blue-soft)}}
 
 /* grafts: 오늘의 기록 as a two-column checklist; 1년 전 오늘 as its own card at the end */
 .v-today .rec-card{padding:10px 12px 12px}

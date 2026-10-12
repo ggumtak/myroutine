@@ -172,5 +172,16 @@ function detectPitch(buf, sr, minF = 60, maxF = 1400) {
 }
 const midiOf = f => 69 + 12 * Math.log2(f / 440);
 
-window.ScaleKit = { PRESETS, BOOK, PARTS, WORDS, START, SOLFA, degName, BUILD_KEYS, detectPitch, midiOf };
+/* Root notes of successive rounds. base and ceiling are independent settings; invalid ranges play once.
+ * A live edit supplies the current root and direction, preserving the round already being heard. */
+function roundSequence(base, ceiling, direction = 'updown', current = null, returning = false) {
+  const from = current == null ? (direction === 'down' ? Math.max(base, ceiling) : base) : current;
+  if (base > ceiling) return [from];
+  const path = (a, b) => Array.from({ length: Math.abs(b - a) + 1 }, (_, i) => a + Math.sign(b - a) * i);
+  if (direction === 'down' || returning) return from >= base ? path(from, base) : [from];
+  if (from > ceiling) return from >= base ? path(from, base) : [from];
+  const up = path(from, ceiling);
+  return up.concat(path(ceiling, base).slice(1));
+}
+window.ScaleKit = { PRESETS, BOOK, PARTS, WORDS, START, SOLFA, degName, BUILD_KEYS, detectPitch, midiOf, roundSequence };
 })();

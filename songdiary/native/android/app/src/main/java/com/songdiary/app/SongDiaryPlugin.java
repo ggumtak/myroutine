@@ -2,6 +2,7 @@ package com.songdiary.app;
 
 import android.content.ContentResolver;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.OpenableColumns;
@@ -28,6 +29,30 @@ public class SongDiaryPlugin extends Plugin {
     private static final String TAG = "SongDiary";
     private static final long MAX_SIZE = 300L * 1024 * 1024; /* the app refuses bigger files anyway (MAX_AUDIO) */
     private final List<JSObject> pending = new ArrayList<>();
+
+    private JSObject windowState() {
+        Configuration c = getContext().getResources().getConfiguration();
+        JSObject r = new JSObject();
+        r.put("multiWindow", getActivity().isInMultiWindowMode());
+        r.put("width", c.screenWidthDp);
+        r.put("height", c.screenHeightDp);
+        return r;
+    }
+
+    @PluginMethod
+    public void getWindowState(PluginCall call) { call.resolve(windowState()); }
+
+    @Override
+    protected void handleOnConfigurationChanged(Configuration c) {
+        super.handleOnConfigurationChanged(c);
+        notifyListeners("windowChanged", windowState());
+    }
+
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        notifyListeners("windowChanged", windowState());
+    }
 
     @Override
     public void load() {

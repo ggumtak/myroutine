@@ -35,7 +35,14 @@ function done(t) { return new Promise((res, rej) => { t.oncomplete = () => res()
 /* a connection the system closed under us is reopened once */
 async function withDB(fn) {
   try { return await fn(await openDB()); }
-  catch (e) { if (e && e.name === 'InvalidStateError') { dbp = null; return fn(await openDB()); } throw e; }
+  catch (e) {
+    if (e && ['InvalidStateError', 'AbortError', 'UnknownError'].includes(e.name)) {
+      dbp = null;
+      await new Promise(r => setTimeout(r, 100));
+      return fn(await openDB());
+    }
+    throw e;
+  }
 }
 const Store = {
   get(store, key) { return withDB(db => reqP(db.transaction(store).objectStore(store).get(key))); },
@@ -298,6 +305,11 @@ const App = {
   onBack(fn) { const A = plug('App'); if (A) A.addListener('backButton', fn); },
   onPause(fn) { const A = plug('App'); if (A) A.addListener('pause', fn); },
   onResume(fn) { const A = plug('App'); if (A) A.addListener('resume', fn); },
+  onWindowChange(fn) {
+    const P = plug('SongDiary'); if (!P) return;
+    P.addListener('windowChanged', fn);
+    if (P.getWindowState) P.getWindowState().then(fn).catch(() => {});
+  },
   exit() { const A = plug('App'); if (A) A.exitApp(); },
   minimize() { const A = plug('App'); if (A && A.minimizeApp) A.minimizeApp().catch(() => A.exitApp()); },
   async version() { const A = plug('App'); if (!A) return null; try { return await A.getInfo(); } catch (e) { return null; } },
@@ -336,7 +348,7 @@ const App = {
     try { await LN.cancel({ notifications: [{ id: 1001 }] }); } catch (e) { /* ignore */ }
     try { await LN.createChannel({ id: 'practice', name: '연습 알림', description: '매일 노래 연습할 시간을 알려줘요', importance: 4, vibration: true }); } catch (e) { /* ignore */ }
     /* a daily nudge doesn't need an exact alarm; asking for one sends Android 14+ users to a system settings page */
-    await LN.schedule({ notifications: [{ id: 1001, title: '노래일기', body, channelId: 'practice', smallIcon: 'ic_stat_note', isExactNotification: false, schedule: { on: { hour, minute }, allowWhileIdle: true } }] });
+    await LN.schedule({ notifications: [{ id: 1001, title: '소리일기', body, channelId: 'practice', smallIcon: 'ic_stat_note', isExactNotification: false, schedule: { on: { hour, minute }, allowWhileIdle: true } }] });
     return 'ok';
   }
 };

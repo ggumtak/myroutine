@@ -65,6 +65,7 @@ async function served() {
 
 /* the version this copy of the app is (written by the publish tool) */
 let curP = null;
+let installingCode = null;
 function current() {
   if (!curP) curP = getBytes('release.json', 8000).then(b => JSON.parse(new TextDecoder().decode(b))).catch(() => null);
   return curP;
@@ -103,6 +104,10 @@ const OTA = {
      checks all of them, then switches. onProgress(done, total, fetched) */
   async apply(latest, onProgress) {
     if (!isNative) throw new Error('unsupported');
+    if (installingCode != null) throw new Error('update-in-progress');
+    installingCode = latest.code;
+    try {
+    if (this.cleaning) await this.cleaning;
     const cur = await current();
     const dir = `ota/v${latest.code}`;
     try { await FS('rmdir', { path: dir, directory: 'DATA', recursive: true }); } catch (e) { /* not there */ }
@@ -142,6 +147,7 @@ const OTA = {
     save(s);
     /* the WebView reloads from the new copy; it is kept only after it starts up fine (confirmBoot) */
     await native('WebView', 'setServerBasePath', { path });
+    } finally { installingCode = null; }
   },
   /* called once the app has started and drawn its first screen. What the WebView actually serves decides:
      the notes kept here can lag behind when Android ends the app right after a switch. */
@@ -181,16 +187,22 @@ const OTA = {
   },
   /* removes downloaded copies, never the one being served */
   async cleanup() {
+    if (installingCode != null) return;
+    if (this.cleaning) return this.cleaning;
+    this.cleaning = (async () => {
     const sv = await served();
     if (!sv) return;
-    const keep = sv.code ? `v${sv.code}` : null;
+    const s = load(), keep = new Set([sv.code, s.pending, s.active].filter(Boolean).map(c => `v${c}`));
+    if (s.prev && s.prev.type === 'file') { const m = /\/ota\/(v\d+)\/?$/.exec(s.prev.path); if (m) keep.add(m[1]); }
     try {
       const r = await FS('readdir', { path: 'ota', directory: 'DATA' });
       for (const f of r.files || []) {
         const name = typeof f === 'string' ? f : f.name;
-        if (name !== keep) { try { await FS('rmdir', { path: `ota/${name}`, directory: 'DATA', recursive: true }); } catch (e) { /* ignore */ } }
+        if (!keep.has(name)) { try { await FS('rmdir', { path: `ota/${name}`, directory: 'DATA', recursive: true }); } catch (e) { /* ignore */ } }
       }
     } catch (e) { /* nothing downloaded yet */ }
+    })().finally(() => { this.cleaning = null; });
+    return this.cleaning;
   },
   state: load,
   /* offer a version again that was set aside as not starting (asked for by the user) */
