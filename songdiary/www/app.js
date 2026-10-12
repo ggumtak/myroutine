@@ -2834,7 +2834,7 @@ function DrillSec(date) {
   if (rOn && isToday) hints.push(LevelSeg(date));
   if (rOn) {
     if (rest != null) hints.push(h('p', { class: 'drill-hint warn' }, isToday ? `오늘은 ①~③단계만 해요 (어제 끝난 후 목 상태 ${rest}점)` : `이 날은 ①~③단계만 한 날 (전날 끝난 후 목 상태 ${rest}점)`));
-    else hints.push(h('p', { class: 'drill-hint' }, `노래 전 루틴 약 ${mins}분 · Singing for the Stars `, h('button', { class: 'link', 'data-fk': 'drills-guide', onclick: openGuide }, '전체 보기')));
+    else hints.push(h('p', { class: 'drill-hint' }, `노래 전 루틴 약 ${mins}분 · `, h('button', { class: 'link', 'data-fk': 'drills-guide', onclick: openGuide }, '전체 보기')));
   }
   if (e && e.stop) hints.push(h('p', { class: 'drill-hint warn' }, '목이 긁히거나 따끔해서 끝낸 날이에요'));
   let body;

@@ -197,6 +197,7 @@ ReaderaPlus와 같은 방식이에요. 앱이 바뀐 푸시마다 GitHub Actions
    → 권한 승인(고급 → 안전하지 않음으로 이동 → 허용) → 웹 앱 URL(`…/exec`) 복사.
 2. 이 저장소 Settings → Secrets → Actions에 `SONGDIARY_DRIVE_URL`(웹 앱 주소), `SONGDIARY_DRIVE_KEY`(그 비밀번호).
 
+- 다른 앱에서 공유한 녹음은 `ShareActivity`가 받아 복사한 뒤 앱을 평범하게 열어요. 공유가 앱 창(task)의 시작이 되면, 최근 앱에서 다시 열 때 안드로이드가 그 공유를 다시 보내려다 파일 권한이 없어 ‘앱을 열지 못했어요’가 떠요.
 - `native/`: 앱이 쓰는 플러그인(App, Filesystem, Share, LocalNotifications; HTTP·WebView·SystemBars는 기본 포함)과
   `SongDiaryPlugin`(화면 켜 두기, 앱 설정 열기, 다른 앱에서 공유한 녹음 받기). 아이콘·스플래시는 `www/icon.svg`로 그렸어요.
 - 서명 키는 첫 빌드 때 만들어 드라이브 `노래일기` 폴더의 `songdiary-signing.json`에 둬요. 지우지 마세요

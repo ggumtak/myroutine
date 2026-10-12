@@ -30,7 +30,6 @@ import java.util.Set;
 @CapacitorPlugin(name = "SongDiary")
 public class SongDiaryPlugin extends Plugin {
     private static final String TAG = "SongDiary";
-    private static final long MAX_SIZE = 300L * 1024 * 1024; /* the app refuses bigger files anyway (MAX_AUDIO) */
     private final List<JSObject> pending = new ArrayList<>();
 
     private JSObject windowState() {
@@ -55,6 +54,7 @@ public class SongDiaryPlugin extends Plugin {
     protected void handleOnResume() {
         super.handleOnResume();
         notifyListeners("windowChanged", windowState());
+        if (SharedFiles.hasPending(getContext())) notifyListeners("sharedFiles", new JSObject(), true);
     }
 
     @Override
@@ -66,6 +66,7 @@ public class SongDiaryPlugin extends Plugin {
     protected void handleOnNewIntent(Intent intent) {
         super.handleOnNewIntent(intent);
         take(intent);
+        if (intent != null && intent.getBooleanExtra(SharedFiles.EXTRA, false)) notifyListeners("sharedFiles", new JSObject(), true);
     }
 
     @PluginMethod
@@ -112,99 +113,21 @@ public class SongDiaryPlugin extends Plugin {
             for (JSObject f : pending) files.put(f);
             pending.clear();
         }
+        for (JSObject f : SharedFiles.takePending(getContext())) files.put(f); /* copied by ShareActivity */
         JSObject r = new JSObject();
         r.put("files", files);
         call.resolve(r);
     }
 
-    /* a share from another app: copy the files off the main thread, then tell the page */
+    /* a share delivered straight to this activity (older installs): copy the files off the main thread, then tell the page */
     private void take(Intent intent) {
-        if (intent == null) return;
-        String action = intent.getAction();
-        final List<Uri> uris = new ArrayList<>();
-        if (Intent.ACTION_SEND.equals(action)) {
-            Uri u = intent.getParcelableExtra(Intent.EXTRA_STREAM);
-            if (u != null) uris.add(u);
-        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action)) {
-            ArrayList<Uri> list = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
-            if (list != null) uris.addAll(list);
-        } else {
-            return;
-        }
-        intent.setAction(Intent.ACTION_MAIN); /* not taken twice when the activity is recreated */
+        final List<Uri> uris = SharedFiles.urisOf(intent);
         if (uris.isEmpty()) return;
+        intent.setAction(Intent.ACTION_MAIN); /* not taken twice when the activity is recreated */
         new Thread(() -> {
-            File dir = new File(getContext().getCacheDir(), "incoming");
-            dir.mkdirs();
-            dropStale(dir);
-            ContentResolver cr = getContext().getContentResolver();
-            List<JSObject> got = new ArrayList<>();
-            for (Uri u : uris) {
-                try {
-                    String name = "녹음";
-                    long size = -1;
-                    try (Cursor c = cr.query(u, null, null, null, null)) {
-                        if (c != null && c.moveToFirst()) {
-                            int ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME), si = c.getColumnIndex(OpenableColumns.SIZE);
-                            if (ni >= 0 && c.getString(ni) != null) name = c.getString(ni);
-                            if (si >= 0 && !c.isNull(si)) size = c.getLong(si);
-                        }
-                    } catch (Exception e) { /* no metadata */ }
-                    String mime = cr.getType(u);
-                    JSObject f = new JSObject();
-                    f.put("name", name);
-                    f.put("mime", mime == null ? "" : mime);
-                    if (size > MAX_SIZE) {
-                        f.put("size", size);
-                        f.put("path", "");
-                    } else {
-                        File out = free(dir, name.replaceAll("[\\\\/:*?\"<>|]", "_"));
-                        long n = 0;
-                        try (InputStream in = cr.openInputStream(u); OutputStream os = new FileOutputStream(out)) {
-                            byte[] buf = new byte[65536];
-                            int r;
-                            while ((r = in.read(buf)) > 0) { os.write(buf, 0, r); n += r; if (n > MAX_SIZE) break; }
-                        } catch (Exception e) {
-                            out.delete(); /* no half copy left behind */
-                            throw e;
-                        }
-                        f.put("size", n);
-                        if (n > MAX_SIZE) {
-                            out.delete(); /* the page refuses it and never reads it */
-                            f.put("path", "");
-                        } else {
-                            f.put("path", Uri.fromFile(out).toString());
-                        }
-                    }
-                    got.add(f);
-                } catch (Exception e) {
-                    Log.w(TAG, "shared file", e);
-                }
-            }
+            List<JSObject> got = SharedFiles.copy(getContext(), uris);
             synchronized (pending) { pending.addAll(got); }
             notifyListeners("sharedFiles", new JSObject(), true);
         }).start();
-    }
-
-    /* copies older than a day that nobody picked up (the app was closed before the page read them) */
-    private void dropStale(File dir) {
-        File[] old = dir.listFiles();
-        if (old == null) return;
-        Set<String> keep = new HashSet<>();
-        synchronized (pending) {
-            for (JSObject f : pending) keep.add(f.getString("path", ""));
-        }
-        long cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000;
-        for (File f : old) {
-            if (f.isFile() && f.lastModified() < cutoff && !keep.contains(Uri.fromFile(f).toString())) f.delete();
-        }
-    }
-
-    private static File free(File dir, String name) {
-        File f = new File(dir, name);
-        int dot = name.lastIndexOf('.');
-        String base = dot > 0 ? name.substring(0, dot) : name, ext = dot > 0 ? name.substring(dot) : "";
-        for (int i = 2; f.exists(); i++) f = new File(dir, base + " (" + i + ")" + ext);
-        return f;
     }
 }
