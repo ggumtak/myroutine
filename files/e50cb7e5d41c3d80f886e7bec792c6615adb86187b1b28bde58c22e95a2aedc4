@@ -56,6 +56,11 @@ function lsGet(k, fb) { try { const v = localStorage.getItem(k); return v ? JSON
 function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
 
 const IC = {
+  diary: '<rect x="5" y="3" width="15" height="18" rx="2.5"/><path d="M8 3v18M3 7h4M3 12h4M3 17h4M13 14V8l4-1v6"/><path d="M13 14c0 2-3 2-3 .5s3-1.5 3-.5M17 13c0 2-3 2-3 .5s3-1.5 3-.5"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M8 14h2M14 14h2M8 17h2"/>',
+  heart: '<path d="M20 5.5a5 5 0 00-8 1 5 5 0 00-8-1c-3 4 1 8 8 14 7-6 11-10 8-14z"/>',
+  water: '<path d="M12 3C10 7 5 11 5 15a7 7 0 0014 0c0-4-5-8-7-12zM9 15a3 3 0 003 3"/>',
+  shield: '<path d="M12 3l8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6zM12 8v5M12 16h.01"/>',
   left: '<path d="M15 5l-7 7 7 7"/>',
   right: '<path d="M9 5l7 7-7 7"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -162,14 +167,14 @@ const S = {
   tab: 'today', date: todayStr(), follow: true,
   cal: { y: new Date().getFullYear(), m: new Date().getMonth(), sel: todayStr(), q: '' },
   fb: { status: 'open', kinds: ['bad', 'fb'], tag: null, pinned: false },
-  lib: { seg: 'songs', best: false, status: null, jq: '', jall: false, jn: 20 },
+  lib: { seg: 'journal', best: false, status: null, jq: '', jall: false, jn: 20 },
   compose: { good: { tag: null }, bad: { tag: null }, fb: { tag: null, from: '선생님' } },
   saveErr: null, openDrills: new Set(), openGroups: new Map(), recording: false, update: null,
   popNote: null, justDone: null, sheetOpen: false
 };
 
 function defaultSettings() {
-  return { v: 2, title: '껌딱의 노래일기', drills: DEFAULT_DRILLS.map(d => ({ ...d })), tags: DEFAULT_TAGS.slice(), sound: true, haptic: true, theme: 'auto', reminder: { on: false, h: 20, m: 0 }, autoBackup: true, songSearch: true, scale: normScale(null), routine: null, book: normBook(null), songs: [], updatedAt: 0 };
+  return { v: 2, title: '나의 소리일기', drills: DEFAULT_DRILLS.map(d => ({ ...d })), tags: DEFAULT_TAGS.slice(), sound: true, haptic: true, theme: 'auto', reminder: { on: false, h: 20, m: 0 }, autoBackup: true, songSearch: true, scale: normScale(null), routine: null, book: normBook(null), songs: [], updatedAt: 0 };
 }
 /* scale practice: chosen exercise, speed, starting chord, last key pressed, your own exercises */
 function normScale(x) {
@@ -178,11 +183,11 @@ function normScale(x) {
     .map(c => ({ id: String(c.id), name: String(c.name || '내 스케일').slice(0, 20), steps: c.steps.slice(0, 40).map(n => clampInt(n, -12, 24, 0)) })) : [];
   const pat = typeof x.pat === 'string' && (SK.BOOK.concat(SK.PRESETS).some(p => p.id === x.pat) || custom.some(c => c.id === x.pat)) ? x.pat : 'b01';
   /* auto: one press goes up a semitone at a time to top (꼭대기 음, the exercise's highest note) and back down */
-  const top = x.top == null ? null : clampInt(x.top, SCALE_LO + 2, SCALE_TOP, 67);
+  const top = x.top == null ? 72 : clampInt(x.top, SCALE_LO + 2, SCALE_TOP, 72);
   /* starts: the 시작 음 you chose per exercise; without one a book exercise starts where the book has a tenor start */
   const starts = {};
   if (x.starts && typeof x.starts === 'object') for (const k in x.starts) if (/^[\w-]{1,40}$/.test(k) && Object.keys(starts).length < 80) starts[k] = clampInt(x.starts[k], SCALE_LO, SCALE_HI, 48);
-  return { pat, bpm: clampInt(x.bpm, 40, 220, 100), chord: x.chord !== false, echo: !!x.echo, root: clampInt(x.root, SCALE_LO, SCALE_HI, 48), auto: x.auto !== false, top, voice: 'tenor', starts, custom };
+  return { pat, bpm: x.tempoVersion !== 2 && x.bpm === 100 ? 80 : clampInt(x.bpm, 40, 220, 80), tempoVersion: 2, direction: x.direction === 'down' ? 'down' : 'updown', chord: x.chord !== false, echo: !!x.echo, root: clampInt(x.root, SCALE_LO, SCALE_HI, 48), auto: x.auto !== false, top, voice: 'tenor', starts, custom };
 }
 /* 책 진도: the book exercise you are on, and its practice log (시작한 날 s / 해낸 날 a) per exercise number */
 function normBook(b) {
@@ -224,7 +229,7 @@ function normSettings(s) {
   const rm = s.reminder && typeof s.reminder === 'object' ? s.reminder : {};
   const out = {
     v: 2,
-    title: typeof s.title === 'string' && s.title.trim() ? s.title.trim().slice(0, 30) : d.title,
+    title: ['껌딱의 노래일기', '노래일기', 'myroutine', 'MyRoutine'].includes(s.title) ? d.title : typeof s.title === 'string' && s.title.trim() ? s.title.trim().slice(0, 30) : d.title,
     drills: Array.isArray(s.drills) ? s.drills.filter(x => x && x.id).map(x => ({ ...x, id: String(x.id), name: String(x.name || '연습').slice(0, 20), target: clampInt(x.target, 1, 99, 5), timed: !!x.timed, memo: String(x.memo || '').slice(0, 60) })) : d.drills,
     tags: Array.isArray(s.tags) ? s.tags.filter(t => typeof t === 'string' && t.trim()).slice(0, MAX_TAGS) : d.tags,
     sound: s.sound !== false,
@@ -369,7 +374,7 @@ function applyTheme() {
   if (t === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', t);
   const dark = isDark();
   const m = $('meta[name="theme-color"]');
-  if (m) m.setAttribute('content', dark ? '#11141B' : '#ECEFF3');
+  if (m) m.setAttribute('content', dark ? '#11141B' : '#F4F2EF');
   Native.setBars(dark);
 }
 
@@ -378,24 +383,12 @@ const Sound = {
   ctx: null,
   get() {
     try {
-      if (!this.ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; this.ctx = new AC(); }
+      if (!this.ctx || this.ctx.state === 'closed') { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; this.ctx = new AC(); }
       if (this.ctx.state === 'suspended') this.ctx.resume();
       return this.ctx;
     } catch (e) { return null; }
   },
-  note(midi, when = 0, dur = 0.55, vol = 0.14) {
-    const ctx = this.get(); if (!ctx) return;
-    const t = ctx.currentTime + when + 0.01;
-    const f = 440 * Math.pow(2, (midi - 69) / 12);
-    const g = ctx.createGain(), o = ctx.createOscillator(), o2 = ctx.createOscillator(), g2 = ctx.createGain();
-    o.type = 'triangle'; o.frequency.value = f;
-    o2.type = 'sine'; o2.frequency.value = f * 2; g2.gain.value = 0.22;
-    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(ctx.destination);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.start(t); o2.start(t); o.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
-  },
+  note(midi, when = 0, dur = 0.4, vol = 0.14) { Synth.one(midi, dur, vol, when); },
   on() { return !S.settings || S.settings.sound !== false; },
   rep(i) { if (this.on()) this.note(SCALE_MIDI[PATTERN[i % 8]]); },
   done(i) { if (!this.on()) return; this.note(SCALE_MIDI[PATTERN[i % 8]]); this.note(72, 0.16, 0.8, 0.1); },
@@ -984,10 +977,13 @@ function render(opts = {}) {
   const y = window.scrollY;
   const act = document.activeElement;
   const keep = !opts.focus && !opts.top && act && act !== document.body && main.contains(act) && !isTyping() ? ctlKey(act) : '';
-  const title = S.settings ? S.settings.title : '노래일기';
-  $('#tb-title').textContent = title;
-  document.title = title;
-  $$('.tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)));
+  const title = S.settings ? S.settings.title : '나의 소리일기';
+  $('#tb-title').textContent = '소리일기';
+  $('#tb-subtitle').textContent = title;
+  document.title = `${title} · 소리일기`;
+  $$('.tab').forEach(b => { const active = b.dataset.tab === S.tab; b.setAttribute('aria-selected', String(active)); b.tabIndex = active ? 0 : -1; });
+  main.setAttribute('role', 'tabpanel');
+  main.setAttribute('aria-labelledby', `main-tab-${S.tab}`);
   let node;
   try {
     if (S.mode === 'loading') node = LoadingView();
@@ -1051,7 +1047,7 @@ function spyNav() {
   const nav = $('.tnav');
   if (!nav) return;
   const k = curPart(S.date);
-  $$('button', nav).forEach(b => b.setAttribute('aria-selected', String(b.dataset.g === k)));
+  $$('button', nav).forEach(b => { const active = b.dataset.g === k; b.setAttribute('aria-selected', String(active)); b.tabIndex = active ? 0 : -1; });
   const tb = $('.topbar');
   nav.classList.toggle('stuck', window.scrollY > 0 && !!tb && nav.getBoundingClientRect().top <= tb.getBoundingClientRect().bottom + 0.5);
 }
@@ -1059,7 +1055,7 @@ window.addEventListener('scroll', () => { if (!spyQ) spyQ = requestAnimationFram
 function TodayNav() {
   const k = curPart(S.date);
   return h('nav', { class: 'tnav jump', 'aria-label': '오늘 기록' },
-    h('div', { class: 'tnav-in', role: 'tablist' }, TGROUPS.map(g => h('button', { role: 'tab', id: `tab-${g.k}`, 'aria-controls': `g-${g.k}`, 'aria-selected': String(g.k === k), 'data-g': g.k, 'data-fk': `nav-${g.k}`, onclick: () => jumpPart(g.k, false) }, g.l.split('·').flatMap((w, i) => (i ? ['·', h('wbr'), w] : [w]))))));
+    h('div', { class: 'tnav-in', role: 'tablist' }, TGROUPS.map(g => h('button', { role: 'tab', id: `tab-${g.k}`, 'aria-controls': `g-${g.k}`, 'aria-selected': String(g.k === k), tabindex: g.k === k ? 0 : -1, 'data-g': g.k, 'data-fk': `nav-${g.k}`, onclick: () => jumpPart(g.k, false) }, icon(g.ic, 18), h('span', null, g.l)))));
 }
 /* to one part of 오늘: shown from its top, just under the bars; focus on its heading when asked (TalkBack goes on from there) */
 function jumpPart(k, focus = true) {
@@ -1632,39 +1628,39 @@ function openSongLink(key, onDone) {
 
 /* ================= scale practice: press a key, hear the exercise start from it ================= */
 const mod12 = n => ((n % 12) + 12) % 12;
-/* piano-like tones on the Web Audio clock; everything scheduled can be stopped at once */
+/* Sampled grand piano on the Web Audio clock; no synthetic fallback timbre. */
+const Piano = window.GrandPiano;
 const Synth = {
   nodes: [], timers: [], master: null, seq: 0, onAbort: null,
+  /* starts loading the piano so the first note is already the real one */
+  prepare() { const ctx = Sound.get(); if (ctx) Piano.load(ctx).catch(() => {}); },
+  /* a recorded piano note: held for dur, then the damper falls (a short release) */
+  sample(ctx, midi, t, dur, vol) {
+    const k = Piano.near(midi), src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = Piano.get(midi, vol);
+    src.playbackRate.value = Math.pow(2, (midi - k) / 12);
+    src.connect(g); g.connect(this.out(ctx));
+    const v = vol * 2.8;
+    g.gain.setValueAtTime(v, t);
+    g.gain.setValueAtTime(v, t + dur);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.16);
+    src.start(t, 0); src.stop(t + dur + 0.18);
+    this.nodes.push({ g, os: [src], t, end: t + dur + 0.18 });
+    if (this.nodes.length > 80) this.nodes = this.nodes.filter(n => n.end > ctx.currentTime);
+  },
   out(ctx) {
     if (!this.master || this.master.context !== ctx) {
       const comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = -14; comp.ratio.value = 4;
+      comp.threshold.value = -8; comp.ratio.value = 1.8; comp.knee.value = 12; comp.attack.value = 0.015; comp.release.value = 0.18;
       this.master = ctx.createGain(); this.master.gain.value = 0.9;
       this.master.connect(comp); comp.connect(ctx.destination);
     }
     return this.master;
   },
   tone(ctx, midi, t, dur, vol) {
-    const f = 440 * Math.pow(2, (midi - 69) / 12);
-    const g = ctx.createGain();
-    g.connect(this.out(ctx));
-    /* low notes get more overtones: a phone speaker hardly plays the fundamental of a man's range */
-    const L = Math.max(0, Math.min(1, (67 - midi) / 19));
-    const os = [['triangle', 1, 1], ['sine', 2, 0.32 + 0.5 * L], ['sine', 3, 0.08 + 0.4 * L], ['sine', 4, 0.3 * L], ['sine', 5, 0.15 * L]]
-      .filter(p => p[2] > 0.01).map(([type, mul, lv]) => {
-        const o = ctx.createOscillator(), og = ctx.createGain();
-        o.type = type; o.frequency.value = f * mul; og.gain.value = lv;
-        o.connect(og); og.connect(g);
-        o.start(t); o.stop(t + dur + 0.2);
-        return o;
-      });
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
-    g.gain.exponentialRampToValueAtTime(vol * 0.45, t + Math.min(0.4, dur * 0.7));
-    g.gain.setValueAtTime(vol * 0.45, t + dur);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.15);
-    this.nodes.push({ g, os, t, end: t + dur + 0.2 });
-    if (this.nodes.length > 80) this.nodes = this.nodes.filter(n => n.end > ctx.currentTime);
+    if (!Piano.get(midi, vol)) return false;
+    this.sample(ctx, midi, t, dur, vol);
+    return true;
   },
   /* a soft tick for the sing-back beats */
   tick(ctx, t) {
@@ -1676,31 +1672,28 @@ const Synth = {
   },
   /* one tone sliding through notes (the book's 'squeaky door' inflection): midis[i] is reached at times[i] */
   glideTone(ctx, midis, times, end, vol) {
-    const hz = m => 440 * Math.pow(2, (m - 69) / 12);
-    const g = ctx.createGain(), t = times[0];
-    g.connect(this.out(ctx));
-    const L = Math.max(0, Math.min(1, (67 - midis[0]) / 19));
-    const os = [['triangle', 1, 1], ['sine', 2, 0.25 + 0.4 * L], ['sine', 3, 0.05 + 0.3 * L]].map(([type, mul, lv]) => {
-      const o = ctx.createOscillator(), og = ctx.createGain();
-      o.type = type; og.gain.value = lv;
-      o.frequency.setValueAtTime(hz(midis[0]) * mul, t);
-      /* hold each note for the first half of its time, then slide to the next */
+    if (Piano.get(midis[0], vol)) {
+      /* the piano recording itself slides (its speed follows the notes) */
+      const k = Piano.near(midis[0]), src = ctx.createBufferSource(), g = ctx.createGain(), rate = m => Math.pow(2, (m - k) / 12), t0 = times[0];
+      src.buffer = Piano.get(midis[0], vol);
+      src.playbackRate.setValueAtTime(rate(midis[0]), t0);
       for (let i = 1; i < midis.length; i++) {
-        o.frequency.setValueAtTime(hz(midis[i - 1]) * mul, times[i - 1] + (times[i] - times[i - 1]) * 0.45);
-        o.frequency.exponentialRampToValueAtTime(hz(midis[i]) * mul, times[i]);
+        src.playbackRate.setValueAtTime(rate(midis[i - 1]), times[i - 1] + (times[i] - times[i - 1]) * 0.45);
+        src.playbackRate.exponentialRampToValueAtTime(rate(midis[i]), times[i]);
       }
-      o.connect(og); og.connect(g);
-      o.start(t); o.stop(end + 0.2);
-      return o;
-    });
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + 0.03);
-    g.gain.exponentialRampToValueAtTime(vol * 0.6, t + 0.3);
-    g.gain.setValueAtTime(vol * 0.6, end);
-    g.gain.exponentialRampToValueAtTime(0.0001, end + 0.15);
-    this.nodes.push({ g, os, t, end: end + 0.2 });
+      src.connect(g); g.connect(this.out(ctx));
+      g.gain.setValueAtTime(vol * 2.8, t0); g.gain.setValueAtTime(vol * 2.8, end); g.gain.exponentialRampToValueAtTime(0.0001, end + 0.16);
+      src.start(t0, 0); src.stop(end + 0.18);
+      this.nodes.push({ g, os: [src], t: t0, end: end + 0.18 });
+      return;
+    }
   },
-  one(midi) { const ctx = Sound.get(); if (ctx) this.tone(ctx, midi, ctx.currentTime + 0.02, 0.5, 0.25); },
+  async one(midi, dur = 0.5, vol = 0.25, when = 0) {
+    const ctx = Sound.get(), seq = this.seq;
+    if (!ctx) return;
+    try { await Piano.load(ctx, [midi], vol); } catch (e) { return; }
+    if (this.seq === seq) this.tone(ctx, midi, ctx.currentTime + when + 0.015, dur, vol);
+  },
   /* steps: semitones above root. onStep(i, pass) as each note is heard — pass 'play' for the piano, 'sing' for
      the sing-back beats (echo); onEnd(finished) after the last one (true), or when the playback is cut off (false).
      d / tie / st / glide: a book exercise's rhythm (see scales.js); without d every note is a beat. Resolves false if no sound. */
@@ -1711,6 +1704,14 @@ const Synth = {
     if (!ctx) return false;
     if (ctx.state !== 'running') { try { await ctx.resume(); } catch (e) { /* ignore */ } }
     if (my !== this.seq) return false; /* stopped or replaced while the audio was waking up */
+    /* Wait for the actual notes, rather than changing to a cheap oscillator if decoding is slow. */
+    try {
+      await Promise.all([Piano.load(ctx, steps.map(s => root + s), 0.27), chord ? Piano.load(ctx, [root, root + 3, root + 4, root + 7], 0.13) : Promise.resolve()]);
+    } catch (e) {
+      if (my === this.seq) { toast('피아노 소리를 준비하지 못했어요. 다시 눌러 주세요.'); if (onEnd) onEnd(false); }
+      return false;
+    }
+    if (my !== this.seq) return false;
     const beat = 60 / bpm;
     const lat = ctx.outputLatency || ctx.baseLatency || 0; /* highlights follow what is heard, not what is scheduled */
     const at = t => Math.max(0, (t + lat - ctx.currentTime) * 1000);
@@ -1721,7 +1722,7 @@ const Synth = {
       t0 += beat * 2.2;
     }
     /* when each note starts and how many beats it lasts */
-    const len = i => (d && d[i] > 0 ? d[i] : i === steps.length - 1 ? 1.8 : 1);
+    const len = i => i === steps.length - 1 ? 0.6 : (d && d[i] > 0 ? d[i] : 1);
     const starts = [];
     let pos = 0;
     steps.forEach((off, i) => { starts.push(pos); pos += len(i); });
@@ -1732,16 +1733,16 @@ const Synth = {
       if (!glide && !held(i)) {
         let sound = len(i);
         for (let j = i + 1; held(j); j++) sound += len(j);
-        const dur = !d ? (i === steps.length - 1 ? 1.8 : 0.9) : st && st.includes(i) ? Math.min(sound, 1) * 0.45 : sound * 0.94;
+        const dur = st && st.includes(i) ? Math.min(sound, 1) * 0.45 : sound * 0.94;
         this.tone(ctx, root + off, t, dur * beat, 0.27);
       }
       this.timers.push(setTimeout(() => onStep && onStep(i, 'play'), at(t)));
     });
-    let end = t0 + (d ? pos : (steps.length - 1) + 1.8) * beat;
+    let end = t0 + pos * beat + 0.18;
     if (echo) {
       const s0 = end + beat * 0.6;
       steps.forEach((off, i) => { const t = s0 + starts[i] * beat; if (!held(i)) this.tick(ctx, t); this.timers.push(setTimeout(() => onStep && onStep(i, 'sing'), at(t))); });
-      end = s0 + (d ? pos - 0.3 : (steps.length - 1) + 1.5) * beat;
+      end = s0 + pos * beat;
     }
     this.onAbort = onEnd ? () => onEnd(false) : null;
     this.timers.push(setTimeout(() => { this.timers = []; this.onAbort = null; if (onEnd) onEnd(true); }, at(end)));
@@ -1815,7 +1816,7 @@ const Tuner = {
   stop() { this.gen++; this.teardown(); },
   on() { return !!this.stream; }
 };
-const TEMPOS = [['아주 느리게', 60], ['느리게', 80], ['보통', 100], ['빠르게', 130]];
+const TEMPOS = [['느리게', 60], ['보통', 80], ['빠르게', 100], ['매우 빠르게', 130]];
 const BLACK_PC = [1, 3, 6, 8, 10];
 const scalePats = () => SK.BOOK.concat(SK.PRESETS, S.settings.scale.custom);
 const bookOf = id => SK.BOOK.find(b => b.id === id) || null;
@@ -1857,11 +1858,14 @@ function openScaleTrainer(o = {}) {
   const span = () => Math.max(...pat().steps);
   const best = bestHigh(), bestM = best ? best.m : null;
   /* 꼭대기 음: the highest note the exercise goes up to before coming back down (yours, or a fifth above the first round) */
-  const ceil = () => (T.top != null ? T.top : Math.min(SCALE_TOP, bestM != null && bestM > base + span() ? bestM : base + span() + 7));
-  const autoSeq = b => {
-    const lim = Math.min(SCALE_HI, ceil() - span()), ups = [b];
-    while (ups[ups.length - 1] < lim && ups.length < 25) ups.push(ups[ups.length - 1] + 1);
-    return ups.concat(ups.slice(0, -1).reverse());
+  const ceil = () => T.top;
+  const limit = () => Math.min(SCALE_HI, ceil() - span());
+  const autoSeq = b => SK.roundSequence(b, limit(), T.direction);
+  const displayedRoot = () => !playing && T.auto && T.direction === 'down' ? Math.max(base, limit()) : root;
+  const reviseRun = changed => {
+    if (!run) return;
+    const returning = T.direction === 'down' || (changed !== 'top' && run.seq[run.i + 1] < root);
+    run.seq = run.seq.slice(0, run.i).concat(SK.roundSequence(base, limit(), T.direction, root, returning));
   };
   /* exercise chips in rows: the book's two parts, then the basic ones and yours */
   const chipBox = h('div', { class: 'sc-rows' });
@@ -1915,11 +1919,17 @@ function openScaleTrainer(o = {}) {
     const p = pat(), custom = T.custom.some(c => c.id === p.id);
     stepsBox.replaceChildren(...[
       h('span', { class: 'sc-turn', 'aria-live': 'polite' }),
-      h('span', { class: 'sc-seq', 'aria-hidden': 'true' }, p.steps.map(s => h('span', null, SK.degName(s)))),
+      h('span', { class: 'sc-seq', role: 'group', 'aria-label': '실제로 연주하는 음' }, p.steps.map(s => h('span', null, SK.SOLFA[mod12(root + s)]))),
       custom ? h('button', { class: 'link', 'data-fk': 'sc-edit', onclick: () => { stop(); openScaleBuilder(T.custom.find(c => c.id === p.id), afterBuild); } }, '편집') : null].filter(Boolean));
   };
   const paintSteps = () => {
-    $$('.sc-seq > span', stepsBox).forEach((sp, i) => { sp.classList.toggle('cur', i === step); sp.classList.toggle('sing', i === step && pass === 'sing'); });
+    $$('.sc-seq > span', stepsBox).forEach((sp, i) => {
+      const m = displayedRoot() + pat().steps[i];
+      sp.textContent = SK.SOLFA[mod12(m)];
+      sp.title = `${noteName(m)} (${noteSci(m)})`;
+      sp.classList.toggle('cur', i === step); sp.classList.toggle('sing', i === step && pass === 'sing');
+      if (i === step) sp.setAttribute('aria-current', 'true'); else sp.removeAttribute('aria-current');
+    });
     const turn = $('.sc-turn', stepsBox), txt = pass === 'sing' ? '따라 불러요' : '';
     if (turn && turn.textContent !== txt) turn.textContent = txt;
   };
@@ -1967,28 +1977,38 @@ function openScaleTrainer(o = {}) {
   };
   const paintKeys = () => {
     const cur = step >= 0 ? root + pat().steps[step] : null, s = sung != null ? Math.round(sung) : null, top = T.auto ? ceil() : null;
-    keys.forEach((k, m) => { k.classList.toggle('root', m === root); k.classList.toggle('on', m === cur); k.classList.toggle('sing', m === s); k.classList.toggle('top', m === top); });
+    keys.forEach((k, m) => { k.classList.toggle('root', m === displayedRoot()); k.classList.toggle('on', m === cur); k.classList.toggle('sing', m === s); k.classList.toggle('top', m === top); });
+    const active = keys.get(cur);
+    if (active) {
+      const left = keyX(active), right = left + active.offsetWidth, vl = kbWrap.scrollLeft, vw = kbWrap.clientWidth;
+      if (left < vl + 20 || right > vl + vw - 20) kbWrap.scrollTo({ left: Math.max(0, left - vw * 0.45), behavior: 'auto' });
+    }
   };
-  const down = h('button', { class: 'btn soft', 'aria-label': '시작 음을 반음 내려서 다시', onclick: () => start(base - 1) }, icon('dn', 18), '반음');
+  const down = h('button', { class: 'btn soft', 'aria-label': '시작 음 반음 내리기', onclick: () => moveStart(base - 1) }, icon('dn', 18), '반음');
   const again = h('button', { class: 'btn ink sc-play', onclick: () => (playing ? stop() : start(base)) });
-  const up = h('button', { class: 'btn soft', 'aria-label': '시작 음을 반음 올려서 다시', onclick: () => start(base + 1) }, icon('up', 18), '반음');
+  const up = h('button', { class: 'btn soft', 'aria-label': '시작 음 반음 올리기', onclick: () => moveStart(base + 1) }, icon('up', 18), '반음');
   /* 꼭대기 음 */
   const topName = h('b', { class: 'sc-top-n', 'aria-live': 'polite' });
-  const setTop = m => { stop(); T.top = Math.max(SCALE_LO + 2, Math.min(SCALE_TOP, m)); touchSettings(); drawKeys(); paint(); showRange(T.top - 4, T.top); };
+  const setTop = m => { T.top = Math.max(SCALE_LO + 2, Math.min(SCALE_TOP, m)); touchSettings(); reviseRun('top'); drawKeys(); paint(); if (!playing) showRange(T.top - 4, T.top); };
   const topDn = h('button', { class: 'btn soft sm sq', 'aria-label': '꼭대기 음 반음 내리기', onclick: () => setTop(ceil() - 1) }, icon('dn', 18));
   const topUp = h('button', { class: 'btn soft sm sq', 'aria-label': '꼭대기 음 반음 올리기', onclick: () => setTop(ceil() + 1) }, icon('up', 18));
   const topHint = h('span', { class: 'hint' });
   const topRow = h('div', { class: 'sc-top' }, h('span', { class: 'lbl' }, '꼭대기 음'), topDn, topName, topUp, topHint);
   /* 시작 음 without playing: go lower (or higher) than the book's start whenever you like */
   const startName = h('b', { class: 'sc-top-n', 'aria-live': 'polite' });
-  const moveStart = m => { stop(); setStart(Math.max(SCALE_LO, Math.min(SCALE_HI, m))); drawInfo(); paint(); showRange(base, base + span()); };
+  const moveStart = m => { setStart(Math.max(SCALE_LO, Math.min(SCALE_HI, m)), playing); reviseRun('start'); drawInfo(); paint(); if (!playing) showRange(base, base + span()); };
   const startDn = h('button', { class: 'btn soft sm sq', 'aria-label': '시작 음 반음 내리기', onclick: () => moveStart(base - 1) }, icon('dn', 18));
   const startUp = h('button', { class: 'btn soft sm sq', 'aria-label': '시작 음 반음 올리기', onclick: () => moveStart(base + 1) }, icon('up', 18));
   const startHint = h('span', { class: 'hint' });
   const startRow = h('div', { class: 'sc-top' }, h('span', { class: 'lbl' }, '시작 음'), startDn, startName, startUp, startHint);
   const extra = h('div', { class: 'sc-extra' });
-  const tempo = h('div', { class: 'seg', role: 'group', 'aria-label': '빠르기' },
-    TEMPOS.map(([l, v]) => segBtn(l, T.bpm === v, ev => { T.bpm = v; touchSettings(); $$('button', tempo).forEach(b => b.setAttribute('aria-pressed', String(b === ev.currentTarget))); })));
+  const tempo = h('div', { class: 'seg sc-tempo', role: 'group', 'aria-label': '빠르기' },
+    TEMPOS.map(([l, v]) => segBtn(l, T.bpm === v, ev => { T.bpm = v; touchSettings(); $$('button', tempo).forEach(b => b.setAttribute('aria-pressed', String(b === ev.currentTarget))); }, `tempo-${v}`)));
+  const directions = h('div', { class: 'seg', role: 'group', 'aria-label': '자동 진행 방향' },
+    [['updown', '상행 시작'], ['down', '하행만']].map(([value, label]) => segBtn(label, T.direction === value, ev => {
+      T.direction = value; touchSettings(); reviseRun('direction');
+      $$('button', directions).forEach(b => b.setAttribute('aria-pressed', String(b === ev.currentTarget))); paint();
+    }, `direction-${value}`)));
   /* '내 음 보기' */
   const tuneBox = h('div', { class: 'tuner', hidden: true });
   const setSwitch = on => { const sw = tuneRow.querySelector('.switch'); if (sw) sw.setAttribute('aria-checked', String(on)); };
@@ -2031,13 +2051,13 @@ function openScaleTrainer(o = {}) {
     const p = pat(), bk = bookOf(p.id), v = bk && bk.v ? bk.v[Math.min(vi, bk.v.length - 1)] : null;
     const say = v ? h('span', { class: 'sc-say' }, ` · ${v[1]}${v[2] && v[2] !== v[1] ? ` (${v[2]})` : ''}`) : null;
     if (run) {
-      const n = run.seq.length, i = Math.min(run.i, n - 1), upN = (n + 1) / 2;
-      const dir = n === 1 ? '' : i < upN - 1 ? '▲ 올라가요' : i === upN - 1 ? '꼭대기' : '▼ 내려와요';
+      const n = run.seq.length, i = Math.min(run.i, n - 1);
+      const dir = T.direction === 'down' ? '▼ 하행' : run.seq[i + 1] > root ? '▲ 상행' : run.seq[i + 1] < root ? '▼ 하행' : '마지막';
       nowBox.replaceChildren(...[h('b', null, noteName(root)), h('span', null, '에서'), say, h('span', { class: 'hint' }, ` · ${dir ? `${dir} ` : ''}${i + 1}/${n}번째`)].filter(Boolean));
     } else {
       const seq = T.auto ? autoSeq(base) : [base], topRoot = Math.max(...seq);
-      nowBox.replaceChildren(...[h('b', null, noteName(base)), h('span', null, ` (${noteSci(base)})에서 시작`), say,
-        h('span', { class: 'hint' }, T.auto && seq.length > 1 ? ` · 반음씩 ${topRoot - base}번 올라갔다 내려와요 (${seq.length}번)` : ` · 가장 높은 음 ${noteName(base + span())}`)].filter(Boolean));
+      nowBox.replaceChildren(...[h('b', null, noteName(seq[0])), h('span', null, ` (${noteSci(seq[0])})에서 시작`), say,
+        h('span', { class: 'hint' }, T.auto && seq.length > 1 ? T.direction === 'down' ? ` · ${noteName(topRoot)}부터 반음씩 내려와요 (${seq.length}번)` : ` · 반음씩 ${topRoot - base}번 올라갔다 내려와요 (${seq.length}번)` : ` · 가장 높은 음 ${noteName(base + span())}`)].filter(Boolean));
     }
     const bs = bookStart(curPat);
     startName.textContent = `${noteName(base)} (${noteSci(base)})`;
@@ -2047,7 +2067,7 @@ function openScaleTrainer(o = {}) {
     topRow.hidden = !T.auto;
     topName.textContent = `${noteName(c)} (${noteSci(c)})`;
     topDn.disabled = c <= SCALE_LO + 2; topUp.disabled = c >= SCALE_TOP;
-    topHint.textContent = base + span() > c ? '첫 번째 음보다 낮아서 한 번만 나와요' : T.top == null ? (bestM != null && bestM > base + span() ? '내 최고음까지 (바꿀 수 있어요)' : '처음보다 5음 위까지 (바꿀 수 있어요)') : '';
+    topHint.textContent = base + span() > c ? '이 범위에서는 한 번만 연주해요. 설정값은 그대로 둬요.' : playing ? '새 설정은 다음 묶음부터 이어져요' : '시작음과 따로 저장돼요';
     again.replaceChildren(...(playing ? [icon('stop', 18), '멈추기'] : [icon('play', 18), T.auto ? '시작' : lastTop != null ? '다시' : '듣기']));
     down.disabled = base <= SCALE_LO; up.disabled = base >= SCALE_HI;
     /* buttons that change what they do keep the focus */
@@ -2113,9 +2133,13 @@ function openScaleTrainer(o = {}) {
       /* 시작한 날: the first day a whole round of a book exercise was sung (not just tried) */
       const bk = bookOf(curPat), L = bk && S.settings.book.log[bk.no];
       if (bk && date === todayStr() && !(L && L.s)) { S.settings.book.log[bk.no] = Object.assign(L || {}, { s: date }); touchSettings(); drawInfo(); }
-      if (my && ++my.i < my.seq.length) {
+      if (my && my.i + 1 < my.seq.length) {
         /* a short breath between rounds (the chord, when on, leads into the next one) */
-        setTimeout(() => { if (run === my && playing) next(); }, T.chord ? 350 : Math.round(60000 / T.bpm));
+        setTimeout(() => {
+          if (run !== my || !playing) return;
+          if (my.i + 1 < my.seq.length) { my.i++; next(); }
+          else { playing = false; run = null; step = -1; pass = ''; root = base; paint(); }
+        }, T.chord ? 350 : Math.round(60000 / T.bpm));
         return;
       }
       playing = false; step = -1; pass = ''; run = null; root = base;
@@ -2129,8 +2153,8 @@ function openScaleTrainer(o = {}) {
     next();
   }
   /* a key or ▲▼ sets this exercise's 시작 음 (the book's own start isn't stored, so it can still change) */
-  function setStart(m) {
-    base = root = m;
+  function setStart(m, keepPlaying = false) {
+    base = m; if (!keepPlaying) root = m;
     if (bookStart(curPat) != null && bookStart(curPat) === m) delete T.starts[curPat];
     else T.starts[curPat] = m;
     if (bookStart(curPat) == null) T.root = m;
@@ -2139,20 +2163,24 @@ function openScaleTrainer(o = {}) {
   function stop() { run = null; Synth.stop(); playing = false; step = -1; pass = ''; root = base; paint(); }
   const onVis = () => { if (document.visibilityState === 'hidden') { stop(); if (Tuner.on()) { Tuner.stop(); setSwitch(false); sung = null; drawTune(); } } };
   document.addEventListener('visibilitychange', onVis);
+  Synth.prepare();
   drawChips(); drawInfo(); drawSteps(); drawKeys(); paint();
   openSheet({
     title: '스케일 연습',
     body: h('div', { class: 'scale' },
-      chipBox, infoBox, stepsBox, nowBox, kbWrap, tuneBox,
+      chipBox, stepsBox, nowBox, kbWrap, tuneBox,
       h('div', { class: 'sc-ctrl' }, down, again, up),
       startRow,
       topRow,
+      h('div', { class: 'field', style: 'margin:14px 0 4px' }, h('span', { class: 'lbl' }, '자동 진행 방향'), directions,
+        h('p', { class: 'hint' }, '상행 시작: 시작음 → 꼭대기 → 시작음. 하행만: 꼭대기에서 시작음까지 내려와요.')),
       extra,
-      ToggleRow('자동으로 오르내리기', T.auto, v => { stop(); T.auto = v; touchSettings(); paint(); }, '누른 음에서 시작해 반음씩 꼭대기 음까지 올라갔다가 다시 반음씩 내려와요. 루틴 항목에서 열면 한 번 다 오르내릴 때 1회 체크돼요.', 'repeat'),
+      ToggleRow('반음씩 자동 진행', T.auto, v => { stop(); T.auto = v; touchSettings(); paint(); }, '위에서 고른 방향으로 한 묶음씩 이어서 연주해요. 시작음과 꼭대기음은 따로 기억하고, 재생 중 바꾸면 다음 묶음부터 반영돼요.', 'repeat'),
       h('div', { class: 'field', style: 'margin:16px 0 4px' }, h('span', { class: 'lbl' }, '빠르기'), tempo),
       ToggleRow('시작 전에 기준 화음', T.chord, v => { T.chord = v; touchSettings(); }, '스케일 전에 첫 음의 화음을 들려줘요', 'music'),
       ToggleRow('따라 부르기 박자', T.echo, v => { T.echo = v; touchSettings(); }, '피아노가 끝나면 같은 박자를 한 번 더 짚어 줘요. 들은 다음 따라 부르는 연습이에요.', 'repeat'),
       tuneRow,
+      h('details', { class: 'sc-instructions' }, h('summary', null, '연습 방법과 책 진도 보기'), infoBox),
       h('p', { class: 'hint', style: 'margin-top:8px' }, '책 스케일은 책의 테너 시작 음에서 열려요. 건반을 누르거나 시작 음 ▼로 더 낮게(0옥 도까지) 시작할 수 있고, 연습마다 기억해요. 책: 피아노 끝까지 올라갈 필요 없어요. 힘이 들어가거나 연결이 끊기면 바로 멈추세요.', bestM != null ? ' 빨간 점은 지금까지 낸 최고음이에요.' : '')),
     onClose: () => { run = null; Synth.stop(); Tuner.stop(); document.removeEventListener('visibilitychange', onVis); if (o.onClose) o.onClose(); }
   });
@@ -2162,6 +2190,7 @@ function openScaleTrainer(o = {}) {
 }
 /* your own exercise, built from the notes as sung from 도 */
 function openScaleBuilder(existing, onDone) {
+  Synth.prepare();
   const T = S.settings.scale;
   if (!existing && T.custom.length >= 30) { toast('내 스케일은 30개까지 만들 수 있어요. 안 쓰는 걸 지우고 만들어 주세요.'); return; }
   let steps = existing ? existing.steps.slice() : [], saved = false, previewing = false;
@@ -2239,6 +2268,15 @@ function Stamp(anim) {
 }
 
 /* ================= today ================= */
+function DiaryArt(kind) {
+  return h('img', { class: 'diary-art', src: `assets/${kind}.svg`, alt: '', width: 120, height: 88, loading: 'lazy', 'aria-hidden': 'true' });
+}
+function QuickActions(date) {
+  return h('div', { class: 'quick-actions', role: 'group', 'aria-label': '자주 쓰는 기능' },
+    h('button', { class: 'quick-action', 'data-fk': 'quick-scale', onclick: () => openScaleTrainer({ date }) }, icon('piano', 23), h('span', null, '스케일'), h('small', null, '바로 연습')),
+    h('button', { class: 'quick-action', 'data-fk': 'quick-record', onclick: () => openRecorder(date) }, icon('mic', 23), h('span', null, '녹음'), h('small', null, '내 소리 듣기')),
+    h('button', { class: 'quick-action', 'data-fk': 'quick-note', onclick: () => focusField('memo') }, icon('edit', 23), h('span', null, '한 줄 기록'), h('small', null, '느낌 남기기')));
+}
 function TodayView() {
   const date = S.date, today = todayStr(), isToday = date === today;
   const e = S.days[date] || null;
@@ -2255,24 +2293,27 @@ function TodayView() {
         !isToday ? h('button', { class: 'pill blue', onclick: () => goDate(today) }, '오늘로') : null)),
     h('button', { class: 'navbtn', 'aria-label': '하루 뒤', disabled: isToday, onclick: () => goDate(addDays(date, 1)) }, icon('right', 24)));
   swipe(head, () => { if (!isToday) goDate(addDays(date, 1)); }, () => goDate(addDays(date, -1)));
-  const welcome = isToday && !entryDates().length ? h('div', { class: 'sec welcome' }, h('p', { class: 'hand' }, '첫 장이에요. 노래할 때마다 여기에 적어 두세요.'), h('p', { class: 'hint', style: 'margin-top:6px' }, '기초 연습 항목과 횟수는 ‘기초 연습’ 옆 편집에서 바꿀 수 있어요. 적는 내용은 모두 이 폰에 자동으로 저장돼요.'),
-    routineOn() ? null : h('button', { class: 'btn soft sm', style: 'margin-top:10px', onclick: openRoutineInsert }, '강의 노래 전 루틴 넣기')) : null;
+  const welcome = isToday && !entryDates().length ? h('div', { class: 'diary-welcome' }, DiaryArt('diary'), h('div', null, h('p', { class: 'hand' }, '오늘의 소리를 남겨요'), h('p', { class: 'hint' }, '잘된 순간도, 어려웠던 순간도 한 줄이면 충분해요. 기록은 자동으로 저장돼요.'))) : null;
   const memo = isToday ? MemorySec(date) : null;
   /* one part of the day: a heading on the page, its sections on one card */
   const cur = curPart(date);
   const part = (k, sub, ...secs) => {
-    const i = TGROUPS.findIndex(g => g.k === k), nx = TGROUPS[i + 1];
-    return h('section', { class: 'tgrp', id: `g-${k}`, 'data-g': k, role: 'tabpanel', 'aria-labelledby': `gh-${k}`, hidden: k !== cur },
-      h('div', { class: 'tg-head' }, h('h2', { class: 'tg-t', id: `gh-${k}`, 'data-fk': `gh-${k}`, tabindex: '-1' }, TGROUPS[i].name), h('p', { class: 'tg-sub' }, sub)),
+    const i = TGROUPS.findIndex(g => g.k === k), nx = TGROUPS[i + 1], prev = TGROUPS[i - 1];
+    return h('section', { class: 'tgrp', id: `g-${k}`, 'data-g': k, role: 'tabpanel', 'aria-labelledby': `tab-${k}`, hidden: k !== cur },
+      h('div', { class: 'tg-head' }, h('h2', { class: 'tg-t', id: `gh-${k}`, 'data-fk': `gh-${k}`, tabindex: '-1' }, icon(TGROUPS[i].ic, 21), TGROUPS[i].name), h('p', { class: 'tg-sub' }, sub)),
       h('div', { class: 'page tg-card' }, secs),
-      nx ? h('button', { class: 'tg-next', 'data-fk': `next-${nx.k}`, onclick: () => jumpPart(nx.k) }, h('span', null, '다음 ', h('b', null, nx.name)), icon('right', 18)) : null);
+      h('div', { class: 'part-actions' },
+        prev ? h('button', { class: 'btn soft', 'data-fk': `prev-${prev.k}`, onclick: () => jumpPart(prev.k) }, icon('left', 17), '이전') : null,
+        nx ? h('button', { class: 'btn blue', 'data-fk': `next-${nx.k}`, onclick: () => jumpPart(nx.k) }, nx.name + '으로', icon('right', 17))
+          : h('button', { class: 'btn blue', onclick: () => { S.lib.seg = 'journal'; go('songs'); } }, icon('diary', 18), '일기 모아보기')));
   };
   return h('div', { class: 'v-today' }, isToday ? (UpdateBanner() || WhatsNew() || BackupNudge()) : null, head,
+    isToday ? QuickActions(date) : null,
     TodayNav(),
     /* the practice clock and the stop rules belong to the whole day, so they come before its parts */
     h('div', { class: 'page t-session' }, TimerSec(date, e, isToday), isToday ? StopCard(date) : null),
     part('before', isToday ? '목 상태를 살피고 집중할 것 하나' : '그날의 목 상태와 목표',
-      welcome, isToday ? PinsSec() : null, isToday ? LastSec(date) : null, CondSec(date, e), GoalSec(date, e)),
+      welcome, CondSec(date, e), GoalSec(date, e), isToday ? PinsSec() : null, isToday ? LastSec(date) : null),
     part('practice', '몸을 풀고 소리를 만들어요', DrillSec(date)),
     part('sing', '부르고, 녹음해서 들어 봐요', SongSec(date, e), RecSec(date, e)),
     part('after', isToday ? '목 상태를 적고 오늘을 돌아봐요' : '그날을 돌아봐요',
@@ -2285,10 +2326,10 @@ function TodayView() {
 }
 /* 오늘, in the order a practice day goes (the bar's labels are short; headings say it in full) */
 const TGROUPS = [
-  { k: 'before', l: '시작 전', name: '시작 전' },
-  { k: 'practice', l: '연습', name: '연습' },
-  { k: 'sing', l: '노래·녹음', name: '노래와 녹음' },
-  { k: 'after', l: '끝나고', name: '끝나고' }
+  { k: 'before', l: '시작 전', name: '시작 전', ic: 'heart' },
+  { k: 'practice', l: '연습', name: '연습', ic: 'piano' },
+  { k: 'sing', l: '노래·녹음', name: '노래와 녹음', ic: 'mic' },
+  { k: 'after', l: '마무리', name: '마무리', ic: 'diary' }
 ];
 /* "한 달 전 오늘" — a look back at the same day a week / month / year ago */
 function MemorySec(date) {
@@ -2316,7 +2357,7 @@ function TimerSec(date, e, isToday) {
   const mins = e ? e.minutes : 0;
   const goal = e && e.goal.trim() ? e.goal.trim().split('\n')[0] : '';
   const row = h('div', { class: 'timer-line' },
-    (isToday && !tm) || running ? h('button', { class: 'btn ' + (running ? 'redb' : 'ink'), 'data-fk': 'tm-main', onclick: () => (running ? stopTimer() : startTimer(date)) }, running ? icon('stop', 18) : h('span', { class: 'dot white' }), running ? '연습 끝' : '연습 시작') : null,
+    (isToday && !tm) || running ? h('button', { class: 'btn ' + (running ? 'redb' : 'ink'), 'data-fk': 'tm-main', onclick: () => (running ? stopTimer() : startTimer(date)) }, icon(running ? 'stop' : 'play', 18), running ? '연습 끝' : '시간 재기') : null,
     h('div', { class: 't-main' },
       running ? h('div', { class: 't-val', id: 'timer-val' }, fmtClock(Date.now() - tm.start)) : h('div', { class: 't-val' }, fmtMin(mins)),
       h('div', { class: 't-sub' }, carried ? `${fmtMD(tm.date)}에 시작한 연습을 재고 있어요` : running ? (mins ? `이 날 이미 ${fmtMin(mins)} 기록됨` : '연습하는 동안 시간을 재고 있어요') : (isToday ? '오늘 연습한 시간' : '이 날 연습한 시간')),
@@ -2329,7 +2370,7 @@ function TimerSec(date, e, isToday) {
     h('div', { class: 't-acts' },
       tm.rest ? h('button', { class: 'btn ink sm', 'data-fk': 'tm-sing', onclick: resumeSing }, icon('play', 16), '다시 부르기')
         : h('button', { class: 'btn soft sm', 'data-fk': 'tm-rest', onclick: startRest }, icon('pause', 16), '쉬기'),
-      h('button', { class: 'btn soft sm', 'data-fk': 'tm-water', 'aria-label': `물 한 잔 마셨어요, 지금까지 ${w}잔`, onclick: () => addWater(date) }, icon('plus', 16), '물 한 잔', h('small', { class: 't-w' }, `${w}잔`))));
+      h('button', { class: 'btn soft sm', 'data-fk': 'tm-water', 'aria-label': `물 한 잔 마셨어요, 지금까지 ${w}잔`, onclick: () => addWater(date) }, icon('water', 16), '물 한 잔', h('small', { class: 't-w' }, `${w}잔`))));
 }
 /* render and bring one control into view (a field in 오늘의 기록, a cue chip …) */
 function focusField(fk) {
@@ -2372,7 +2413,7 @@ function StopCard(date) {
   const shown = folded ? R.filter(r => r.on || r.hintAct) : R;
   return h('div', { class: 'sec stop-card' + (onN ? ' alert' : ''), id: 'sec-stop' },
     h('button', { class: 'stop-h', 'data-fk': 'stop-fold', 'aria-expanded': String(!folded), 'aria-label': `멈춤 규칙 4가지${onN ? `, 지금 해당 ${onN}개` : ''}, ${folded ? '펼치기' : '접기'}`, onclick: () => { uiSet('stopFold', !folded); render({ focus: 'stop-fold' }); } },
-      h('span', { class: 'stop-ic', 'aria-hidden': 'true' }, '⛔'), h('b', null, '멈춤 규칙'),
+      icon('shield', 20), h('b', null, '멈춤 규칙'),
       folded ? h('span', { class: 'hint' }, onN ? `지금 해당 ${onN}개` : '4가지 · 펼치기') : null, h('span', { class: 'sp' }), icon(folded ? 'chevd' : 'chevu', 18)),
     shown.length ? h('ul', { class: 'stop-list' }, shown.map(r => h('li', { class: 'stop-rule' + (r.on ? ' on' : '') + (r.done ? ' done' : '') },
       h('span', { class: 'sr-n', 'aria-hidden': 'true' }, `${R.indexOf(r) + 1}`),
@@ -2479,7 +2520,7 @@ function CondSec(date, e) {
   const cups = h('div', { class: 'cups' });
   for (let i = 1; i <= 8; i++) cups.append(h('button', { class: 'cup' + (i <= w ? ' on' : ''), 'aria-label': `물 ${i}잔`, 'aria-pressed': String(i <= w), html: CUP_SVG, onclick: () => setDay(d => { d.water = d.water === i ? i - 1 : i; }) }));
   return h('div', { class: 'sec', id: 'sec-cond' },
-    h('div', { class: 'sec-h' }, h('h3', null, '컨디션')),
+    h('div', { class: 'sec-h' }, h('h3', null, icon('heart', 19), '컨디션')),
     h('div', { class: 'cond-line' }, h('span', { class: 'lbl' }, '목 상태'), bars, h('span', { class: 'val' }, c ? COND_LABELS[c - 1] : '')),
     h('div', { class: 'cond-chips chips' }, THROAT.map(t => {
       const on = !!(e && e.throat.includes(t));
@@ -2524,7 +2565,7 @@ function GoalSec(date, e) {
       PR.CUES.map((c, i) => h('button', { class: 'chip sm', 'data-fk': `cue-${i}`, 'aria-pressed': String(chosen(i)), 'aria-label': `${cueText(c)}, ${past ? '이 날' : '오늘'} 집중할 것으로 정하기`, onclick: () => pick(i, `cue-${i}`) }, c[0])),
       h('button', { class: 'chip sm', 'data-fk': 'cue-list', 'aria-expanded': 'false', 'aria-label': '노래할 때 기억할 것 모두 펼치기', onclick: () => toggle(true) }, '모두 보기', icon('chevd', 14)));
   return h('div', { class: 'sec', id: 'sec-goal' },
-    h('div', { class: 'sec-h' }, h('h3', null, past ? '이 날의 목표' : '오늘의 목표'), h('span', { class: 'sec-note' }, past ? '이 날 집중한 것' : '오늘 집중할 것 하나')),
+    h('div', { class: 'sec-h' }, h('h3', null, icon('flag', 19), past ? '이 날의 목표' : '오늘의 목표'), h('span', { class: 'sec-note' }, past ? '이 날 집중한 것' : '오늘 집중할 것 하나')),
     autoTA({ class: 'input', rows: 1, placeholder: '예: 히싱 20초 넘기기, 후렴 음정 정확하게', value: e ? e.goal : '', 'data-fk': 'goal', 'data-day': date, 'aria-label': past ? '이 날의 목표' : '오늘의 목표', oninput: ev => { ensureDay(date).goal = ev.target.value; touch(date); } }, 46),
     h('div', { class: 'cue-box' },
       h('div', { class: 'cue-h' }, h('span', { class: 'lbl' }, '노래할 때 기억할 것'), h('span', { class: 'sp' }),
@@ -2690,7 +2731,7 @@ function SongSec(date, e) {
     : routineOn() && restDay(date) ? '오늘은 루틴 ①~③단계만 하는 날이에요 (멈춤 규칙)' : null;
   const gl = e && e.goal.trim() ? e.goal.trim().split('\n')[0] : '';
   return h('div', { class: 'sec', id: 'sec-songs' },
-    h('div', { class: 'sec-h' }, h('h3', null, '노래'), songs.length ? h('span', { class: 'sec-note' }, `${songs.length}곡`) : null),
+    h('div', { class: 'sec-h' }, h('h3', null, icon('music', 19), '노래'), songs.length ? h('span', { class: 'sec-note' }, `${songs.length}곡`) : null),
     sh ? h('p', { class: 'hint warn song-hint' }, sh) : gl ? h('p', { class: 'hint song-hint clip' }, h('b', null, '집중 '), gl) : null,
     songs.length ? h('ul', { class: 'songs' }, songs.map(s => {
       const L = lib.get(normKey(s.title));
@@ -2730,9 +2771,9 @@ function RecSec(date, e) {
   const recs = e ? e.recs : [];
   const note = recs.length ? null : '폰의 녹음 파일(m4a, mp3)도 여러 개 한 번에 불러올 수 있어요.';
   return h('div', { class: 'sec', id: 'sec-recs' },
-    h('div', { class: 'sec-h' }, h('h3', null, '녹음'), recs.length ? h('span', { class: 'sec-note' }, `${recs.length}개`) : null),
+    h('div', { class: 'sec-h' }, h('h3', null, icon('mic', 19), '녹음'), recs.length ? h('span', { class: 'sec-note' }, `${recs.length}개`) : null),
     h('div', { class: 'rec-actions' },
-      h('button', { class: 'btn redb', onclick: () => openRecorder(date) }, h('span', { class: 'dot white' }), '녹음하기'),
+      h('button', { class: 'btn redb', onclick: () => openRecorder(date) }, icon('mic', 18), '녹음하기'),
       h('button', { class: 'btn', onclick: () => pickAudio(date) }, icon('upload', 18), '파일 불러오기')),
     note ? h('p', { class: 'hint', style: 'margin-top:6px' }, note) : null,
     recs.length ? h('div', { class: 'recs' }, recs.map(r => RecRow(r, date))) : null,
@@ -2778,7 +2819,7 @@ function NotesSec(date, e) {
   return h('div', { class: 'sec notes-sec', id: 'sec-notes' },
     h('div', { class: 'sec-h' }, h('h3', null, h('label', { for: 'ta-memo' }, '메모')), h('span', { class: 'sp' }),
       h('button', { class: 'btn ghost sm', onclick: () => openWriter(date, 'memo', '메모') }, icon('expand', 16), '크게 쓰기')),
-    autoTA({ id: 'ta-memo', class: 'input lined', placeholder: '레슨에서 들은 말, 몸 상태, 떠오른 생각', value: e ? e.memo : '', 'data-fk': 'memo', 'data-day': date, oninput: ev => { ensureDay(date).memo = ev.target.value; touch(date); } }, 122),
+    autoTA({ id: 'ta-memo', class: 'input lined', placeholder: '오늘 내 소리는 어땠나요? 한 줄이라도 남겨 보세요.', value: e ? e.memo : '', 'data-fk': 'memo', 'data-day': date, 'aria-label': '오늘의 일기 메모', oninput: ev => { ensureDay(date).memo = ev.target.value; touch(date); } }, 122),
     h('div', { class: 'field next-field' }, h('label', { class: 'lbl', for: 'ta-next' }, '다음 연습 때 할 것', h('span', { class: 'lbl-note' }, ' · 다음에 열면 맨 위에 보여요')),
       autoTA({ id: 'ta-next', class: 'input lined', placeholder: '예: 히싱 20초 넘기기, 2절 브릿지 숨 위치 바꾸기', value: e ? e.next : '', 'data-fk': 'next', 'data-day': date, oninput: ev => { ensureDay(date).next = ev.target.value; touch(date); } }, 66)));
 }
@@ -2880,7 +2921,7 @@ function deleteItem(date, kind, id) {
 function summaryText(date) {
   const e = S.days[date];
   if (!hasContent(e)) return '';
-  const L = [`[노래일기] ${fmtMDW(date)}`];
+  const L = [`[소리일기] ${fmtMDW(date)}`];
   const cond = [];
   if (e.cond) cond.push(`목 ${COND_LABELS[e.cond - 1]}`);
   if (e.throat.length) cond.push(e.throat.join('/'));
@@ -2922,7 +2963,7 @@ async function copySummary(date) {
 async function shareSummary(date) {
   const text = summaryText(date);
   if (!text) { toast('아직 적은 내용이 없어요'); return; }
-  try { if (!(await Files.share({ title: `노래일기 ${fmtMD(date)}`, text }))) copySummary(date); } catch (e) { copySummary(date); }
+  try { if (!(await Files.share({ title: `소리일기 ${fmtMD(date)}`, text }))) copySummary(date); } catch (e) { copySummary(date); }
 }
 
 /* ================= recordings UI ================= */
@@ -3116,7 +3157,7 @@ async function shareRec(date, r) {
     const blob = await audioBlob(r, t);
     if (!blob) { t.done(audioWhy === '' ? undefined : audioWhy || '녹음 파일을 찾지 못했어요'); return; }
     t.set('보낼 준비를 하는 중…');
-    await Files.share({ title: r.title || '녹음', text: `[노래일기] ${fmtMD(date)} ${r.title || '녹음'}${r.songTitle ? ` (${r.songTitle})` : ''}`, files: [{ name: recFileName(date, r, blob), blob }] });
+    await Files.share({ title: r.title || '녹음', text: `[소리일기] ${fmtMD(date)} ${r.title || '녹음'}${r.songTitle ? ` (${r.songTitle})` : ''}`, files: [{ name: recFileName(date, r, blob), blob }] });
     t.done();
   } catch (err) { console.error(err); t.done('보내지 못했어요. 다시 시도해 주세요.'); }
   finally { recIO = false; }
@@ -4142,7 +4183,7 @@ function CalendarView() {
   const search = h('div', { class: 'search' }, icon('search', 20),
     h('input', { class: 'input', type: 'search', placeholder: '노래, 피드백, 메모에서 찾기', value: S.cal.q, 'data-fk': 'cal-q', enterkeyhint: 'search', 'aria-label': '기록 검색', oninput: ev => { S.cal.q = ev.target.value; drawCalBody(body); } }));
   drawCalBody(body);
-  return h('div', { class: 'v-cal' }, Banner(), search, body);
+  return h('div', { class: 'v-cal' }, Banner(), h('div', { class: 'view-head' }, icon('calendar', 26), h('h1', { class: 'view-title' }, '연습 달력')), search, body);
 }
 function drawCalBody(body) {
   const q = S.cal.q.trim();
@@ -4373,8 +4414,8 @@ function FeedbackView() {
   const all = allItems();
   const fix = all.filter(x => x.kind !== 'good');
   const openN = fix.filter(x => !x.it.resolved).length, doneN = fix.length - openN;
-  const head = h('div', { class: 'view-head' }, h('h1', { class: 'view-title' }, '피드백'), h('span', { class: 'sp' }), h('button', { class: 'btn ink sm', onclick: openAddFeedback }, icon('plus', 18), '추가'));
-  if (!all.length) return h('div', { class: 'v-fb' }, Banner(), head, h('div', { class: 'page' }, h('div', { class: 'empty' }, h('span', { class: 'hand' }, '아직 모인 피드백이 없어요'), '오늘 화면의 ‘아쉬웠던 점’, ‘받은 피드백’, ‘잘 된 점’에 적으면 여기에 날짜별로 모여요. 레슨에서 들은 말은 위의 추가 버튼으로 바로 적어도 돼요.')));
+  const head = h('div', { class: 'view-head' }, mark('fb'), h('h1', { class: 'view-title' }, '피드백'), h('span', { class: 'sp' }), h('button', { class: 'btn ink sm', onclick: openAddFeedback }, icon('plus', 18), '추가'));
+  if (!all.length) return h('div', { class: 'v-fb' }, Banner(), head, h('div', { class: 'page' }, h('div', { class: 'empty' }, DiaryArt('voice'), h('span', { class: 'hand' }, '한마디가 다음 연습의 힌트가 돼요'), '레슨에서 들은 말이나 녹음을 듣고 느낀 점을 남겨 보세요. 날짜별로 모아 볼 수 있어요.', h('div', null, h('button', { class: 'btn blue mt', onclick: openAddFeedback }, icon('plus', 18), '첫 피드백 적기')))));
   const counts = new Map();
   fix.filter(x => F.status === 'all' || (F.status === 'open' ? !x.it.resolved : x.it.resolved)).forEach(x => { if (x.it.tag) counts.set(x.it.tag, (counts.get(x.it.tag) || 0) + 1); });
   const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 6);
@@ -4469,17 +4510,17 @@ function SongsView() {
   else content = RangePanel();
   const pickSeg = v => { if (S.lib.seg === v) return; S.lib.seg = v; render({ top: true, focus: 'seg-' + v }); };
   return h('div', { class: 'v-songs' }, Banner(),
-    h('div', { class: 'view-head' }, h('h1', { class: 'view-title' }, '모아보기')),
+    h('div', { class: 'view-head' }, icon('diary', 26), h('h1', { class: 'view-title' }, '나의 기록')),
     h('div', { class: 'seg', style: 'margin-bottom:12px', role: 'group', 'aria-label': '보기' },
+      segBtn('일기', seg === 'journal', () => pickSeg('journal'), 'seg-journal'),
       segBtn('곡별', seg === 'songs', () => pickSeg('songs'), 'seg-songs'),
       segBtn('녹음', seg === 'recs', () => pickSeg('recs'), 'seg-recs'),
-      segBtn('일지', seg === 'journal', () => pickSeg('journal'), 'seg-journal'),
       segBtn('음역', seg === 'range', () => pickSeg('range'), 'seg-range')),
     content);
 }
 function SongListPanel() {
   const all = Array.from(songLib().values()).sort((a, b) => b.last.localeCompare(a.last) || b.dates.length - a.dates.length);
-  if (!all.length) return h('div', { class: 'page' }, h('div', { class: 'empty' }, h('span', { class: 'hand' }, '아직 부른 노래가 없어요'), '오늘 화면의 ‘노래’에 부른 곡을 적으면 곡마다 연습한 날과 녹음이 모여요.', h('div', null, h('button', { class: 'btn soft mt', onclick: () => goSection('sec-songs') }, icon('music', 18), '오늘 부른 노래 적기'))));
+  if (!all.length) return h('div', { class: 'page' }, h('div', { class: 'empty' }, DiaryArt('diary'), h('span', { class: 'hand' }, '내가 부른 노래를 한곳에'), '부른 곡을 적으면 연습한 날과 녹음이 곡마다 모여요.', h('div', null, h('button', { class: 'btn blue mt', onclick: () => goSection('sec-songs') }, icon('music', 18), '오늘 부른 노래 적기'))));
   if (S.lib.status && !all.some(L => L.status === S.lib.status)) S.lib.status = null;
   const used = SONG_STATUS.filter(st => all.some(L => L.status === st));
   const lib = S.lib.status ? all.filter(L => L.status === S.lib.status) : all;
@@ -4566,7 +4607,7 @@ function AllRecsPanel() {
     h('div', { class: 'sec-h', style: 'margin:16px 0 6px' }, h('h2', null, '모든 녹음'), h('span', { class: 'sec-note' }, `${total}개`), h('span', { class: 'sp' }),
       total ? h('button', { class: 'chip sm', 'aria-pressed': String(S.lib.best), onclick: () => { S.lib.best = !S.lib.best; render(); } }, icon('star', 15), '베스트만') : null));
   if (!rows.length) {
-    page.append(h('div', { class: 'empty' }, S.lib.best ? '별표를 누른 베스트 녹음이 아직 없어요.' : '아직 녹음이 없어요. 오늘 화면의 ‘녹음’에서 바로 녹음하거나 파일을 불러오세요.',
+    page.append(h('div', { class: 'empty' }, DiaryArt('voice'), S.lib.best ? '별표를 누른 베스트 녹음이 아직 없어요.' : '아직 녹음이 없어요. 오늘 화면의 ‘녹음’에서 바로 녹음하거나 파일을 불러오세요.',
       !S.lib.best ? h('div', null, h('button', { class: 'btn soft mt', onclick: () => goSection('sec-recs') }, icon('mic', 18), '오늘 화면에서 녹음하기')) : null));
     return page;
   }
@@ -4669,7 +4710,7 @@ function journalDays() {
 function drawJournal(body) {
   const J = S.lib, q = (J.jq || '').trim();
   const days = journalDays();
-  if (!entryDates().length) { body.replaceChildren(h('div', { class: 'empty' }, h('span', { class: 'hand' }, '아직 쓴 일지가 없어요'), '오늘 화면의 목표, 메모, 돌아보기에 적은 글이 날짜별로 여기에 모여요.')); return; }
+  if (!entryDates().length) { body.replaceChildren(h('div', { class: 'empty' }, DiaryArt('diary'), h('span', { class: 'hand' }, '첫 소리일기를 펼쳐 볼까요?'), '오늘의 느낌을 남기면 여기에서 다시 꺼내 볼 수 있어요.', h('div', null, h('button', { class: 'btn blue mt', onclick: () => goSection('sec-notes') }, icon('edit', 18), '첫 일기 쓰기')))); return; }
   if (!days.length) { body.replaceChildren(h('div', { class: 'empty' }, q ? '찾는 내용이 없어요. 다른 낱말로 찾아보세요.' : '글을 적은 날이 아직 없어요. ‘연습만 한 날도’를 누르면 모든 기록을 보여 줘요.')); return; }
   const shown = days.slice(0, J.jn);
   const nodes = [h('div', { class: 'j-top' }, h('span', { class: 'sec-note' }, `${days.length}일`), h('span', { class: 'sp' }),
@@ -4696,8 +4737,8 @@ function JournalPanel() {
     body)];
 }
 async function shareJournal(days) {
-  const text = ['[노래일기] 일지 모음', ...days.slice().reverse().map(summaryText)].join('\n\n────────\n\n');
-  try { if (!(await Files.share({ title: '노래일기 일지 모음', text }))) throw new Error('no share'); }
+  const text = ['[소리일기] 일지 모음', ...days.slice().reverse().map(summaryText)].join('\n\n────────\n\n');
+  try { if (!(await Files.share({ title: '소리일기 일지 모음', text }))) throw new Error('no share'); }
   catch (e) {
     const ta = h('textarea', { class: 'input', readOnly: true, rows: 12, value: text, style: 'min-height:260px' });
     openSheet({ title: '일지 모음', body: h('div', null, h('p', { class: 'hint', style: 'margin-bottom:10px' }, '아래 글을 길게 눌러 전체 선택한 뒤 복사하세요.'), ta) });
@@ -5007,7 +5048,7 @@ function ReminderBlock() {
     let res;
     try { res = await Native.setReminder(R.on, R.h, R.m, REMIND_TEXT); }
     catch (e) { console.error(e); R.on = false; touchSettings(); draw(); toast('알림을 맞추지 못했어요. 다시 시도해 주세요.'); return; }
-    if (res === 'denied') { R.on = false; touchSettings(); draw(); toast('알림 권한이 꺼져 있어요. 폰 설정에서 노래일기 알림을 허용해 주세요.', { action: '설정 열기', onAction: () => Native.openAppSettings() }); }
+    if (res === 'denied') { R.on = false; touchSettings(); draw(); toast('알림 권한이 꺼져 있어요. 폰 설정에서 소리일기 알림을 허용해 주세요.', { action: '설정 열기', onAction: () => Native.openAppSettings() }); }
     else if (res === 'unsupported' && R.on) toast('알림은 설치한 앱에서만 쓸 수 있어요');
     else if (R.on) toast(`매일 ${fmtHM(new Date(2000, 0, 1, R.h, R.m).getTime())}에 알려 드릴게요`);
   };
@@ -5017,7 +5058,7 @@ function ReminderBlock() {
   const draw = () => box.replaceChildren(...[
     ToggleRow('매일 연습 알림', R.on, v => { R.on = v; touchSettings(); draw(); apply(); }, '정한 시간에 노래할 시간이라고 알려 줘요', 'bell'),
     R.on ? h('div', { class: 'cond-line' }, h('span', { class: 'lbl', style: 'width:auto' }, '알림 시간'), time) : null,
-    R.on && allowed === false ? h('div', { class: 'banner', style: 'margin:8px 0 0' }, '폰 설정에서 노래일기 알림이 꺼져 있어서 알림이 오지 않아요. ',
+    R.on && allowed === false ? h('div', { class: 'banner', style: 'margin:8px 0 0' }, '폰 설정에서 소리일기 알림이 꺼져 있어서 알림이 오지 않아요. ',
       h('button', { class: 'link', onclick: () => Native.openAppSettings() }, '설정 열기')) : null].filter(Boolean));
   draw();
   Native.notifyAllowed().then(v => { allowed = v; if (box.isConnected) draw(); });
@@ -5026,7 +5067,7 @@ function ReminderBlock() {
 function openSettings() {
   if (S.mode !== 'ready') return;
   const titleInp = h('input', { class: 'input', value: S.settings.title, maxlength: 30, 'aria-label': '일기 이름' });
-  titleInp.addEventListener('input', debounce(() => { S.settings.title = titleInp.value.trim() || defaultSettings().title; touchSettings(); $('#tb-title').textContent = S.settings.title; }, 400));
+  titleInp.addEventListener('input', debounce(() => { S.settings.title = titleInp.value.trim() || defaultSettings().title; touchSettings(); $('#tb-subtitle').textContent = S.settings.title; document.title = `${S.settings.title} · 소리일기`; }, 400));
   const themeSeg = h('div', { class: 'seg' });
   const drawTheme = () => themeSeg.replaceChildren(...THEMES.map(([k, l]) => segBtn(l, S.settings.theme === k, () => { S.settings.theme = k; touchSettings(); applyTheme(); drawTheme(); })));
   drawTheme();
@@ -5055,7 +5096,7 @@ function openSettings() {
         Native.isNative ? h('p', { class: 'hint', style: 'margin-top:8px' }, '저장 위치: 내 파일 > 내장 저장공간 > Documents > 노래일기 > 백업. ‘백업 보내기’로 구글 드라이브나 카카오톡 나에게 보내 두면 더 안전해요.') : null,
         Native.isNative ? ToggleRow('매일 자동 백업 (글만)', S.settings.autoBackup, v => { S.settings.autoBackup = v; touchSettings(); if (v) autoBackup(true); }, '앱을 닫을 때 모든 글 기록을 Documents > 노래일기 > 자동백업에 저장해요. 하루 한 파일씩 최근 14개를 남기고, 녹음은 빠져요.', 'save') : null),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '저장 공간')), StorageBlock()),
-      h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '앱 정보')), UpdateRow(), h('p', { class: 'hint', style: 'margin-top:8px' }, '이전 노래일기(웹)에서 ‘백업 파일 저장’으로 받은 파일도 ‘백업 불러오기’로 옮길 수 있어요. 그때 녹음은 파일이 옮겨지지 않아서 ‘보내기’로 받은 파일을 따로 불러와야 해요.'))),
+      h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '앱 정보')), UpdateRow(), h('p', { class: 'hint', style: 'margin-top:8px' }, '피아노 소리: 야마하 C5 그랜드 · 48 kHz / 24-bit 스테레오 무손실. Salamander Grand Piano V3, Alexander Holm, CC BY 3.0. 연습: Seth Riggs, Singing for the Stars.'), h('p', { class: 'hint', style: 'margin-top:8px' }, '이전 노래일기(웹)에서 ‘백업 파일 저장’으로 받은 파일도 ‘백업 불러오기’로 옮길 수 있어요. 그때 녹음은 파일이 옮겨지지 않아서 ‘보내기’로 받은 파일을 따로 불러와야 해요.'))),
     onClose: () => render()
   });
 }
@@ -5739,8 +5780,8 @@ async function openUpdate(L) {
   foot: [go], beforeClose: () => !running || (toast('받는 중이에요. 잠시만 기다려 주세요'), false) });
 }
 function UpdateRow() {
-  const line = h('p', { class: 'hint' }, '노래일기');
-  Promise.all([OTA.current(), Native.version()]).then(([cur, v]) => { line.textContent = `노래일기 ${cur ? cur.version : (v ? v.version : '')}${v ? ` · 설치 파일 ${v.version} (${v.build})` : ''}`; });
+  const line = h('p', { class: 'hint' }, '소리일기');
+  Promise.all([OTA.current(), Native.version()]).then(([cur, v]) => { line.textContent = `소리일기 ${cur ? cur.version : (v ? v.version : '')}${v ? ` · 설치 파일 ${v.version} (${v.build})` : ''}`; });
   return h('div', null, line,
     OTA.isNative ? h('button', { class: 'btn soft sm', style: 'margin-top:6px', 'data-fk': 'ota-check', onclick: () => checkUpdate(true) }, icon('repeat', 16), '업데이트 확인') : null);
 }
@@ -5749,18 +5790,25 @@ function UpdateRow() {
    with it (its text boxes show the result at once) and everything is sent before Android may end the app */
 function onAppPause() {
   Sync.boxesOk = true;
-  flushWrites(); autoBackup(); Sync.run();
+  flushWrites(); if (document.visibilityState === 'hidden') Piano.clear(); autoBackup(); Sync.run();
+}
+async function onAppResume() {
+  Sync.boxesOk = false;
+  if (S.mode === 'error') { S.mode = 'loading'; render(); await loadAll(); }
+  else { retrySaves(); followToday(true); }
+  if (S.mode === 'ready') { Sync.run(); checkUpdate(false); }
 }
 /* ================= boot ================= */
 function bindViewport() {
   const vv = window.visualViewport;
-  let base = window.innerHeight, lastW = window.innerWidth;
+  let base = window.innerHeight, lastW = window.innerWidth, nativeHeight = 0;
   const upd = () => {
     /* only a text field can bring the keyboard up; any other height change (split screen, pop-up view) is the window */
     const typing = isTyping();
-    if (window.innerWidth !== lastW || !typing) { lastW = window.innerWidth; base = window.innerHeight; }
+    if (nativeHeight) base = nativeHeight;
+    else if (window.innerWidth !== lastW || !typing) { lastW = window.innerWidth; base = window.innerHeight; }
     const vh = vv ? vv.height : window.innerHeight;
-    base = Math.max(base, window.innerHeight);
+    if (!nativeHeight) base = Math.max(base, window.innerHeight);
     const overlay = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
     const root = document.documentElement;
     root.style.setProperty('--kb', (overlay > 80 ? overlay : 0) + 'px');
@@ -5768,6 +5816,13 @@ function bindViewport() {
     document.body.classList.toggle('kb', typing && base - vh > 150);
   };
   if (vv) { vv.addEventListener('resize', upd); vv.addEventListener('scroll', upd); }
+  Native.onWindowChange(state => {
+    nativeHeight = state.height > 0 ? state.height : 0;
+    base = nativeHeight || window.innerHeight;
+    lastW = window.innerWidth;
+    document.body.classList.toggle('multi-window', !!state.multiWindow);
+    upd();
+  });
   window.addEventListener('resize', upd);
   document.addEventListener('focusout', () => setTimeout(upd, 60));
   upd();
@@ -5810,6 +5865,18 @@ function followToday(fromResume) {
   softRender();
 }
 function bindGlobal() {
+  $$('.tab').forEach(b => { b.id = `main-tab-${b.dataset.tab}`; b.setAttribute('aria-controls', 'view'); });
+  document.addEventListener('keydown', ev => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(ev.key)) return;
+    const tab = ev.target.closest('[role="tab"]');
+    const list = tab && tab.closest('[role="tablist"]');
+    if (!list) return;
+    const tabs = $$('[role="tab"]', list), i = tabs.indexOf(tab);
+    const j = ev.key === 'Home' ? 0 : ev.key === 'End' ? tabs.length - 1 : (i + (ev.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    ev.preventDefault();
+    tabs[j].click();
+    tabs[j].focus({ preventScroll: true });
+  });
   $$('.tab').forEach(b => b.addEventListener('click', () => {
     const t = b.dataset.tab;
     haptic(5);
@@ -5826,7 +5893,7 @@ function bindGlobal() {
   $('#tb-timer').addEventListener('click', () => { const tm = lsGet(LS_TIMER, null); if (tm) goDate(tm.date); });
   document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && Sheets.length) closeSheet(); });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') { flushWrites(); autoBackup(); }
+    if (document.visibilityState === 'hidden') { flushWrites(); Piano.clear(); autoBackup(); }
     else followToday(true);
   });
   window.addEventListener('pagehide', () => { flushWrites(); });
@@ -5847,7 +5914,7 @@ function bindGlobal() {
     toast('한 번 더 누르면 앱을 닫아요');
   });
   Native.onPause(onAppPause);
-  Native.onResume(() => { Sync.boxesOk = false; followToday(true); Sync.run(); checkUpdate(false); });
+  Native.onResume(onAppResume);
   window.addEventListener('online', () => Sync.run());
   setInterval(() => { if (document.visibilityState === 'visible') Sync.run(); }, 5 * 60000);
 }
@@ -5874,7 +5941,7 @@ function afterLoad() {
   OTA.confirmBoot().then(() => { const v = OTA.takeUpdated(); if (v) toast(`${v} 버전으로 업데이트했어요`); }).catch(() => {});
   setTimeout(() => checkUpdate(false), 5000);
   if (Sync.on()) setTimeout(() => Sync.run(), 1500);
-  if (!Native.isNative || window.SD_TEST) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer, Sync, Cloud, OTA, openLogin, openUpdate, checkUpdate, fp, queueWrite, flushWrites, storeAudio, audioBlob, AUD, afterLogin, audioWhy: () => audioWhy, onAppPause, merge3, mergeList, mergeSet3, dayBase, setBase };
+  if (!Native.isNative || window.SD_TEST) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer, Sync, Cloud, OTA, openLogin, openUpdate, checkUpdate, fp, queueWrite, flushWrites, storeAudio, audioBlob, AUD, afterLogin, audioWhy: () => audioWhy, onAppPause, onAppResume, Synth, Piano, Sound, openScaleTrainer, merge3, mergeList, mergeSet3, dayBase, setBase };
   const R = S.settings.reminder;
   /* the switch stays on: once notifications are allowed again, the reminder comes back by itself */
   if (R.on) Native.ensureReminder(R.h, R.m, REMIND_TEXT).catch(() => {});
