@@ -21,43 +21,51 @@
 .ly{width:100%;min-width:0}
 .ly-foot{display:flex;gap:8px;flex:1;min-width:0}
 
-/* sticky tool bar */
-.ly-head{position:sticky;top:-8px;z-index:3;margin:-8px -20px 0;padding:8px 20px 6px;background:var(--sheet);border-bottom:1px solid var(--rule-2)}
-.ly-head .seg{margin-bottom:8px}
-.ly-head.open{position:static} /* all 23 chips are tall: let them scroll away instead of covering the lyrics */
-.ly-tools{display:grid;gap:6px}
-.ly-modes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-.ly-modes .ly-chip{justify-content:center;padding-left:4px;padding-right:4px}
-.ly-techs{display:flex;flex-wrap:wrap;gap:6px}
-.ly-chip{gap:5px}
-.ly-tools .chip.sm.ly-chip{min-height:40px}
-@media (max-height:700px){.ly-head{position:static}} /* the chip rows would cover most of a short screen */
-.ly-chip.ly-more{border-style:dashed}
+/* top: slim tabs + the two note actions. The tool bar lives in the sheet's foot, pinned under the lyrics. */
+.ly-head{display:flex;align-items:center;gap:6px;margin:0 0 2px}
+.ly-head .seg{flex:1;min-width:0}
+.ly-head .seg button{min-height:32px;font-size:13.5px}
+.ly-acts{display:flex;flex:none}
+.ly-acts .icon-btn{color:var(--ink-2)}
+.lg-own{--gc:var(--ink-2)}
+
+/* bottom bar: row 1 = what a tap does, row 2 = one scrolling row of techniques */
+.sheet-foot:has(>.ly-foot.ly-bar){padding:8px 0 10px}
+.sheet-foot:has(>.ly-foot.none){display:none}
+.ly-foot.ly-bar{flex-direction:column;gap:0}
+.ly-tools{display:grid;gap:6px;min-width:0}
+.ly-modes{margin:0 20px}
+.ly-modes button{min-height:34px}
+.ly-techs{display:flex;gap:6px;overflow-x:auto;overscroll-behavior-x:contain;padding:0 20px 2px;scroll-padding:0 20px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.ly-techs::-webkit-scrollbar{display:none}
+.ly-tools .chip.sm.ly-chip{min-height:38px;gap:5px;padding:0 12px}
+.ly-chip.ly-add{border-style:dashed;color:var(--ink-3)}
+.ly-chip.ly-own{-webkit-touch-callout:none;user-select:none}
 .ly-sym{display:inline-block;min-width:1.1em;text-align:center;font-weight:700;font-size:13px;line-height:1.2;color:var(--gc,var(--ink-2))}
 .ly-sym.big{font-size:15px;min-width:26px;padding:3px 0;border-radius:8px;background:var(--sheet-2)}
 .chip[aria-pressed="true"] .ly-sym{color:inherit}
-.ly-desc{margin:7px 0 0;font-size:12.5px;line-height:1.4;min-height:35px;color:var(--ink-2)}
+.ly-desc{margin:0 20px 7px;font-size:12.5px;line-height:1.35;color:var(--ink-2)}
 
-/* ruled notebook */
-.ly-paper{padding:6px 0 28px;font-family:var(--font-hand)}
-.ly-line{border-bottom:1px solid var(--rule);padding:0 2px}
-.ly-wl{display:flex;flex-wrap:wrap;align-items:flex-end;column-gap:15px}
+/* ruled notebook: roomy lines, marks clearly above the syllables */
+.ly-paper{padding:10px 0 32px;font-family:var(--font-hand)}
+.ly-line{border-bottom:1px solid var(--rule);padding:8px 2px 2px}
+.ly-wl{display:flex;flex-wrap:wrap;align-items:flex-end;column-gap:16px}
 .ly-w{display:inline-flex;flex-wrap:wrap;max-width:100%;align-items:flex-end}
-.ly-gap{height:18px}
+.ly-gap{height:26px}
 .ly-syl{position:relative;display:inline-flex;flex-direction:column;align-items:center;justify-content:flex-end;min-width:18px;margin:0;padding:0;border:0;background:transparent;color:var(--ink);font:inherit;-webkit-appearance:none;appearance:none}
 .ly-syl.has-br{margin-right:7px}
-.ly-top{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;min-height:26px;pointer-events:none}
-.ly-ch{display:block;font-size:22px;line-height:34px;padding:0 1px;border-radius:5px;pointer-events:none}
+.ly-top{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;min-height:30px;pointer-events:none}
+.ly-ch{display:block;font-size:23px;line-height:38px;padding:0 1px;border-radius:5px;pointer-events:none}
 .ly-syl.has-pr .ly-ch{text-decoration:underline dotted var(--red);text-decoration-thickness:2px;text-underline-offset:4px}
 .ly-syl.on .ly-ch{background:var(--hl)}
 .ly-syl:focus-visible{outline-offset:-1px;border-radius:6px}
 .ly-pr{font-size:16px;line-height:16px;font-weight:700;color:var(--red)}
-.ly-mk{font-family:var(--font-ui);font-size:12px;line-height:13px;font-weight:700;color:var(--gc,var(--ink-3));white-space:nowrap}
+.ly-mk{font-family:var(--font-ui);font-size:12px;line-height:14px;font-weight:700;color:var(--gc,var(--ink-3));white-space:nowrap}
 .ly-mk.ly-n{color:var(--ink-3)}
-.ly-br{position:absolute;right:-5px;bottom:16px;font-family:var(--font-ui);font-size:13px;line-height:13px;font-weight:700;color:var(--gc);pointer-events:none}
+.ly-br{position:absolute;right:-5px;bottom:18px;font-family:var(--font-ui);font-size:13px;line-height:13px;font-weight:700;color:var(--gc);pointer-events:none}
 .ly-paper.focus .ly-mk:not(.cur),.ly-paper.focus .ly-br:not(.cur){opacity:.4}
-.ly-p{display:inline-block;font-size:22px;line-height:34px;color:var(--ink-2)}
-.ly-memo{margin:-4px 0 6px;font-size:15px;line-height:1.3;font-style:italic;color:var(--ink-3);overflow-wrap:anywhere}
+.ly-p{display:inline-block;font-size:23px;line-height:38px;color:var(--ink-2)}
+.ly-memo{margin:-2px 0 8px;font-size:15px;line-height:1.3;font-style:italic;color:var(--ink-3);overflow-wrap:anywhere}
 .ly-memo::before{content:"✎ "}
 
 /* edit view */
@@ -71,6 +79,7 @@
 .ly-vt{flex:1;min-width:0;display:grid;gap:1px}
 .ly-vp{margin-top:10px;font-family:var(--font-hand);font-size:19px;color:var(--ink-2)}
 .ly-vp b{color:var(--red)}
+.ly-vdel{justify-self:start;display:inline-flex;align-items:center;gap:3px;margin-top:1px;padding:6px 0;border:0;background:transparent;color:var(--ink-3);font:inherit;font-size:12.5px;text-decoration:underline}
 
 /* 들으며 체크하기 */
 .ly-check{padding-top:12px}

@@ -1,6 +1,6 @@
 {
   "name": "songdiary-ui-checks",
   "private": true,
-  "scripts": { "test": "node ux-smoke.cjs && node routine-check.cjs && node data-check.cjs" },
+  "scripts": { "test": "node ux-smoke.cjs && node routine-check.cjs && node data-check.cjs && node lyric-entry.cjs" },
   "devDependencies": { "playwright": "1.62.1" }
 }
