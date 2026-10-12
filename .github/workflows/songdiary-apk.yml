@@ -5,7 +5,7 @@
 # SONGDIARY_DRIVE_KEY. Until they exist the job only says so. The APK signing key is made on the first build and
 # kept in that Drive folder (never in git or the Actions cache: this repository is public); the update-signing key
 # is derived from it, so nothing else needs setting up.
-name: 노래일기 APK → Google Drive
+name: 소리일기 APK → Google Drive
 
 on:
   push:
@@ -113,16 +113,16 @@ jobs:
           git -C "$ota" push -q origin songdiary-ota
           echo "in-app update ${{ steps.ver.outputs.name }} published"
 
-      - name: Upload APK to Google Drive
-        if: steps.on.outputs.on == 'true'
-        run: python3 songdiary/tools/drive_apk.py upload --file "${{ steps.build.outputs.apk }}"
-
       - uses: actions/upload-artifact@v4
         if: steps.on.outputs.on == 'true'
         with:
           name: songdiary-apk
           path: ${{ steps.build.outputs.apk }}
           retention-days: 7
+
+      - name: Upload APK to Google Drive
+        if: steps.on.outputs.on == 'true'
+        run: python3 songdiary/tools/drive_apk.py upload --file "${{ steps.build.outputs.apk }}"
 
       - name: Remove the key
         if: always()

@@ -1,6 +1,6 @@
 {
   "appId": "com.songdiary.app",
-  "appName": "노래일기",
+  "appName": "소리일기",
   "webDir": "../www",
   "android": {
     "allowMixedContent": false

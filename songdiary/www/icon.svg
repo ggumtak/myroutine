@@ -1,1 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108"><rect width="108" height="108" rx="24" fill="#2350C4"/><g stroke="#fff" stroke-linecap="round" fill="none"><path d="M24 42h60M24 51h60M24 60h60M24 69h60" stroke-opacity=".3" stroke-width="2.2"/><path d="M55 67V31c7 3 15 8 15 19" stroke-width="4.4"/></g><ellipse cx="46.5" cy="68.5" rx="9.6" ry="6.8" transform="rotate(-20 46.5 68.5)" fill="#fff"/><circle cx="72" cy="72" r="6.5" fill="none" stroke="#FF7D74" stroke-width="2.6"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <rect width="108" height="108" rx="26" fill="#69508C"/>
+  <rect x="27" y="23" width="54" height="65" rx="9" fill="#FFFDFA"/>
+  <path d="M38 24v63M24 37h8M24 53h8M24 69h8" fill="none" stroke="#C6B6D9" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M54 67V43l17-4v23" fill="none" stroke="#69508C" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <ellipse cx="49" cy="67" rx="7" ry="5" transform="rotate(-18 49 67)" fill="#69508C"/>
+  <ellipse cx="66" cy="62" rx="7" ry="5" transform="rotate(-18 66 62)" fill="#69508C"/>
+  <path d="M78 17l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="#EDC275"/>
+</svg>
