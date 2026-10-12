@@ -1164,6 +1164,6 @@ body.noscroll .toast{bottom:calc(var(--sab) + 96px)} /* above a sheet's foot but
 .hero-t .link{min-height:44px}
 .weeks-fold>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;gap:10px;font-weight:700;color:var(--blue);margin-top:6px}
 .weeks-fold>summary small{font-weight:400;color:var(--ink-3);font-size:12.5px}
-.month-link{padding:4px 0 8px}
+.month-link{padding:6px 20px 10px}
 .month-link .link{min-height:44px;font-weight:600}
 .fbi-n{font-weight:700;color:var(--blue)}

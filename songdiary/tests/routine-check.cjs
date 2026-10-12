@@ -63,6 +63,14 @@ async function main() {
   });
   check(JSON.stringify(renamed.names) === JSON.stringify(['립트릴', '텅트릴', '오늘의 스케일']), 'stored routine names move to 립트릴 · 텅트릴 · 오늘의 스케일');
   check(renamed.kept === '내 립롤 연습', 'a name the user wrote is kept');
+  const oldDay = await page.evaluate(() => {
+    const t = __sdTest, d = '2026-01-05';
+    t.S.days[d] = t.normDay(d, { drills: { rs_lip: { name: '입술 떨기 (립롤)', target: 2, done: 2 }, rs_book: { name: '오늘의 단계 연습', target: 3, done: 3 }, gone_x: { name: '없어진 연습', target: 1, done: 1 } } });
+    const names = t.drillList(d).filter(x => x.done > 0).map(x => x.name);
+    delete t.S.days[d];
+    return names;
+  });
+  check(oldDay.includes('립트릴') && oldDay.includes('오늘의 스케일') && oldDay.includes('없어진 연습') && !oldDay.some(n => /입술|단계 연습/.test(n)), 'days saved under the old names show 립트릴 · 오늘의 스케일');
 
   // ---------- the book's start notes and directions ----------
   const book = await page.evaluate(() => ({ t12: ScaleKit.BOOK[11].t, d12: ScaleKit.BOOK[11].dir, d25: ScaleKit.BOOK[24].dir, s12: ScaleKit.downSequence(61, 36), s25: ScaleKit.downSequence(ScaleKit.BOOK[24].t, 36), low: ScaleKit.downSequence(38, 36), how9: ScaleKit.BOOK[8].how }));
