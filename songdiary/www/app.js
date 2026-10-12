@@ -1630,6 +1630,8 @@ function openSongLink(key, onDone) {
 const mod12 = n => ((n % 12) + 12) % 12;
 /* Sampled grand piano on the Web Audio clock; no synthetic fallback timbre. */
 const Piano = window.GrandPiano;
+/* the last note of an exercise rings this many seconds longer than its written length, so it can be held and heard */
+const LAST_HOLD = 0.4;
 const Synth = {
   nodes: [], timers: [], master: null, seq: 0, onAbort: null,
   /* starts loading the piano so the first note is already the real one */
@@ -1727,18 +1729,19 @@ const Synth = {
     let pos = 0;
     steps.forEach((off, i) => { starts.push(pos); pos += len(i); });
     const held = i => !!(tie && tie.includes(i)); /* goes on from the note before: no new strike */
-    if (glide) this.glideTone(ctx, steps.map(x => root + x), starts.map(b => t0 + b * beat), t0 + (pos - 0.2) * beat, 0.24);
+    const last = steps.length - 1;
+    if (glide) this.glideTone(ctx, steps.map(x => root + x), starts.map(b => t0 + b * beat), t0 + (pos - 0.2) * beat + LAST_HOLD, 0.24);
     steps.forEach((off, i) => {
       const t = t0 + starts[i] * beat;
       if (!glide && !held(i)) {
-        let sound = len(i);
-        for (let j = i + 1; held(j); j++) sound += len(j);
+        let sound = len(i), j = i + 1;
+        for (; held(j); j++) sound += len(j);
         const dur = st && st.includes(i) ? Math.min(sound, 1) * 0.45 : sound * 0.94;
-        this.tone(ctx, root + off, t, dur * beat, 0.27);
+        this.tone(ctx, root + off, t, dur * beat + (j - 1 === last ? LAST_HOLD : 0), 0.27);
       }
       this.timers.push(setTimeout(() => onStep && onStep(i, 'play'), at(t)));
     });
-    let end = t0 + pos * beat + 0.18;
+    let end = t0 + pos * beat + LAST_HOLD + 0.18;
     if (echo) {
       const s0 = end + beat * 0.6;
       steps.forEach((off, i) => { const t = s0 + starts[i] * beat; if (!held(i)) this.tick(ctx, t); this.timers.push(setTimeout(() => onStep && onStep(i, 'sing'), at(t))); });
@@ -1816,7 +1819,7 @@ const Tuner = {
   stop() { this.gen++; this.teardown(); },
   on() { return !!this.stream; }
 };
-const TEMPOS = [['느리게', 60], ['보통', 80], ['빠르게', 100], ['매우 빠르게', 130]];
+const TEMPOS = [['아주 느리게', 40], ['느리게', 60], ['보통', 80], ['빠르게', 100], ['매우 빠르게', 130]];
 const BLACK_PC = [1, 3, 6, 8, 10];
 const scalePats = () => SK.BOOK.concat(SK.PRESETS, S.settings.scale.custom);
 const bookOf = id => SK.BOOK.find(b => b.id === id) || null;
@@ -4587,10 +4590,12 @@ function openSongDetail(key) {
     hero = nh;
   };
   drawHero();
+  const lyBtn = h('button', { class: 'btn soft ly-open', 'data-fk': 'ly-open', onclick: () => { saveMeta.flush(); window.LyricNote.open({ key, title: L.title, artist: aInp.value.trim() }); } }, icon('lyrics', 18), '가사 노트 · 기교 표시');
   const s = openSheet({
     title: L.title,
     body: h('div', null, hero, story,
       field('지금 이 곡은', stChips), field('가수', aInp), field('곡 메모', memo),
+      window.LyricNote ? lyBtn : null,
       recPart),
     onClose: () => { saveMeta.flush(); Preview.stop(); if (songDetailRefresh === refresh) songDetailRefresh = null; render(); }
   });
@@ -4936,7 +4941,7 @@ function mergeSettings(cur, inc) {
   inc.songs.forEach(m => {
     const o = out.songs.find(x => x.k === m.k);
     if (!o) out.songs.push(clone(m));
-    else { if (!o.artist) o.artist = m.artist; if (!o.memo) o.memo = m.memo; if (!o.status) o.status = m.status; if (!o.cat && m.cat) o.cat = m.cat; }
+    else { if (!o.artist) o.artist = m.artist; if (!o.memo) o.memo = m.memo; if (!o.status) o.status = m.status; if (!o.cat && m.cat) o.cat = m.cat; if (m.ly && (!o.ly || (m.ly.at || 0) > (o.ly.at || 0))) o.ly = clone(m.ly); }
   });
   out.updatedAt = Date.now();
   return normSettings(out);
@@ -5096,7 +5101,7 @@ function openSettings() {
         Native.isNative ? h('p', { class: 'hint', style: 'margin-top:8px' }, '저장 위치: 내 파일 > 내장 저장공간 > Documents > 노래일기 > 백업. ‘백업 보내기’로 구글 드라이브나 카카오톡 나에게 보내 두면 더 안전해요.') : null,
         Native.isNative ? ToggleRow('매일 자동 백업 (글만)', S.settings.autoBackup, v => { S.settings.autoBackup = v; touchSettings(); if (v) autoBackup(true); }, '앱을 닫을 때 모든 글 기록을 Documents > 노래일기 > 자동백업에 저장해요. 하루 한 파일씩 최근 14개를 남기고, 녹음은 빠져요.', 'save') : null),
       h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '저장 공간')), StorageBlock()),
-      h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '앱 정보')), UpdateRow(), h('p', { class: 'hint', style: 'margin-top:8px' }, '피아노 소리: 야마하 C5 그랜드 · 48 kHz / 24-bit 스테레오 무손실. Salamander Grand Piano V3, Alexander Holm, CC BY 3.0. 연습: Seth Riggs, Singing for the Stars.'), h('p', { class: 'hint', style: 'margin-top:8px' }, '이전 노래일기(웹)에서 ‘백업 파일 저장’으로 받은 파일도 ‘백업 불러오기’로 옮길 수 있어요. 그때 녹음은 파일이 옮겨지지 않아서 ‘보내기’로 받은 파일을 따로 불러와야 해요.'))),
+      h('div', { class: 'set-block' }, h('div', { class: 'set-h' }, h('h4', null, '앱 정보')), UpdateRow(), h('p', { class: 'hint', style: 'margin-top:8px' }, '피아노 소리: 야마하 C5 그랜드 · 48 kHz / 16-bit 스테레오 무손실. Salamander Grand Piano V3, Alexander Holm, CC BY 3.0. 연습: Seth Riggs, Singing for the Stars.'), h('p', { class: 'hint', style: 'margin-top:8px' }, '이전 노래일기(웹)에서 ‘백업 파일 저장’으로 받은 파일도 ‘백업 불러오기’로 옮길 수 있어요. 그때 녹음은 파일이 옮겨지지 않아서 ‘보내기’로 받은 파일을 따로 불러와야 해요.'))),
     onClose: () => render()
   });
 }
@@ -5931,6 +5936,15 @@ async function takeShared(list) {
   const date = S.tab === 'today' ? S.date : todayStr();
   openImport(date, files, 'share');
 }
+/* the crash report Android kept (MainActivity): shown once so it can be copied and sent */
+function openCrash(text) {
+  const lines = String(text).split('\n'), at = +lines[0];
+  const body = h('div', null,
+    h('p', { class: 'hint' }, `${at ? new Date(at).toLocaleString('ko-KR') + '에 ' : ''}앱이 멈춘 기록이에요. 복사해서 보내 주시면 원인을 찾는 데 도움이 돼요. 기록과 녹음은 그대로예요.`),
+    h('pre', { class: 'input', style: 'white-space:pre-wrap;font-size:11.5px;max-height:50vh;overflow:auto;margin-top:10px' }, lines.slice(1).join('\n')));
+  const copy = h('button', { class: 'btn ink', onclick: () => { navigator.clipboard.writeText(text).then(() => toast('복사했어요'), () => toast('복사하지 못했어요')); } }, icon('copy', 18), '복사');
+  openSheet({ title: '앱이 멈춘 기록', body, foot: [copy] });
+}
 let booted = false;
 function afterLoad() {
   if (booted || S.mode !== 'ready') return;
@@ -5940,6 +5954,7 @@ function afterLoad() {
   setTimeout(() => { if (!Sheets.length) offerDraft(); }, 800);
   OTA.confirmBoot().then(() => { const v = OTA.takeUpdated(); if (v) toast(`${v} 버전으로 업데이트했어요`); }).catch(() => {});
   setTimeout(() => checkUpdate(false), 5000);
+  Native.lastCrash().then(t => { if (t) setTimeout(() => toast('지난번에 앱이 갑자기 멈췄어요', { action: '기록 보기', onAction: () => openCrash(t) }), 1500); });
   if (Sync.on()) setTimeout(() => Sync.run(), 1500);
   if (!Native.isNative || window.SD_TEST) window.__sdTest = { openImport, openRecDetail, exportBackup, backupJSON, mergeDay, makeZip, S, normDay, hasContent, mergeSettings, normSettings, restDay, soreSince, insertRoutine, removeRoutine, hissWeek, render, markStop, stopTimer, openPron, openGuide, openAfterSheet, summaryText, drillsAllDone, tickTimer, Sync, Cloud, OTA, openLogin, openUpdate, checkUpdate, fp, queueWrite, flushWrites, storeAudio, audioBlob, AUD, afterLogin, audioWhy: () => audioWhy, onAppPause, onAppResume, Synth, Piano, Sound, openScaleTrainer, merge3, mergeList, mergeSet3, dayBase, setBase };
   const R = S.settings.reminder;
@@ -5947,6 +5962,15 @@ function afterLoad() {
   if (R.on) Native.ensureReminder(R.h, R.m, REMIND_TEXT).catch(() => {});
   setTimeout(() => autoBackup(), 4000);
 }
+/* what lyrics.js (가사 노트) needs from here */
+window.SDUI = {
+  h, icon, openSheet, closeSheet, confirmSheet, toast, haptic, autoTA, field, segBtn, bindEnter, guardUnsaved,
+  /* the song's saved details (S.settings.songs), made when missing; save() after changing it */
+  songMeta(key) { let m = S.settings.songs.find(x => x.k === key); if (!m) { m = { k: key, artist: '', memo: '', status: '', cat: null }; S.settings.songs.push(m); } return m; },
+  save: touchSettings,
+  flush: flushWrites,
+  openUrl: url => Native.openUrl(url)
+};
 async function init() {
   Player.init();
   bindGlobal();

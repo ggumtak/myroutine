@@ -83,6 +83,25 @@ public class SongDiaryPlugin extends Plugin {
         call.resolve();
     }
 
+    /* the crash MainActivity wrote down last time (once), or nothing */
+    @PluginMethod
+    public void lastCrash(PluginCall call) {
+        File f = new File(getContext().getFilesDir(), MainActivity.CRASH_FILE);
+        JSObject r = new JSObject();
+        if (f.isFile()) {
+            try (InputStream in = new java.io.FileInputStream(f)) {
+                byte[] b = new byte[(int) Math.min(f.length(), 16384)];
+                int n = 0, k;
+                while (n < b.length && (k = in.read(b, n, b.length - n)) > 0) n += k;
+                r.put("text", new String(b, 0, n, java.nio.charset.StandardCharsets.UTF_8));
+            } catch (Exception e) {
+                Log.w(TAG, "crash report", e);
+            }
+            f.delete();
+        }
+        call.resolve(r);
+    }
+
     @PluginMethod
     public void takeSharedFiles(PluginCall call) {
         JSArray files = new JSArray();

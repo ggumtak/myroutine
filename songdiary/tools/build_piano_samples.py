@@ -37,8 +37,8 @@ def main():
             source.write_bytes(data)
         target = out / f'p{midi}v{layer}.flac'
         subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source),
-                        '-af', 'silenceremove=start_periods=1:start_threshold=-65dB:window=0.003,atrim=duration=8,afade=t=out:st=7.8:d=0.2',
-                        '-ar', '48000', '-ac', '2', '-c:a', 'flac', '-sample_fmt', 's32', '-compression_level', '8', str(target)], check=True)
+                        '-af', 'silenceremove=start_periods=1:start_threshold=-65dB:window=0.003,atrim=duration=8,afade=t=out:st=7.8:d=0.2,aresample=osf=s16:dither_method=triangular',
+                        '-ar', '48000', '-ac', '2', '-c:a', 'flac', '-sample_fmt', 's16', '-compression_level', '8', str(target)], check=True)
         return {'midi': midi, 'layer': layer, 'source': name,
                 'sourceSha256': hashlib.sha256(source.read_bytes()).hexdigest(),
                 'file': target.name, 'sha256': hashlib.sha256(target.read_bytes()).hexdigest()}
@@ -47,7 +47,7 @@ def main():
         records = list(pool.map(export, [(m, layer) for m in range(33, 97, 3) for layer in (8, 12)]))
     (out / 'samples.json').write_text(json.dumps({'instrument': 'Yamaha C5', 'library': 'Salamander Grand Piano V3',
         'author': 'Alexander Holm', 'license': 'CC BY 3.0', 'revision': REV,
-        'encoding': '48 kHz 24-bit stereo FLAC (lossless), max 8 seconds; leading silence trimmed; final 200 ms faded; no per-note normalization',
+        'encoding': '48 kHz 16-bit stereo FLAC (lossless at CD resolution, triangular dither from the 24-bit source), max 8 seconds; leading silence trimmed; final 200 ms faded; no per-note normalization',
         'samples': records}, indent=2) + '\n')
     print(f'Exported {len(records)} stereo samples, {sum((out / x["file"]).stat().st_size for x in records) / 1048576:.1f} MiB')
 

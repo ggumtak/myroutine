@@ -5,7 +5,8 @@ Source: https://github.com/sfzinstruments/SalamanderGrandPiano/tree/3382bf9496bb
 License: https://creativecommons.org/licenses/by/3.0/ (full text in LICENSE.txt).
 
 44 samples: 22 root notes (MIDI 33–96 at three-semitone intervals), two original velocity layers (8 and 12).
-48 kHz, 24-bit, stereo **lossless FLAC**, not an MP3 transcode. The export trims leading silence, keeps up to
+48 kHz, 16-bit (CD resolution, dithered from the 24-bit source), stereo **lossless FLAC**, not an MP3 transcode.
+The 24-bit exports were 36 MB, which pushed the APK past what the Google Drive upload accepts; 16-bit is 12 MB. The export trims leading silence, keeps up to
 eight seconds of the natural recording, and fades only the final 200 ms of the stored tail. No per-note
 normalization or added reverb. Playback applies the damper earlier when the musical note ends.
 

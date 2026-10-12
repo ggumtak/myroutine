@@ -165,12 +165,13 @@ async function main() {
     try {
       await Synth.play(60, [0,4,7,0], { bpm:80, chord:false });
       const rendered = await ctx.startRendering(), a = rendered.getChannelData(0), b = rendered.getChannelData(1);
-      let peak = 0, stereo = 0, tail = 0;
-      for (let i=0;i<a.length;i++) { peak = Math.max(peak, Math.abs(a[i]), Math.abs(b[i])); stereo += Math.abs(a[i]-b[i]); if (i>48000*3.2) tail += a[i]*a[i]+b[i]*b[i]; }
-      return { peak, stereo, tail, channels: rendered.numberOfChannels, rate: rendered.sampleRate, decoded: Piano.buf.size };
+      let peak = 0, stereo = 0, tail = 0, hold = 0;
+      for (let i=0;i<a.length;i++) { peak = Math.max(peak, Math.abs(a[i]), Math.abs(b[i])); stereo += Math.abs(a[i]-b[i]); if (i>48000*2.9 && i<48000*3.1) hold += a[i]*a[i]+b[i]*b[i]; if (i>48000*3.6) tail += a[i]*a[i]+b[i]*b[i]; }
+      return { peak, stereo, tail, hold, channels: rendered.numberOfChannels, rate: rendered.sampleRate, decoded: Piano.buf.size };
     } finally { Synth.stop(); Synth.master = null; Sound.get = original; Piano.clear(); }
   });
   check(audio.channels === 2 && audio.rate === 48000 && audio.stereo > 1 && audio.peak > .01 && audio.peak < 1, 'real 48kHz stereo grand piano renders without clipping');
+  check(audio.hold > .001, 'the final note is held about 0.4 s past its written length');
   check(audio.tail < .00001, 'the final note ends quickly rather than ringing for seconds');
   check(audio.decoded <= 20, 'decoded sample memory is bounded');
   // Use a separate context for a genuine first-run empty state.

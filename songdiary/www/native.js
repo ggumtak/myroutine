@@ -294,6 +294,8 @@ const App = {
       if (!on && App._wl) { App._wl.release().catch(() => {}); App._wl = null; }
     } catch (e) { /* ignore */ }
   },
+  /* what Android wrote down the last time the app crashed (read once), or '' */
+  async lastCrash() { const P = plug('SongDiary'); if (!P || !P.lastCrash) return ''; try { const r = await P.lastCrash(); return (r && r.text) || ''; } catch (e) { return ''; } },
   openAppSettings() { const P = plug('SongDiary'); if (P) P.openAppSettings().catch(() => {}); },
   onShared(fn) {
     const P = plug('SongDiary');

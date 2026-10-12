@@ -13,7 +13,7 @@ targets the active Android song diary rather than replacing that project.
 | Long exercise instructions came before the instrument | Keyboard and playback controls first; optional instructions below |
 | Today parts lacked a visible heading/backward action | Visible headings, matching icons, previous/next buttons and keyboard tab navigation |
 | First-use screens described tools but provided little direction | Notebook/microphone illustrations and working write/add actions |
-| Monophonic 80 kbps MP3 and synthetic loading fallback | Original 48 kHz 24-bit stereo Yamaha C5 samples in lossless FLAC; wait for the real sound |
+| Monophonic 80 kbps MP3 and synthetic loading fallback | Original 48 kHz stereo Yamaha C5 samples in lossless FLAC (16-bit, dithered from 24-bit, to keep the APK under the Drive upload limit); wait for the real sound |
 | Final note sustained for up to several beats | Final note 0.6 beat plus a short 160 ms damper release |
 | Normal speed was 100 BPM | 느리게 60, 보통 80, 빠르게 100, 매우 빠르게 130; prior default 100 migrates to 80 |
 | 계이름 stayed 도 미 솔 after transposing | Actual played note names update on every root change |
