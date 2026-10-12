@@ -1,0 +1,362 @@
+{
+  "instrument": "Yamaha C5",
+  "library": "Salamander Grand Piano V3",
+  "author": "Alexander Holm",
+  "license": "CC BY 3.0",
+  "revision": "3382bf9496bba2486f5ab0de55a264d1dfc38404",
+  "encoding": "48 kHz 16-bit stereo FLAC (lossless at CD resolution, triangular dither from the 24-bit source), max 8 seconds; leading silence trimmed; final 200 ms faded; no per-note normalization",
+  "samples": [
+    {
+      "midi": 33,
+      "layer": 8,
+      "source": "A1v8.flac",
+      "sourceSha256": "357b13d2e918e6146c3ead9d016a867bb49133b370e58dcb0bc1f41a56023abf",
+      "file": "p33v8.flac",
+      "sha256": "774b596a15109f61e6d060208033a300dd3e8a3597f4aeb31636c36ac3a2e5ec"
+    },
+    {
+      "midi": 33,
+      "layer": 12,
+      "source": "A1v12.flac",
+      "sourceSha256": "eebd4b102ae1101870b50aec8fbef972f695c796e468398d958f82930a9fa539",
+      "file": "p33v12.flac",
+      "sha256": "005ecc8f5d8b60973e46ed1f458865655142dea00ae627c80dfda4e96f14ca08"
+    },
+    {
+      "midi": 36,
+      "layer": 8,
+      "source": "C2v8.flac",
+      "sourceSha256": "2fae21e19a214aeecd527a2235b106f66030df6ff51cfa789a5b4c6feb3d7357",
+      "file": "p36v8.flac",
+      "sha256": "e0fefe311586751a37594af8cddf9733144f6fcc22f30bcf76af9c21187d8ed6"
+    },
+    {
+      "midi": 36,
+      "layer": 12,
+      "source": "C2v12.flac",
+      "sourceSha256": "dcbafcb704b7e1555b50b587269e7436769ac8c8fbb9234b1e2c3e84512c5ff8",
+      "file": "p36v12.flac",
+      "sha256": "7f1b8d1142425857e44318bcf96b52447f1f7fbc29b3fb8ade2985c909a49874"
+    },
+    {
+      "midi": 39,
+      "layer": 8,
+      "source": "D#2v8.flac",
+      "sourceSha256": "662b21ad6ee7634777fe8b5952c70db1795a23bfc8557ecb35844ce8d12eba70",
+      "file": "p39v8.flac",
+      "sha256": "0ea0d0481d1c4f7bd342d0fdf115f7956e42f42c00c0fb0a5baa122033da9bb1"
+    },
+    {
+      "midi": 39,
+      "layer": 12,
+      "source": "D#2v12.flac",
+      "sourceSha256": "5bef947e86d4577bf7d0c8ee88f8561d8da8450922daea9d1ccfc2e103a7c412",
+      "file": "p39v12.flac",
+      "sha256": "7fc4e785a11043d9cd9adbb34c0552ee060e0f4aaab294f6193512ae01318810"
+    },
+    {
+      "midi": 42,
+      "layer": 8,
+      "source": "F#2v8.flac",
+      "sourceSha256": "05c649a7114f0845ee09716831242af9726b2429dad92eb170fc84e92f92a8e1",
+      "file": "p42v8.flac",
+      "sha256": "e7cba9378de81d1a88330c12c8930fdbc8a71e1624efffe9fd9047429c0eac38"
+    },
+    {
+      "midi": 42,
+      "layer": 12,
+      "source": "F#2v12.flac",
+      "sourceSha256": "075f000a9bc1813c089fda2741a324ec63dafa56b02fa965f0c4aa92f480db9c",
+      "file": "p42v12.flac",
+      "sha256": "0b6f89f3d2f508fc11b0010629175faf6863f95781414f88d6b9bfb716ed4604"
+    },
+    {
+      "midi": 45,
+      "layer": 8,
+      "source": "A2v8.flac",
+      "sourceSha256": "31dcdb3c1dea91943c4cccbb9f804dde2953ae1f16cb3990fe7def7acf60f944",
+      "file": "p45v8.flac",
+      "sha256": "d78d7b221fa18e3667a81fdca1a1cd3b671f245f3a6c428fc650a84ad475632c"
+    },
+    {
+      "midi": 45,
+      "layer": 12,
+      "source": "A2v12.flac",
+      "sourceSha256": "f51451e0661c762b600b0f8f535f74dd8d73c41de1a228abbd037e5cc1783c0e",
+      "file": "p45v12.flac",
+      "sha256": "7eb24c54385f9d333d17a421df24baf83c2bc5c7ad484f3b93e1b70ae75dfb14"
+    },
+    {
+      "midi": 48,
+      "layer": 8,
+      "source": "C3v8.flac",
+      "sourceSha256": "b9200830cdef54fe0eb92db928dea161cd26d1faf31c7a08a4f51c97549e05bf",
+      "file": "p48v8.flac",
+      "sha256": "3d04524507c21f1a2561e5be4c5051e06acdfa6b2abbfcc8eef36610a5373b53"
+    },
+    {
+      "midi": 48,
+      "layer": 12,
+      "source": "C3v12.flac",
+      "sourceSha256": "1250eceb6bc80b2a4559f5d15834a19b357f6f8695412445f0c292abcf9e3d78",
+      "file": "p48v12.flac",
+      "sha256": "11e54709e82891c16cee815936cf5162fafb73b2c2be725db5d07254f290fdbc"
+    },
+    {
+      "midi": 51,
+      "layer": 8,
+      "source": "D#3v8.flac",
+      "sourceSha256": "900ad0d774e6cefd44c1081b66d50556b3121bf1d3f255c5329a9117447b9cff",
+      "file": "p51v8.flac",
+      "sha256": "220171be605710df668948ed2ee1cbc13a3fba6dff7b570bcaa94acaeca14427"
+    },
+    {
+      "midi": 51,
+      "layer": 12,
+      "source": "D#3v12.flac",
+      "sourceSha256": "0681df11bb97982d3c29da9ad543f19ed412829677ea3e12a2152dcb4d921f9a",
+      "file": "p51v12.flac",
+      "sha256": "ab70c5496d04fcee6c27ecc1532fc78a3ff35e4f4e493c084dbf5ab203042bd8"
+    },
+    {
+      "midi": 54,
+      "layer": 8,
+      "source": "F#3v8.flac",
+      "sourceSha256": "116a760f8552491d361cae27ac06f4e46d226f9a50e5ea58f6c385fac7efca68",
+      "file": "p54v8.flac",
+      "sha256": "f94dc4c9e3d8fb5a9d04cbfa7ac14e02109936c955cca7ecc6bf84fb9c7b067e"
+    },
+    {
+      "midi": 54,
+      "layer": 12,
+      "source": "F#3v12.flac",
+      "sourceSha256": "230d44d27106f66b09095d279ea7e2ad65be50c50bfed3a8449942306c1a8dc7",
+      "file": "p54v12.flac",
+      "sha256": "76a6ca467e86089e8e15fab02dbeb6d96949a87c22d6c8f3577939a1ff89c391"
+    },
+    {
+      "midi": 57,
+      "layer": 8,
+      "source": "A3v8.flac",
+      "sourceSha256": "b02ed7c37d6b902552274c92d66911751ee52aac20b28618387e1388b1653ed4",
+      "file": "p57v8.flac",
+      "sha256": "1b3fca26a921cfed7464b0c6ab609a1f4e5c095a09669d8bb2560ab8c0201be2"
+    },
+    {
+      "midi": 57,
+      "layer": 12,
+      "source": "A3v12.flac",
+      "sourceSha256": "d1fbc87c103c7c04ed6620156f6716c3b3862af36e6368e02bbf8886576b739e",
+      "file": "p57v12.flac",
+      "sha256": "126d86dd29fea2b75d0bf4179cf7cfd1a3b90b5b07f24ee2c2e9c9c87d8d5957"
+    },
+    {
+      "midi": 60,
+      "layer": 8,
+      "source": "C4v8.flac",
+      "sourceSha256": "36fb0535a1f21fe1dfc367c361dedda73710144e8c4940b40e97e6e5f8a3c694",
+      "file": "p60v8.flac",
+      "sha256": "02874b991133bc0cc680e5a20bb0aa4cbe0ce29c37b672573fb71e7ecb21ccac"
+    },
+    {
+      "midi": 60,
+      "layer": 12,
+      "source": "C4v12.flac",
+      "sourceSha256": "21ebd25176ad28fabe364f22357cd8b7471b449c91b10ab4400c9c1408c74128",
+      "file": "p60v12.flac",
+      "sha256": "10ec48bdd4c5ad86372132c3bab6e5b07f38f8c90093b6e557d0feb61c704af4"
+    },
+    {
+      "midi": 63,
+      "layer": 8,
+      "source": "D#4v8.flac",
+      "sourceSha256": "295179461449c598c44ad712977d47b41c0c25d9c782d349094e748dc06c0dfa",
+      "file": "p63v8.flac",
+      "sha256": "3484820476dcd47c48f53bbf52059b7dac7e4ef25e48962016a508e4a3a095ec"
+    },
+    {
+      "midi": 63,
+      "layer": 12,
+      "source": "D#4v12.flac",
+      "sourceSha256": "78bc671f77911b0750e5cf2b5377bea3f1615b64f97d209c5694433c673b0b31",
+      "file": "p63v12.flac",
+      "sha256": "d6b12aa2f4f7690f48752d7793ead5d316280f37970f0525ecefeca2157783e9"
+    },
+    {
+      "midi": 66,
+      "layer": 8,
+      "source": "F#4v8.flac",
+      "sourceSha256": "be2dc339e8cec5f2f1da4ff583672dbc518bf5319547a08901b094617ac6998e",
+      "file": "p66v8.flac",
+      "sha256": "631d7b2b0230dc2eb573ba924c37b3570a688bce92e0bf1aaa072b509e6e61cb"
+    },
+    {
+      "midi": 66,
+      "layer": 12,
+      "source": "F#4v12.flac",
+      "sourceSha256": "dd0d513f3187457ef1f7c5c2dcb274d6132df10ade225dba06a0f212bd499572",
+      "file": "p66v12.flac",
+      "sha256": "f8a876ae2565a33e4a0f81b658aef4129f2c2531477ff391374d512d4ff8454c"
+    },
+    {
+      "midi": 69,
+      "layer": 8,
+      "source": "A4v8.flac",
+      "sourceSha256": "59529694455698d7fd212cde8eec4029eaae8e5e6d454bb48bf36428eaa8009b",
+      "file": "p69v8.flac",
+      "sha256": "db58e477f8cfead8409a4684771e81a6bac728c1562da9f4d30275128fcd7e80"
+    },
+    {
+      "midi": 69,
+      "layer": 12,
+      "source": "A4v12.flac",
+      "sourceSha256": "16f43b59ecb870359978c4523c97745a13c439d56e574ed5a96aec633aae5f4f",
+      "file": "p69v12.flac",
+      "sha256": "a20800760b0b584a93c7ae3fa2006b8ed2fd14d9d4ce421e53aec4697094b53c"
+    },
+    {
+      "midi": 72,
+      "layer": 8,
+      "source": "C5v8.flac",
+      "sourceSha256": "f663242a552aad54113f186a6dd90c907c81d1f6374887a23179814544f78d79",
+      "file": "p72v8.flac",
+      "sha256": "ccd315e132e8995b63ef9398ec5eb46015651fb0c823a8b235be6b47f81c5d75"
+    },
+    {
+      "midi": 72,
+      "layer": 12,
+      "source": "C5v12.flac",
+      "sourceSha256": "bef7fa0e75075f0566400a5f5d7c313d6e295d287413c88e742e2dc2205d8915",
+      "file": "p72v12.flac",
+      "sha256": "62751baeea836008dafc8dfbb7ff13d5466278498b7179a80018d5f2a4ab86fd"
+    },
+    {
+      "midi": 75,
+      "layer": 8,
+      "source": "D#5v8.flac",
+      "sourceSha256": "f841ad0506994313f4202fbe3f07d917e60eeb10fb3461df3eae4fb9cd58432a",
+      "file": "p75v8.flac",
+      "sha256": "2bbafa2245d9ca206c9dbe97cbe0e76958f0f22ad876cd57b68b1b2ad6119fda"
+    },
+    {
+      "midi": 75,
+      "layer": 12,
+      "source": "D#5v12.flac",
+      "sourceSha256": "84561eff0510969f90068b03de4b70c2965082609f4daf73dc80a213c67b4721",
+      "file": "p75v12.flac",
+      "sha256": "3bc3f3e0f920394ce32651053a90a3ec34a92b7fee834d71a87bede47ded6ddf"
+    },
+    {
+      "midi": 78,
+      "layer": 8,
+      "source": "F#5v8.flac",
+      "sourceSha256": "7757ef988e874313432a3b4ed586f0407fd4a9933b7ccc613b8ff96a2f83bc87",
+      "file": "p78v8.flac",
+      "sha256": "0690e02a508ec56f84fb4cae3c1aa3e9db1971591a30a291c2be3c5b94f84701"
+    },
+    {
+      "midi": 78,
+      "layer": 12,
+      "source": "F#5v12.flac",
+      "sourceSha256": "8c93b4180c17e7c6c998b66d505cdcaea2bc9037790ab5e51847bbc28a4cf27e",
+      "file": "p78v12.flac",
+      "sha256": "d5101c70d9f6db29fe645170b4f9aa81ff07aedf4e1d5de8c5a72203d92eebef"
+    },
+    {
+      "midi": 81,
+      "layer": 8,
+      "source": "A5v8.flac",
+      "sourceSha256": "c71f80ecee2dfc37519769ab97e2e92732bfce9314f6562ba884a737cfa018a9",
+      "file": "p81v8.flac",
+      "sha256": "3e507d1d8934710534c33468a404d8b254dc1dfae11c54cd5f00eac0689639fb"
+    },
+    {
+      "midi": 81,
+      "layer": 12,
+      "source": "A5v12.flac",
+      "sourceSha256": "5cbe3f13c10a181fb6ab5637f083988eeaac4dfa900cef847693c2748c0b7bab",
+      "file": "p81v12.flac",
+      "sha256": "c6f2edc51c74d1f6589b1ed5f912ee3c1caf20c13a7bd577f33432e0bb73b1ba"
+    },
+    {
+      "midi": 84,
+      "layer": 8,
+      "source": "C6v8.flac",
+      "sourceSha256": "e5d5db275007d4b0e35ce94b00e0b53f6c659707517ee1326bd77eeba119693b",
+      "file": "p84v8.flac",
+      "sha256": "86ccab171e30f1678c3904b82bc1d6d93fd5fc6f35c9c27573339e2d402ed8d3"
+    },
+    {
+      "midi": 84,
+      "layer": 12,
+      "source": "C6v12.flac",
+      "sourceSha256": "a3bd4d493607a6683ecd0c9d638febf643f94130042828e77253dda60d5d3761",
+      "file": "p84v12.flac",
+      "sha256": "43c9cdf8fe31edcb039338cd2fa4e64ebb06bfcf8ad63c666628f5e4efea9fb2"
+    },
+    {
+      "midi": 87,
+      "layer": 8,
+      "source": "D#6v8.flac",
+      "sourceSha256": "ef9d6d285795ea2ed51c0d0261d7d4997d1041dadc53939363a080edc5dcdc4e",
+      "file": "p87v8.flac",
+      "sha256": "1a73682171b1ef54667d8441a784dec9f3420dcd4882439577acffbdc5f8e5ac"
+    },
+    {
+      "midi": 87,
+      "layer": 12,
+      "source": "D#6v12.flac",
+      "sourceSha256": "d4e2b79976564ea6de12fa0d67fdc2f3fd408c34eca0b7e5261fd03762218efc",
+      "file": "p87v12.flac",
+      "sha256": "b40e17741a393fd36675d603c3e27877ffab5d6977ad8f50172588b201bfddc6"
+    },
+    {
+      "midi": 90,
+      "layer": 8,
+      "source": "F#6v8.flac",
+      "sourceSha256": "8dd12f1be1cad3bb4be36c5609ff8426640d6d37b3ef0b9b3eed3b159ae51088",
+      "file": "p90v8.flac",
+      "sha256": "f9a0aa80880d1c2b5e2c30e461696c8517eaa6acdf26c3d1ad64059a9ee9ffec"
+    },
+    {
+      "midi": 90,
+      "layer": 12,
+      "source": "F#6v12.flac",
+      "sourceSha256": "cde3a16c0edacc9e3fa7adcb0c47ab23b4053df316f8f0a9e952413c8807cba0",
+      "file": "p90v12.flac",
+      "sha256": "34136205f5b2bcf939bfd11cb147dff68d7ad506567275f113399db08764e85e"
+    },
+    {
+      "midi": 93,
+      "layer": 8,
+      "source": "A6v8.flac",
+      "sourceSha256": "6c49808b96392ddec4fd237a89af11fb70ed31da11a6022905f6eb3ae897c989",
+      "file": "p93v8.flac",
+      "sha256": "3470a3de7318b2649d8cf412b898a33797fde47a568d2d73e029fceab126883c"
+    },
+    {
+      "midi": 93,
+      "layer": 12,
+      "source": "A6v12.flac",
+      "sourceSha256": "59b295d84254d1f3722a9140fc4472f592c651239ceffc30392295302141f8f3",
+      "file": "p93v12.flac",
+      "sha256": "b4d0439fed272ecc62ebbb52f29edaed14e266d4ea03b218be321a6734f7a184"
+    },
+    {
+      "midi": 96,
+      "layer": 8,
+      "source": "C7v8.flac",
+      "sourceSha256": "fbe68e0670fd7edd46923e983da11a97ca7d2b8826585258b81918f97e268b68",
+      "file": "p96v8.flac",
+      "sha256": "a4f22a1699e38751c645352af6bf479d0a10c2e7c2741cbdc1991507f576d6c1"
+    },
+    {
+      "midi": 96,
+      "layer": 12,
+      "source": "C7v12.flac",
+      "sourceSha256": "ca09022f1419de4e16cf310fc300b7b2f1f9f05f5b5d53f10f16506c6b937d40",
+      "file": "p96v12.flac",
+      "sha256": "31d3b7f4888b22fe456ae6c6bab617fe79f00aba6763c3c540acbfbcf97616d0"
+    }
+  ]
+}
