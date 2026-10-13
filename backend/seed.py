@@ -1,4 +1,10 @@
-﻿from __future__ import annotations
+"""Initial seed and one-time, versioned data migrations.
+
+Migrations run once per database (tracked in AppMeta.data_version) and never
+on reads, so user edits are not overwritten later.
+"""
+
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -7,7 +13,9 @@ from typing import Any, Dict
 from sqlmodel import Session, select
 
 from .config import SEED_PATH
-from .models import Product, RuleUsage, RulesState, TaskDefinition, TaskStatus
+from .models import AppMeta, Product, RulesState, TaskDefinition, TaskRecord, TaskStatus
+from .scheduler import RULE_KEY_AM_VITC, RULE_KEY_PM_HIGH_NIACIN, legacy_kst_date, to_utc_iso
+from .config import TIMEZONE
 
 DEFAULT_CONDITIONS: Dict[str, bool] = {
     "sensitive": False,
@@ -18,8 +26,19 @@ DEFAULT_CONDITIONS: Dict[str, bool] = {
     "lazy_mode": False,
 }
 
-RULE_KEY_AM_VITC = "am_vitc"
-RULE_KEY_PM_HIGH_NIACIN = "pm_high_niacin"
+CURRENT_DATA_VERSION = 2
+
+__all__ = [
+    "CURRENT_DATA_VERSION",
+    "DEFAULT_CONDITIONS",
+    "RULE_KEY_AM_VITC",
+    "RULE_KEY_PM_HIGH_NIACIN",
+    "get_meta",
+    "prepare_database",
+]
+
+LEGACY_AM_ACTIONS = {"cleanse_optional"}
+LEGACY_PM_ACTIONS = {"double_cleanse_if_needed", "optional_toner"}
 
 
 def _read_seed(path: Path) -> Dict[str, Any]:
@@ -33,127 +52,131 @@ def _read_seed(path: Path) -> Dict[str, Any]:
     raise ValueError(f"Unable to read seed file: {path}") from last_error
 
 
-def seed_if_needed(session: Session) -> None:
-    has_products = session.exec(select(Product)).first() is not None
-    has_tasks = session.exec(select(TaskDefinition)).first() is not None
-    has_rules = session.exec(select(RulesState)).first() is not None
+def get_meta(session: Session) -> AppMeta:
+    meta = session.get(AppMeta, 1)
+    if meta is None:
+        meta = AppMeta(id=1, data_version=0, revision=0)
+        session.add(meta)
+    return meta
 
-    if has_products and has_tasks and has_rules:
-        return
 
-    seed_path = SEED_PATH
-    data = _read_seed(seed_path)
-
-    if not has_products:
-        for product in data.get("products", []):
-            session.add(
-                Product(
-                    id=product["id"],
-                    name=product["name"],
-                    category=product["category"],
-                    role=product["role"],
-                    notes=product.get("notes"),
-                    verified=product.get("verified", {}),
-                    is_active=True,
-                )
+def _seed(session: Session) -> None:
+    data = _read_seed(SEED_PATH)
+    for product in data.get("products", []):
+        session.add(
+            Product(
+                id=product["id"],
+                name=product["name"],
+                category=product["category"],
+                role=product["role"],
+                notes=product.get("notes"),
+                verified=product.get("verified", {}),
+                is_active=product.get("is_active", True),
             )
-
-    if not has_tasks:
-        for task_def in data.get("taskDefinitions", []):
-            session.add(
-                TaskDefinition(
-                    id=task_def["id"],
-                    slot=task_def["slot"],
-                    task_type=task_def["type"],
-                    steps=task_def.get("steps", []),
-                    interval_days=task_def.get("interval_days"),
-                    cron_weekdays=task_def.get("cron_weekdays"),
-                )
+        )
+    for task_def in data.get("taskDefinitions", []):
+        session.add(
+            TaskDefinition(
+                id=task_def["id"],
+                slot=task_def["slot"],
+                task_type=task_def["type"],
+                steps=task_def.get("steps", []),
+                interval_days=task_def.get("interval_days"),
+                cron_weekdays=task_def.get("cron_weekdays"),
             )
-        for task_def in data.get("taskDefinitions", []):
-            session.add(TaskStatus(task_definition_id=task_def["id"]))
-
-    if not has_rules:
-        rules = data.get("rules", {})
-        session.add(RulesState(id=1, rules=rules, conditions=DEFAULT_CONDITIONS.copy()))
-
-    rules = data.get("rules", {})
-    am_vitc = rules.get("amSerumRotation", {}).get("vitc")
-    pm_niacin = rules.get("pmSerumRotation", {}).get("highNiacinamide")
-
-    if am_vitc and session.get(RuleUsage, RULE_KEY_AM_VITC) is None:
-        session.add(RuleUsage(rule_key=RULE_KEY_AM_VITC))
-
-    if pm_niacin and session.get(RuleUsage, RULE_KEY_PM_HIGH_NIACIN) is None:
-        session.add(RuleUsage(rule_key=RULE_KEY_PM_HIGH_NIACIN))
-
-    session.commit()
+        )
+    session.add(RulesState(id=1, rules=data.get("rules", {}), conditions=dict(DEFAULT_CONDITIONS)))
 
 
-def migrate_skincare_tasks(session: Session) -> None:
-    updated = False
-
-    def _has_action(steps: list[dict[str, Any]], action: str) -> bool:
-        return any(step.get("action") == action for step in steps)
+def _migrate_to_v2(session: Session) -> None:
+    for product in session.exec(select(Product)).all():
+        if product.category == "serum":
+            product.category = "ampoule"
+            session.add(product)
 
     am_task = session.get(TaskDefinition, "skin_am")
-    if am_task and (
-        _has_action(am_task.steps, "cleanse_optional")
-        or _has_action(am_task.steps, "apply_toner")
-        or not _has_action(am_task.steps, "apply_cream")
-    ):
+    if am_task and any(s.get("action") in LEGACY_AM_ACTIONS for s in am_task.steps or []):
         am_task.steps = [
             {"step": 1, "action": "apply_serum", "productSelector": "rule_based_serum_am"},
             {"step": 2, "action": "apply_cream", "products": ["cream_minic_barrier"]},
-            {
-                "step": 3,
-                "action": "apply_sunscreen",
-                "products": ["sunscreen_mediheal_madecassoside"],
-            },
+            {"step": 3, "action": "apply_sunscreen", "products": ["sunscreen_mediheal_madecassoside"]},
         ]
         session.add(am_task)
-        updated = True
 
     pm_task = session.get(TaskDefinition, "skin_pm")
-    if pm_task and (
-        _has_action(pm_task.steps, "double_cleanse_if_needed")
-        or any(step.get("action") == "optional_toner" for step in pm_task.steps)
-        or not _has_action(pm_task.steps, "apply_toner")
-    ):
+    if pm_task and any(s.get("action") in LEGACY_PM_ACTIONS for s in pm_task.steps or []):
         pm_task.steps = [
             {"step": 1, "action": "apply_toner", "products": ["toner_dr_sante_azulene"]},
             {"step": 2, "action": "apply_serum", "productSelector": "rule_based_serum_pm"},
             {"step": 3, "action": "apply_cream", "products": ["cream_minic_barrier"]},
         ]
         session.add(pm_task)
-        updated = True
 
-    if updated:
-        session.commit()
-
-
-def migrate_products(session: Session) -> None:
-    products = session.exec(select(Product)).all()
-    updated = False
-    for product in products:
-        if product.category == "serum":
-            product.category = "ampoule"
-            session.add(product)
-            updated = True
-    if updated:
-        session.commit()
-
-
-def migrate_rules(session: Session) -> None:
     rules_state = session.exec(select(RulesState)).first()
     if rules_state is None:
-        return
+        rules_state = RulesState(id=1, rules=_read_seed(SEED_PATH).get("rules", {}), conditions={})
+    rules = dict(rules_state.rules or {})
+    hydration = rules.get("hydrationBoost")
+    if isinstance(hydration, dict) and "autoSeasons" not in hydration:
+        rules["hydrationBoost"] = {**hydration, "autoSeasons": ["winter", "fall"]}
+    # Assign new objects: in-place edits of JSON columns are not tracked.
+    rules_state.rules = rules
+    rules_state.conditions = {**DEFAULT_CONDITIONS, **(rules_state.conditions or {})}
+    session.add(rules_state)
 
-    rules = rules_state.rules or {}
-    hydration = rules.get("hydrationBoost", {})
-    if "autoSeasons" not in hydration:
-        hydration["autoSeasons"] = ["winter", "fall"]
-        rules["hydrationBoost"] = hydration
-        rules_state.rules = rules
-        session.add(rules_state)
-        session.commit()
+    # Legacy "last completed/skipped" -> one dated record each. Only what was
+    # actually stored is migrated; no history is invented.
+    task_defs = {t.id: t for t in session.exec(select(TaskDefinition)).all()}
+    for status in session.exec(select(TaskStatus)).all():
+        task_def = task_defs.get(status.task_definition_id)
+        if task_def is None:
+            continue
+        entries = []
+        if status.last_completed_at is not None:
+            entries.append(("completed", status.last_completed_at))
+        if status.last_skipped_at is not None:
+            entries.append(("skipped", status.last_skipped_at))
+        by_date: Dict[str, Any] = {}
+        for state, acted in entries:
+            day = legacy_kst_date(acted)
+            aware = acted if acted.tzinfo else acted.replace(tzinfo=TIMEZONE)
+            if day not in by_date or aware > by_date[day][1]:
+                by_date[day] = (state, aware)
+        for day, (state, aware) in by_date.items():
+            if session.get(TaskRecord, (task_def.id, day)) is not None:
+                continue
+            session.add(
+                TaskRecord(
+                    task_definition_id=task_def.id,
+                    scheduled_date=day,
+                    state=state,
+                    acted_at=to_utc_iso(aware),
+                    slot=task_def.slot,
+                    task_type=task_def.task_type,
+                    interval_days=task_def.interval_days,
+                    steps=None,
+                )
+            )
+
+
+def prepare_database(session: Session) -> None:
+    """Seed a fresh database or migrate an existing one, exactly once per version."""
+    meta = session.get(AppMeta, 1)
+    if meta is None:
+        has_data = (
+            session.exec(select(Product)).first() is not None
+            or session.exec(select(TaskDefinition)).first() is not None
+            or session.exec(select(RulesState)).first() is not None
+        )
+        meta = AppMeta(id=1, data_version=1 if has_data else 0, revision=0)
+        session.add(meta)
+
+    if meta.data_version == 0:
+        _seed(session)
+        meta.data_version = CURRENT_DATA_VERSION
+    if meta.data_version < 2:
+        _migrate_to_v2(session)
+        meta.data_version = 2
+
+    session.add(meta)
+    session.commit()
